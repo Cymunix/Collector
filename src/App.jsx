@@ -8,6 +8,7 @@ import AddEmployeeModal from './components/AddEmployeeModal'
 import LocationCard from './components/LocationCard'
 import AddLocationModal from './components/AddLocationModal'
 import QRCode from 'qrcode'
+import StorePOSDashboard from './components/StorePOSDashboard'
 
 const DEFAULT_HOME_SECTIONS = ['Events Near You', 'Trending Items', 'Sales Near You']
 
@@ -1410,6 +1411,7 @@ const getPlanDisplayLabel = (profile) => {
 }
 
 function App() {
+  const [posSession, setPosSession] = useState(null)
   const [currentScreen, setCurrentScreen] = useState('home')
   const [isAuthOpen, setIsAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState('signin')
@@ -3923,42 +3925,45 @@ function App() {
           throw new Error('Store Code, Username, and PIN are required.')
         }
 
-        const { data: verifyRows, error: verifyError } = await supabase.rpc('verify_store_employee_pin', {
-          p_store_code: normalizedStoreCode,
-          p_username: normalizedUsername,
-          p_pin: normalizedPin,
-        })
+        // Test store bypass
+        if (normalizedStoreCode === '0000' && normalizedUsername === 'TestStoreUser' && normalizedPin === 'Password') {
+          setPosSession({ storeName: 'CollectorsHub', storeMode: 'Store OS + marketplace', badge: 'DEMO', username: 'TestStoreUser', storeCode: '0000' })
+          closeAuth()
+        } else {
+          const { data: verifyRows, error: verifyError } = await supabase.rpc('verify_store_employee_pin', {
+            p_store_code: normalizedStoreCode,
+            p_username: normalizedUsername,
+            p_pin: normalizedPin,
+          })
 
-        if (verifyError) {
-          throw verifyError
+          if (verifyError) {
+            throw verifyError
+          }
+
+          const verified = Array.isArray(verifyRows) ? verifyRows[0] : verifyRows
+          if (!verified?.internal_email) {
+            throw new Error('Invalid Store Code, Username, or PIN.')
+          }
+
+          const { error: loginError } = await supabase.auth.signInWithPassword({
+            email: verified.internal_email,
+            password: normalizedPin,
+          })
+
+          if (loginError) {
+            throw loginError
+          }
+
+          await supabase.rpc('log_store_employee_action', {
+            p_store_id: verified.store_id,
+            p_employee_id: verified.employee_id,
+            p_action: 'employee_login',
+            p_metadata: { login_method: 'store_code_username_pin', username: normalizedUsername },
+          })
+
+          setPosSession({ storeName: verified.store_name || 'Store', storeMode: 'Store OS + marketplace', badge: 'LIVE', username: normalizedUsername, storeCode: normalizedStoreCode })
+          closeAuth()
         }
-
-        const verified = Array.isArray(verifyRows) ? verifyRows[0] : verifyRows
-        if (!verified?.internal_email) {
-          throw new Error('Invalid Store Code, Username, or PIN.')
-        }
-
-        const { error: loginError } = await supabase.auth.signInWithPassword({
-          email: verified.internal_email,
-          password: normalizedPin,
-        })
-
-        if (loginError) {
-          throw loginError
-        }
-
-        await supabase.rpc('log_store_employee_action', {
-          p_store_id: verified.store_id,
-          p_employee_id: verified.employee_id,
-          p_action: 'employee_login',
-          p_metadata: {
-            login_method: 'store_code_username_pin',
-            username: normalizedUsername,
-          },
-        })
-
-        setAuthMessage('Store employee login successful.')
-        closeAuth()
       } else if (authMode === 'reset_password') {
         const nextPassword = resetPasswordValue.trim()
         const confirmPassword = resetPasswordConfirmValue.trim()
@@ -7774,6 +7779,10 @@ function App() {
       gradedCopies: 0,
     },
   )
+
+  if (posSession) {
+    return <StorePOSDashboard session={posSession} onLogout={() => setPosSession(null)} />
+  }
 
   return (
     <div className="page-shell">
