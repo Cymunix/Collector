@@ -2,7 +2,7 @@ export const page = { padding: '32px 32px 36px', flex: 1 }
 export const card = { background: '#fff', borderRadius: 16, border: '1px solid #dde3ef', padding: '20px 22px' }
 export const cardSm = { background: '#fff', borderRadius: 12, border: '1px solid #dde3ef', padding: '16px 18px' }
 export const fld = { width: '100%', border: '1.5px solid #d4dbe8', borderRadius: 10, padding: '9px 12px', fontSize: '0.86rem', color: '#17253d', outline: 'none', fontFamily: 'var(--font-ui)', background: '#f7f9fc', boxSizing: 'border-box', display: 'block' }
-export const btnPrimary = { border: 0, borderRadius: 10, padding: '10px 18px', background: '#80b0d8', color: '#17253d', fontWeight: 700, fontSize: '0.86rem', cursor: 'pointer', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }
+export const btnPrimary = { border: 0, borderRadius: 10, padding: '10px 18px', background: '#17253d', color: '#fff', fontWeight: 700, fontSize: '0.86rem', cursor: 'pointer', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }
 export const btnSecondary = { border: '1.5px solid #d4dbe8', borderRadius: 10, padding: '9px 16px', background: '#fff', color: '#17253d', fontWeight: 600, fontSize: '0.86rem', cursor: 'pointer', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }
 
 export function PageHeader({ sub, title, action }) {

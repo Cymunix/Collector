@@ -118,7 +118,7 @@ export default function StorePOSDashboard({ session, onLogout }) {
       <aside style={{ width: 224, minHeight: '100svh', background: 'linear-gradient(180deg,#031333 0%,#081a46 60%,#10265c 100%)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
         <div style={{ padding: '20px 18px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 5 }}>
-            <span style={{ width: 34, height: 34, background: 'rgba(128,176,216,0.2)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, color: '#80b0d8', fontSize: '0.82rem', flexShrink: 0 }}>CH</span>
+            <span style={{ width: 34, height: 34, background: 'rgba(94,197,255,0.15)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, color: '#5ec5ff', fontSize: '0.82rem', flexShrink: 0 }}>CH</span>
             <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: '#fff', fontSize: '1rem' }}>{session.storeName}</span>
           </div>
           <div style={{ paddingLeft: 43, color: 'rgba(255,255,255,0.45)', fontSize: '0.7rem', lineHeight: 1.4 }}>
@@ -130,7 +130,7 @@ export default function StorePOSDashboard({ session, onLogout }) {
 
         <nav style={{ flex: 1, padding: '10px' }}>
           {NAV_ITEMS.map(item => (
-            <button key={item.id} type="button" onClick={() => setActiveNav(item.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: activeNav === item.id ? 'rgba(128,176,216,0.2)' : 'transparent', border: activeNav === item.id ? '1px solid rgba(128,176,216,0.35)' : '1px solid transparent', borderRadius: 10, color: activeNav === item.id ? '#80b0d8' : 'rgba(255,255,255,0.58)', fontSize: '0.84rem', fontWeight: activeNav === item.id ? 700 : 500, cursor: 'pointer', textAlign: 'left', marginBottom: 2, fontFamily: 'var(--font-ui)', transition: 'all 0.14s' }}>
+            <button key={item.id} type="button" onClick={() => setActiveNav(item.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px', background: activeNav === item.id ? 'rgba(94,197,255,0.15)' : 'transparent', border: activeNav === item.id ? '1px solid rgba(94,197,255,0.28)' : '1px solid transparent', borderRadius: 10, color: activeNav === item.id ? '#5ec5ff' : 'rgba(255,255,255,0.58)', fontSize: '0.84rem', fontWeight: activeNav === item.id ? 700 : 500, cursor: 'pointer', textAlign: 'left', marginBottom: 2, fontFamily: 'var(--font-ui)', transition: 'all 0.14s' }}>
               <span style={{ fontSize: '0.9rem', width: 18, textAlign: 'center' }}>{item.icon}</span>
               {item.label}
             </button>
@@ -169,7 +169,7 @@ export default function StorePOSDashboard({ session, onLogout }) {
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               {['Standard', 'Pure Sell'].map(mode => (
-                <button key={mode} type="button" onClick={() => setTxMode(mode.toLowerCase().replace(' ', '-'))} style={{ padding: '6px 14px', borderRadius: 8, border: 0, background: txMode === mode.toLowerCase().replace(' ', '-') ? '#80b0d8' : '#edf1fb', color: txMode === mode.toLowerCase().replace(' ', '-') ? '#17253d' : '#5f7294', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>{mode}</button>
+                <button key={mode} type="button" onClick={() => setTxMode(mode.toLowerCase().replace(' ', '-'))} style={{ padding: '6px 14px', borderRadius: 8, border: 0, background: txMode === mode.toLowerCase().replace(' ', '-') ? '#17253d' : '#edf1fb', color: txMode === mode.toLowerCase().replace(' ', '-') ? '#fff' : '#5f7294', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'var(--font-ui)' }}>{mode}</button>
               ))}
             </div>
           </div>
