@@ -34,7 +34,7 @@
   font-family: var(--font-display);
   letter-spacing: 0.02em;
   font-weight: 700;
-  color: #5ec5ff;
+  color: #80b0d8;
   font-size: 1.15rem;
 }
 
@@ -222,8 +222,9 @@ input {
 }
 
 .login-btn {
-  background: #1a4ecf;
-  border-color: #2a62e0;
+  background: #80b0d8;
+  border-color: #80b0d8;
+  color: #17253d;
 }
 
 .user-pill {
@@ -376,9 +377,9 @@ input {
 }
 
 .main-nav a.active {
-  color: #ffffff;
-  background: #071a3e;
-  box-shadow: 0 6px 16px rgba(7, 26, 62, 0.18);
+  color: #17253d;
+  background: #80b0d8;
+  box-shadow: 0 6px 16px rgba(128, 176, 216, 0.28);
 }
 
 .home-content {
@@ -401,7 +402,7 @@ h1 {
 
 .auth-banner {
   margin: 0 0 18px;
-  color: #1a4ecf;
+  color: #80b0d8;
   font-weight: 700;
 }
 
@@ -457,9 +458,9 @@ h1 {
 }
 
 .collection-sidebar-link.active {
-  border-color: #2f5ad1;
-  background: #edf3ff;
-  color: #16379a;
+  border-color: #80b0d8;
+  background: #e8f3fb;
+  color: #17253d;
 }
 
 .collection-inline-create {
@@ -522,9 +523,9 @@ h1 {
 }
 
 .collection-tab-button.active {
-  border-color: #2f5ad1;
-  background: #edf3ff;
-  color: #16379a;
+  border-color: #80b0d8;
+  background: #e8f3fb;
+  color: #17253d;
 }
 
 .collection-summary-grid {
@@ -707,9 +708,9 @@ h1 {
 }
 
 .owned-copy-tab.active {
-  border-color: #244f9f;
-  background: #eaf1ff;
-  color: #143b82;
+  border-color: #80b0d8;
+  background: #e8f3fb;
+  color: #17253d;
 }
 
 .owned-copy-section-head {
@@ -749,9 +750,9 @@ h1 {
 }
 
 .owned-copy-select-card.active {
-  border-color: #2c62c4;
-  background: #edf4ff;
-  box-shadow: 0 6px 14px rgba(29, 77, 145, 0.12);
+  border-color: #80b0d8;
+  background: #e8f3fb;
+  box-shadow: 0 6px 14px rgba(128, 176, 216, 0.2);
 }
 
 .owned-copy-select-card strong,
@@ -1055,9 +1056,9 @@ h1 {
 }
 
 .catalog-action-pill.active {
-  border-color: #2f5ad1;
-  background: #edf3ff;
-  color: #16379a;
+  border-color: #80b0d8;
+  background: #e8f3fb;
+  color: #17253d;
 }
 
 .catalog-screen {
@@ -1156,7 +1157,7 @@ h1 {
 .catalog-clear-btn {
   border: 0;
   background: transparent;
-  color: #3d79e0;
+  color: #80b0d8;
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
@@ -2369,8 +2370,8 @@ h1 {
   border: 0;
   border-radius: 8px;
   padding: 10px 12px;
-  background: linear-gradient(120deg, #031333 0%, #081a46 60%, #10265c 100%);
-  color: #ffffff;
+  background: #80b0d8;
+  color: #17253d;
   font-size: 0.84rem;
   font-weight: 800;
   cursor: pointer;
@@ -2445,13 +2446,13 @@ h1 {
   width: 100%;
   border: 0;
   border-radius: 10px;
-  background: linear-gradient(120deg, #031333 0%, #081a46 60%, #10265c 100%);
-  color: #ffffff;
+  background: #80b0d8;
+  color: #17253d;
   font-size: 1rem;
   font-weight: 800;
   padding: 12px 14px;
   cursor: pointer;
-  box-shadow: 0 14px 24px rgba(10, 46, 85, 0.28);
+  box-shadow: 0 14px 24px rgba(128, 176, 216, 0.32);
 }
 
 .catalog-loading-panel {
