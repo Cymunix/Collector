@@ -9,6 +9,7 @@ import LocationCard from './components/LocationCard'
 import AddLocationModal from './components/AddLocationModal'
 import QRCode from 'qrcode'
 import StorePOSDashboard from './components/StorePOSDashboard'
+import CatalogAdminPanel from './components/CatalogAdminPanel'
 
 const DEFAULT_HOME_SECTIONS = ['Events Near You', 'Trending Items', 'Sales Near You']
 
@@ -1656,6 +1657,10 @@ function App() {
   const [catalogAdminFormError, setCatalogAdminFormError] = useState('')
   const [isCreatingCatalogItem, setIsCreatingCatalogItem] = useState(false)
   const [isCatalogItemModalOpen, setIsCatalogItemModalOpen] = useState(false)
+  const [isCatalogAdminPanelOpen, setIsCatalogAdminPanelOpen] = useState(false)
+  const [catalogAdminNewSubcategoryName, setCatalogAdminNewSubcategoryName] = useState('')
+  const [catalogAdminIsCreatingSubcategory, setCatalogAdminIsCreatingSubcategory] = useState(false)
+  const [catalogAdminIsSavingSubcategory, setCatalogAdminIsSavingSubcategory] = useState(false)
   const [isTwoFactorModalOpen, setIsTwoFactorModalOpen] = useState(false)
   const [isTwoFactorEnabled, setIsTwoFactorEnabled] = useState(false)
   const [twoFactorQrSvg, setTwoFactorQrSvg] = useState('')
@@ -4659,6 +4664,29 @@ function App() {
     setCatalogAdminMinifigRows((rows) =>
       rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)),
     )
+  }
+
+  const handleCreateCatalogSubcategory = async () => {
+    const name = catalogAdminNewSubcategoryName.trim()
+    if (!name || !catalogAdminCategoryId) return
+    setCatalogAdminIsSavingSubcategory(true)
+    setCatalogAdminFormError('')
+    const { data, error } = await supabase
+      .from('catalog_subcategories')
+      .insert({ name, category_id: catalogAdminCategoryId, is_active: true })
+      .select('id')
+      .single()
+    if (error) {
+      setCatalogAdminFormError(error.message || 'Could not create subcategory.')
+      setCatalogAdminIsSavingSubcategory(false)
+      return
+    }
+    const newSub = { id: data.id, name, category_id: catalogAdminCategoryId }
+    setCatalogAdminSubcategories(prev => [...prev, newSub].sort((a, b) => a.name.localeCompare(b.name)))
+    setCatalogAdminSubcategoryId(data.id)
+    setCatalogAdminNewSubcategoryName('')
+    setCatalogAdminIsCreatingSubcategory(false)
+    setCatalogAdminIsSavingSubcategory(false)
   }
 
   const handleCreateCatalogFranchise = async () => {
@@ -8904,24 +8932,33 @@ function App() {
                   {t('suggestItemAction')}
                 </button>
                 {isPlatformAdmin && (
-                  <button
-                    type="button"
-                    className="catalog-action-pill"
-                    onClick={() => {
-                      setCatalogAdminFormError('')
-                      setCatalogAdminItemName('')
-                      setCatalogAdminItemYear('')
-                      setCatalogAdminItemDescription('')
-                      setCatalogAdminItemIdentifier('')
-                      setCatalogAdminStatus('draft')
-                      setCatalogAdminItemImageFile(null)
-                      setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(selectedCatalogAdminCategoryName))
-                      setCatalogAdminVariants([buildCatalogVariantRow()])
-                      setIsCatalogItemModalOpen(true)
-                    }}
-                  >
-                    {t('addItemAction')}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="catalog-action-pill"
+                      onClick={() => {
+                        setCatalogAdminFormError('')
+                        setCatalogAdminItemName('')
+                        setCatalogAdminItemYear('')
+                        setCatalogAdminItemDescription('')
+                        setCatalogAdminItemIdentifier('')
+                        setCatalogAdminStatus('draft')
+                        setCatalogAdminItemImageFile(null)
+                        setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(selectedCatalogAdminCategoryName))
+                        setCatalogAdminVariants([buildCatalogVariantRow()])
+                        setIsCatalogItemModalOpen(true)
+                      }}
+                    >
+                      {t('addItemAction')}
+                    </button>
+                    <button
+                      type="button"
+                      className="catalog-action-pill"
+                      onClick={() => setIsCatalogAdminPanelOpen(true)}
+                    >
+                      Manage Catalog
+                    </button>
+                  </>
                 )}
                 <button type="button" className="catalog-action-pill">
                   {t('mySuggestionsAction')}
@@ -9115,6 +9152,13 @@ function App() {
               &#9783;
             </button>
 
+            {isCatalogAdminPanelOpen && isPlatformAdmin && (
+              <CatalogAdminPanel
+                categories={catalogAdminCategories}
+                onClose={() => setIsCatalogAdminPanelOpen(false)}
+              />
+            )}
+
             {isCatalogItemModalOpen && isPlatformAdmin && (
               <div className="auth-overlay" onClick={() => setIsCatalogItemModalOpen(false)}>
                 <section className="auth-modal catalog-item-modal" onClick={(event) => event.stopPropagation()}>
@@ -9165,6 +9209,37 @@ function App() {
                         </option>
                       ))}
                     </select>
+
+                    {catalogAdminCategoryId && (
+                      <div className="catalog-admin-inline-create">
+                        {catalogAdminIsCreatingSubcategory ? (
+                          <>
+                            <input
+                              type="text"
+                              className="catalog-admin-inline-input"
+                              placeholder="New subcategory name"
+                              value={catalogAdminNewSubcategoryName}
+                              onChange={(e) => setCatalogAdminNewSubcategoryName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); handleCreateCatalogSubcategory() }
+                                if (e.key === 'Escape') { setCatalogAdminIsCreatingSubcategory(false); setCatalogAdminNewSubcategoryName('') }
+                              }}
+                              autoFocus
+                            />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminNewSubcategoryName.trim() || catalogAdminIsSavingSubcategory} onClick={handleCreateCatalogSubcategory}>
+                              {catalogAdminIsSavingSubcategory ? '…' : 'Save'}
+                            </button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogAdminIsCreatingSubcategory(false); setCatalogAdminNewSubcategoryName('') }}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminIsCreatingSubcategory(true)}>
+                            + New subcategory
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <label htmlFor="catalog-admin-franchise">{t('franchiseLabel')}</label>
                     <select
