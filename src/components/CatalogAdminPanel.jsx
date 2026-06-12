@@ -117,14 +117,14 @@ function FranchiseTab() {
   const [items, setItems]   = useState([])
 
   useEffect(() => {
-    supabase.from('catalog_franchise_brands').select('id, name').eq('is_active', true).order('name')
+    supabase.from('catalog_franchise').select('id, name').eq('is_active', true).order('name')
       .then(({ data }) => setItems(data || []))
   }, [])
 
   const save = async () => {
     if (!name.trim()) return
     setSaving(true); setError(''); setSuccess('')
-    const { data, error: err } = await supabase.from('catalog_franchise_brands')
+    const { data, error: err } = await supabase.from('catalog_franchise')
       .insert({ name: name.trim(), is_active: true })
       .select('id').single()
     if (err) { setError(err.message || 'Could not create franchise.'); setSaving(false); return }
@@ -182,7 +182,7 @@ function CollectibleSetTab({ categories }) {
   }, [categoryId])
 
   useEffect(() => {
-    supabase.from('catalog_franchise_brands').select('id, name').eq('is_active', true).order('name')
+    supabase.from('catalog_franchise').select('id, name').eq('is_active', true).order('name')
       .then(({ data }) => setFranchises(data || []))
   }, [])
 
