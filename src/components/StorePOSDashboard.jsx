@@ -49,6 +49,23 @@ export default function StorePOSDashboard({ session, onLogout }) {
 
   const searchRef   = useRef(null)
   const debounceRef = useRef(null)
+  const lookupRef   = useRef({ subjectMap: {}, setMap: {}, printTypeMap: {} })
+
+  useEffect(() => {
+    const loadLookups = async () => {
+      const [{ data: subjects }, { data: sets }, { data: printTypes }] = await Promise.all([
+        supabase.from('subjects').select('subject_id, subject_name'),
+        supabase.from('collectible_sets').select('collectible_set_id, name'),
+        supabase.from('print_types').select('print_type_id, name'),
+      ])
+      lookupRef.current = {
+        subjectMap:   Object.fromEntries((subjects   || []).map(r => [r.subject_id,         r.subject_name])),
+        setMap:       Object.fromEntries((sets        || []).map(r => [r.collectible_set_id, r.name])),
+        printTypeMap: Object.fromEntries((printTypes  || []).map(r => [r.print_type_id,      r.name])),
+      }
+    }
+    loadLookups()
+  }, [])
 
   const totalIn  = items.filter(i => i.direction === 'IN') .reduce((s, i) => s + i.price, 0)
   const totalOut = items.filter(i => i.direction === 'OUT').reduce((s, i) => s + i.price, 0)
@@ -76,27 +93,46 @@ export default function StorePOSDashboard({ session, onLogout }) {
     }
     debounceRef.current = setTimeout(async () => {
       setIsSearching(true)
-      const { data } = await supabase
-        .from('catalog_items')
-        .select('id, name, release_year, metadata')
-        .eq('is_active', true)
-        .ilike('name', `%${q}%`)
-        .order('name')
-        .limit(10)
-      setSearchResults(data || [])
+      const { data: matchingPlayers } = await supabase
+        .from('subjects')
+        .select('subject_id')
+        .ilike('subject_name', `%${q}%`)
+        .limit(20)
+      const playerIds = (matchingPlayers || []).map(p => p.subject_id)
+      let results = []
+      if (playerIds.length > 0) {
+        const { data } = await supabase
+          .from('items')
+          .select('item_id, card_number, print_count, subject_id, collectible_set_id, print_type_id')
+          .in('subject_id', playerIds)
+          .limit(10)
+        results = data || []
+      }
+      setSearchResults(results)
       setShowDropdown(true)
       setIsSearching(false)
     }, 280)
     return () => clearTimeout(debounceRef.current)
   }, [searchQuery])
 
+  const buildItemDisplayName = (catalogItem) => {
+    const { subjectMap, setMap, printTypeMap } = lookupRef.current
+    const parts = [
+      subjectMap[catalogItem.subject_id],
+      setMap[catalogItem.collectible_set_id],
+      printTypeMap[catalogItem.print_type_id],
+      catalogItem.card_number ? `#${catalogItem.card_number}` : null,
+    ].filter(Boolean)
+    return parts.join(' — ') || 'Unknown Item'
+  }
+
   const addCatalogItem = (catalogItem) => {
     setItems(prev => [...prev, {
       id:        nextId++,
-      catalogId: catalogItem.id,
-      name:      catalogItem.name,
-      year:      catalogItem.release_year,
-      image:     catalogItem.metadata?.image_url || null,
+      catalogId: catalogItem.item_id,
+      name:      buildItemDisplayName(catalogItem),
+      year:      null,
+      image:     null,
       direction: 'IN',
       condition: 'NM',
       price:     0,
@@ -224,7 +260,7 @@ export default function StorePOSDashboard({ session, onLogout }) {
                 <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#fff', border: '1.5px solid #d4dbe8', borderRadius: 12, boxShadow: '0 8px 24px rgba(17,37,61,0.12)', zIndex: 100, maxHeight: 280, overflowY: 'auto' }}>
                   {searchResults.map(result => (
                     <button
-                      key={result.id}
+                      key={result.item_id}
                       type="button"
                       onMouseDown={() => addCatalogItem(result)}
                       style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 14px', background: 'none', border: 0, borderBottom: '1px solid #f0f2f6', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-ui)' }}
@@ -232,14 +268,11 @@ export default function StorePOSDashboard({ session, onLogout }) {
                       onMouseLeave={e => e.currentTarget.style.background = 'none'}
                     >
                       <div style={{ width: 34, height: 34, borderRadius: 7, background: '#edf1fb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        {result.metadata?.image_url
-                          ? <img src={result.metadata.image_url} alt="" style={{ width: '100%', height: '100%', borderRadius: 7, objectFit: 'cover' }} />
-                          : <span style={{ fontSize: '1rem' }}>📦</span>
-                        }
+                        <span style={{ fontSize: '1rem' }}>📦</span>
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.86rem', color: '#17253d', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{result.name}</div>
-                        {result.release_year && <div style={{ fontSize: '0.72rem', color: '#8292ac' }}>{result.release_year}</div>}
+                        <div style={{ fontWeight: 600, fontSize: '0.86rem', color: '#17253d', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{buildItemDisplayName(result)}</div>
+                        {result.card_number && <div style={{ fontSize: '0.72rem', color: '#8292ac' }}>#{result.card_number}{result.print_count ? ` /${result.print_count}` : ''}</div>}
                       </div>
                       <span style={{ fontSize: '0.75rem', color: '#5ec5ff', fontWeight: 700, flexShrink: 0 }}>+ Add</span>
                     </button>

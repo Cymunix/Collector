@@ -1573,6 +1573,19 @@ function App() {
   const [catalogPage, setCatalogPage] = useState(1)
   const [catalogTotalItemCount, setCatalogTotalItemCount] = useState(0)
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
+  const [catalogItemImages, setCatalogItemImages] = useState([])
+  const [isCatalogItemEditMode, setIsCatalogItemEditMode] = useState(false)
+  const [catalogItemEditValues, setCatalogItemEditValues] = useState({})
+  const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [] })
+  const [catalogItemEditTeamIds, setCatalogItemEditTeamIds] = useState([])
+  const [catalogItemEditCardTypeIds, setCatalogItemEditCardTypeIds] = useState([])
+  const [catalogItemEditSubjectSearch, setCatalogItemEditSubjectSearch] = useState('')
+  const [catalogItemEditSubjectResults, setCatalogItemEditSubjectResults] = useState([])
+  const [catalogItemEditSubjectIsSearching, setCatalogItemEditSubjectIsSearching] = useState(false)
+  const [isSavingCatalogItem, setIsSavingCatalogItem] = useState(false)
+  const [catalogItemEditError, setCatalogItemEditError] = useState('')
+  const [catalogItemImagesReloadToken, setCatalogItemImagesReloadToken] = useState(0)
+  const [isUploadingCatalogItemImage, setIsUploadingCatalogItemImage] = useState(false)
   const [catalogDetailIsGraded, setCatalogDetailIsGraded] = useState(false)
   const [catalogDetailGradingCompany, setCatalogDetailGradingCompany] = useState('')
   const [catalogDetailSelectedGrade, setCatalogDetailSelectedGrade] = useState('')
@@ -1634,14 +1647,29 @@ function App() {
   const [catalogAdminCategoryId, setCatalogAdminCategoryId] = useState('')
   const [catalogAdminSubcategoryId, setCatalogAdminSubcategoryId] = useState('')
   const [catalogAdminFranchiseId, setCatalogAdminFranchiseId] = useState('')
-  const [catalogAdminItemName, setCatalogAdminItemName] = useState('')
-  const [catalogAdminItemYear, setCatalogAdminItemYear] = useState('')
   const [catalogAdminItemDescription, setCatalogAdminItemDescription] = useState('')
-  const [catalogAdminItemIdentifier, setCatalogAdminItemIdentifier] = useState('')
-  const [catalogAdminStatus, setCatalogAdminStatus] = useState('draft')
+  const [catalogAdminCardNumber, setCatalogAdminCardNumber] = useState('')
+  const [catalogAdminPrintCount, setCatalogAdminPrintCount] = useState('')
+  const [catalogAdminRealFranchiseId, setCatalogAdminRealFranchiseId] = useState('')
+  const [catalogAdminSubjectId, setCatalogAdminSubjectId] = useState('')
+  const [catalogAdminSubjectSearch, setCatalogAdminSubjectSearch] = useState('')
+  const [catalogAdminSubjectResults, setCatalogAdminSubjectResults] = useState([])
+  const [catalogAdminSubjectIsSearching, setCatalogAdminSubjectIsSearching] = useState(false)
+  const [catalogAdminTeamIds, setCatalogAdminTeamIds] = useState([])
+  const [catalogAdminPrintTypeId, setCatalogAdminPrintTypeId] = useState('')
+  const [catalogAdminCardTypeIds, setCatalogAdminCardTypeIds] = useState([])
+  const [catalogAdminSubsetId, setCatalogAdminSubsetId] = useState('')
+  const [catalogAdminRealFranchises, setCatalogAdminRealFranchises] = useState([])
+  const [catalogAdminSubjects, setCatalogAdminSubjects] = useState([])
+  const [catalogAdminTeams, setCatalogAdminTeams] = useState([])
+  const [catalogAdminPrintTypes, setCatalogAdminPrintTypes] = useState([])
+  const [catalogAdminCardTypes, setCatalogAdminCardTypes] = useState([])
+  const [catalogAdminSpecies, setCatalogAdminSpecies] = useState([])
+  const [catalogAdminSubsets, setCatalogAdminSubsets] = useState([])
   const [catalogAdminDynamicFields, setCatalogAdminDynamicFields] = useState({})
   const [catalogAdminVariants, setCatalogAdminVariants] = useState([buildCatalogVariantRow()])
-  const [catalogAdminItemImageFile, setCatalogAdminItemImageFile] = useState(null)
+  const [catalogAdminFrontImageFile, setCatalogAdminFrontImageFile] = useState(null)
+  const [catalogAdminBackImageFile, setCatalogAdminBackImageFile] = useState(null)
   const [catalogAdminBrands, setCatalogAdminBrands] = useState([])
   const [catalogAdminBrandId, setCatalogAdminBrandId] = useState('')
   const [catalogAdminNewBrandName, setCatalogAdminNewBrandName] = useState('')
@@ -1657,6 +1685,8 @@ function App() {
   const [catalogAdminFormError, setCatalogAdminFormError] = useState('')
   const [isCreatingCatalogItem, setIsCreatingCatalogItem] = useState(false)
   const [isCatalogItemModalOpen, setIsCatalogItemModalOpen] = useState(false)
+  const [catalogAdminInlineCreate, setCatalogAdminInlineCreate] = useState({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })
+  const [isSavingCatalogAdminInline, setIsSavingCatalogAdminInline] = useState(false)
   const [isCatalogAdminPanelOpen, setIsCatalogAdminPanelOpen] = useState(false)
   const [catalogAdminNewSubcategoryName, setCatalogAdminNewSubcategoryName] = useState('')
   const [catalogAdminIsCreatingSubcategory, setCatalogAdminIsCreatingSubcategory] = useState(false)
@@ -1675,6 +1705,7 @@ function App() {
   const locationMenuRef = useRef(null)
   const defaultCollectionIdRef = useRef('')
   const isAutoSyncingCompletionGoalsRef = useRef(false)
+  const catalogLookupRef = useRef({ subjectMap: {}, setMap: {}, printTypeMap: {} })
 
   const tierLabel = profile?.subscription_tier
     ? tierLabels[profile.subscription_tier] ?? 'Unknown Tier'
@@ -1800,37 +1831,13 @@ function App() {
           (subcategory) =>
             subcategory.name === catalogSubcategory && subcategory.category_id === selectedCatalogCategoryRecord.id,
         ) || null
-  const catalogSetRowsForFilters = catalogFranchises
-    .filter((setRecord) => {
-      if (selectedCatalogSubcategoryRecord) {
-        return setRecord.subcategory_id === selectedCatalogSubcategoryRecord.id
-      }
-      if (selectedCatalogCategoryRecord) {
-        return setRecord.category_id === selectedCatalogCategoryRecord.id
-      }
-      return true
-    })
-  const catalogFranchiseOptions = Array.from(
-    new Set(
-      catalogSetRowsForFilters
-        .map((setRecord) => {
-          if (!setRecord.franchise_id) {
-            return ''
-          }
-          return catalogFranchiseBrandById[setRecord.franchise_id] || ''
-        })
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right))
+  const catalogFranchiseOptions = catalogFranchiseBrands
+    .map((f) => f.name)
+    .sort((left, right) => left.localeCompare(right))
   const selectedCatalogFranchiseRecord =
     catalogFranchise === 'all'
       ? null
       : catalogFranchiseBrands.find((franchiseBrand) => franchiseBrand.name === catalogFranchise) || null
-  const selectedCatalogFranchiseSetIds = selectedCatalogFranchiseRecord
-    ? catalogSetRowsForFilters
-        .filter((setRecord) => setRecord.franchise_id === selectedCatalogFranchiseRecord.id)
-        .map((setRecord) => setRecord.id)
-    : []
   const filteredCatalogItems = catalogItems
   const catalogTotalPages = Math.max(1, Math.ceil(catalogTotalItemCount / CATALOG_PAGE_SIZE))
   const paginatedCatalogItems = catalogItems
@@ -2398,61 +2405,54 @@ function App() {
         return
       }
 
-      setIsCatalogLoading(true)
-      setCatalogLoadError('')
-
-      const [categoriesResult, subcategoriesResult, franchisesResult, franchiseBrandsResult, brandsResult] = await Promise.all([
-        supabase.from('catalog_categories').select('id, name').eq('is_active', true).order('sort_order').order('name'),
-        supabase.from('catalog_subcategories').select('id, name, category_id').eq('is_active', true).order('sort_order').order('name'),
-        supabase.from('collectible_sets').select('id, set_name, category_id, subcategory_id, franchise_id').eq('is_active', true).order('sort_order').order('set_name'),
-        supabase.from('catalog_franchise_brands').select('id, name').eq('is_active', true).order('sort_order').order('name'),
-        supabase.from('catalog_brands').select('id, name').eq('is_active', true).order('name'),
+      const [categoriesResult, subcategoriesResult, franchisesResult, brandsResult] = await Promise.all([
+        supabase.from('categories').select('category_id, name').order('name'),
+        supabase.from('subcategories').select('subcategory_id, name, category_id').order('name'),
+        supabase.from('franchises').select('franchise_id, name').order('name'),
+        supabase.from('brands').select('brand_id, name').order('name'),
       ])
 
-      const firstError =
-        categoriesResult.error ||
-        subcategoriesResult.error ||
-        franchisesResult.error ||
-        franchiseBrandsResult.error ||
-        brandsResult.error
-
+      const firstError = categoriesResult.error || subcategoriesResult.error || franchisesResult.error || brandsResult.error
       if (firstError) {
-        setCatalogLoadError(firstError.message || 'Could not load catalog items.')
+        console.error('Catalog screen data load error:', firstError)
         setCatalogCategories([])
         setCatalogSubcategories([])
         setCatalogFranchises([])
         setCatalogFranchiseBrands([])
         setCatalogBrands([])
-        setIsCatalogLoading(false)
         return
       }
 
-      setCatalogCategories(categoriesResult.data || [])
-      setCatalogSubcategories(subcategoriesResult.data || [])
-      setCatalogFranchises(
-        Array.isArray(franchisesResult.data)
-          ? franchisesResult.data.map((setRecord) => ({
-              id: setRecord.id,
-              name: setRecord.set_name || '',
-              category_id: setRecord.category_id,
-              subcategory_id: setRecord.subcategory_id,
-              franchise_id: setRecord.franchise_id || null,
-            }))
-          : [],
-      )
-      setCatalogFranchiseBrands(franchiseBrandsResult.data || [])
-      setCatalogBrands(brandsResult.data || [])
-      setIsCatalogLoading(false)
+      setCatalogCategories((categoriesResult.data || []).map(r => ({ id: r.category_id, name: r.name })))
+      setCatalogSubcategories((subcategoriesResult.data || []).map(r => ({ id: r.subcategory_id, name: r.name, category_id: r.category_id })))
+      setCatalogFranchises([])
+      setCatalogFranchiseBrands((franchisesResult.data || []).map(r => ({ id: r.franchise_id, name: r.name })))
+      setCatalogBrands((brandsResult.data || []).map(r => ({ id: r.brand_id, name: r.name })))
     }
 
     loadCatalogScreenData()
   }, [catalogReloadToken, currentScreen])
 
   useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const subcategoryId = selectedCatalogSubcategoryRecord?.id
+    if (!subcategoryId) {
+      supabase.from('franchises').select('franchise_id, name').order('name')
+        .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
+      return
+    }
+    supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
+      .then(({ data: fsRows }) => {
+        const ids = (fsRows || []).map(r => r.franchise_id)
+        if (!ids.length) { setCatalogFranchiseBrands([]); return }
+        supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
+          .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
+      })
+  }, [currentScreen, selectedCatalogSubcategoryRecord])
+
+  useEffect(() => {
     const loadCatalogItems = async () => {
-      if (currentScreen !== 'catalog') {
-        return
-      }
+      if (currentScreen !== 'catalog') return
 
       setIsCatalogLoading(true)
       setCatalogLoadError('')
@@ -2462,59 +2462,43 @@ function App() {
       const queryEnd = queryStart + CATALOG_PAGE_SIZE - 1
 
       let itemsQuery = supabase
-        .from('catalog_items')
-        .select(
-          'id, name, description, release_year, category_id, subcategory_id, collectible_set_id, brand_id, metadata, dynamic_fields',
-          { count: 'exact' },
-        )
-        .eq('is_active', true)
+        .from('item_details')
+        .select('*', { count: 'exact' })
 
       if (selectedCatalogCategoryRecord) {
         itemsQuery = itemsQuery.eq('category_id', selectedCatalogCategoryRecord.id)
       }
-
       if (selectedCatalogSubcategoryRecord) {
         itemsQuery = itemsQuery.eq('subcategory_id', selectedCatalogSubcategoryRecord.id)
       }
-
       if (selectedCatalogFranchiseRecord) {
-        if (selectedCatalogFranchiseSetIds.length === 0) {
-          setCatalogItems([])
-          setCatalogTotalItemCount(0)
-          setIsCatalogLoading(false)
-          return
-        }
-
-        itemsQuery = itemsQuery.in('collectible_set_id', selectedCatalogFranchiseSetIds)
+        itemsQuery = itemsQuery.eq('franchise_id', selectedCatalogFranchiseRecord.id)
       }
-
-      if (catalogMinYear && Number.isFinite(Number(catalogMinYear))) {
-        itemsQuery = itemsQuery.gte('release_year', Number(catalogMinYear))
-      }
-
-      if (catalogMaxYear && Number.isFinite(Number(catalogMaxYear))) {
-        itemsQuery = itemsQuery.lte('release_year', Number(catalogMaxYear))
-      }
-
       if (queryText) {
-        const escapedSearchText = queryText.replace(/[%_]/g, '').trim()
-        if (escapedSearchText.length > 1) {
-          // Only search if at least 2 chars, and only by name for performance
-          itemsQuery = itemsQuery.ilike('name', `%${escapedSearchText}%`)
-        }
+        const escapedText = queryText.replace(/[%_]/g, '\\$&')
+        itemsQuery = itemsQuery.ilike('subject', `%${escapedText}%`)
+      }
+      if (catalogMinYear) {
+        itemsQuery = itemsQuery.gte('release_year', parseInt(catalogMinYear, 10))
+      }
+      if (catalogMaxYear) {
+        itemsQuery = itemsQuery.lte('release_year', parseInt(catalogMaxYear, 10))
       }
 
       if (catalogSortKey === 'newest_year') {
-        itemsQuery = itemsQuery.order('release_year', { ascending: false, nullsFirst: false }).order('name', { ascending: true })
+        itemsQuery = itemsQuery.order('release_year', { ascending: false, nullsFirst: false }).order('subject', { ascending: true })
+      } else if (catalogSortKey === 'oldest_year') {
+        itemsQuery = itemsQuery.order('release_year', { ascending: true, nullsFirst: false }).order('subject', { ascending: true })
       } else {
-        itemsQuery = itemsQuery.order('name', { ascending: true })
+        itemsQuery = itemsQuery.order('subject', { ascending: true })
       }
+      itemsQuery = itemsQuery.range(queryStart, queryEnd)
 
       let itemsResult
       try {
-        itemsResult = await itemsQuery.range(queryStart, queryEnd)
+        itemsResult = await itemsQuery
       } catch (err) {
-        setCatalogLoadError('Catalog query timed out or failed. Try reducing filters or search terms.')
+        setCatalogLoadError('Catalog query timed out or failed.')
         setCatalogItems([])
         setCatalogTotalItemCount(0)
         setIsCatalogLoading(false)
@@ -2522,6 +2506,7 @@ function App() {
       }
 
       if (itemsResult.error) {
+        console.error('item_details query error:', itemsResult.error)
         setCatalogLoadError(itemsResult.error.message || 'Could not load catalog items.')
         setCatalogItems([])
         setCatalogTotalItemCount(0)
@@ -2529,7 +2514,39 @@ function App() {
         return
       }
 
-      setCatalogItems(itemsResult.data || [])
+      const na = (v) => (v && v !== 'N/A' ? v : '')
+      const normalizeItem = (raw) => {
+        const subjectName   = na(raw.subject)
+        const setName       = na(raw.collectible_set)
+        const printType     = na(raw.print_type)
+        const franchiseName = na(raw.franchise)
+        const brandName     = na(raw.brand)
+        const cardNum       = raw.card_number && raw.card_number !== 'N/A' ? `#${raw.card_number}` : ''
+        const printCount    = raw.print_count ? `/${raw.print_count}` : ''
+        const nameParts     = [subjectName, setName, printType, (cardNum + printCount) || null].filter(Boolean)
+        return {
+          id:                 raw.item_id,
+          name:               nameParts.join(' — ') || raw.description || 'Unnamed Item',
+          description:        raw.description || '',
+          release_year:       raw.release_year,
+          category_id:        raw.category_id,
+          subcategory_id:     raw.subcategory_id,
+          franchise_id:       raw.franchise_id,
+          collectible_set_id: raw.collectible_set_id,
+          brand_id:           raw.brand_id,
+          card_number:        raw.card_number !== 'N/A' ? raw.card_number : null,
+          print_count:        raw.print_count,
+          metadata:           {},
+          dynamic_fields:     {},
+          _subject_name:      subjectName,
+          _set_name:          setName,
+          _print_type:        printType,
+          _brand_name:        brandName,
+          _franchise_name:    franchiseName,
+          _details:           raw,
+        }
+      }
+      setCatalogItems((itemsResult.data || []).map(normalizeItem))
       setCatalogTotalItemCount(Number(itemsResult.count) || 0)
       setIsCatalogLoading(false)
     }
@@ -2573,6 +2590,25 @@ function App() {
   useEffect(() => {
     setCatalogPage(1)
   }, [catalogCategory, catalogSubcategory, catalogFranchise, catalogMinYear, catalogMaxYear, catalogSortKey])
+
+  useEffect(() => {
+    if (currentScreen !== 'catalog_item' || !selectedCatalogItem?.id) {
+      setCatalogItemImages([])
+      return
+    }
+    let cancelled = false
+    const loadImages = async () => {
+      const { data, error } = await supabase
+        .from('item_images')
+        .select('item_image_id, image_path, position')
+        .eq('item_id', selectedCatalogItem.id)
+        .order('position')
+      if (error) console.error('item_images load error:', error)
+      if (!cancelled) setCatalogItemImages(data || [])
+    }
+    loadImages()
+    return () => { cancelled = true }
+  }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
 
   useEffect(() => {
     if (catalogPage > catalogTotalPages) {
@@ -2725,19 +2761,19 @@ function App() {
         return
       }
 
-      const { data, error } = await supabase
-        .from('catalog_categories')
-        .select('id, name')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true })
+      const { data: rawData, error } = await supabase
+        .from('categories')
+        .select('category_id, name')
         .order('name', { ascending: true })
+
+      const data = (rawData || []).map(r => ({ id: r.category_id, name: r.name }))
 
       if (error) {
         setCatalogAdminFormError(error.message || 'Could not load catalog categories.')
         return
       }
 
-      setCatalogAdminCategories(data || [])
+      setCatalogAdminCategories(data)
       if (!data?.some((category) => category.id === catalogAdminCategoryId)) {
         setCatalogAdminCategoryId('')
         setCatalogAdminSubcategoryId('')
@@ -2762,29 +2798,214 @@ function App() {
         return
       }
 
-      const { data } = await supabase
-        .from('catalog_brands')
-        .select('id, name')
-        .eq('is_active', true)
+      const { data: rawBrands } = await supabase
+        .from('brands')
+        .select('brand_id, name')
         .order('name', { ascending: true })
 
-      setCatalogAdminBrands(data || [])
+      setCatalogAdminBrands((rawBrands || []).map(r => ({ id: r.brand_id, name: r.name })))
     }
 
     loadCatalogAdminBrands()
   }, [currentScreen, isPlatformAdmin])
 
   useEffect(() => {
+    if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminCardTypes([]); return }
+    supabase.from('card_types').select('card_type_id, name').order('name')
+      .then(({ data }) => setCatalogAdminCardTypes((data || []).map(r => ({ id: r.card_type_id, name: r.name }))))
+  }, [currentScreen, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !catalogAdminSubcategoryId) {
+      setCatalogAdminRealFranchises([])
+      setCatalogAdminRealFranchiseId(prev => prev ? '' : prev)
+      return
+    }
+    supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', catalogAdminSubcategoryId)
+      .then(({ data: fsRows }) => {
+        const ids = (fsRows || []).map(r => r.franchise_id)
+        if (!ids.length) { setCatalogAdminRealFranchises([]); setCatalogAdminRealFranchiseId(''); return }
+        supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
+          .then(({ data }) => {
+            const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
+            setCatalogAdminRealFranchises(list)
+            setCatalogAdminRealFranchiseId(prev => list.some(f => f.id === prev) ? prev : '')
+          })
+      })
+  }, [catalogAdminSubcategoryId, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminSubjects([]); setCatalogAdminSubjectId(''); return }
+    supabase
+      .from('subject_franchise')
+      .select('subject_id')
+      .eq('franchise_id', catalogAdminRealFranchiseId)
+      .then(({ data: sfRows }) => {
+        const ids = (sfRows || []).map(r => r.subject_id)
+        if (ids.length === 0) { setCatalogAdminSubjects([]); return }
+        supabase.from('subjects').select('subject_id, subject_name').in('subject_id', ids).order('subject_name')
+          .then(({ data }) => setCatalogAdminSubjects((data || []).map(r => ({ id: r.subject_id, name: r.subject_name }))))
+      })
+  }, [catalogAdminRealFranchiseId, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminTeams([]); setCatalogAdminTeamIds(prev => prev.length ? [] : prev); return }
+    supabase.from('teams').select('team_id, name').eq('franchise_id', catalogAdminRealFranchiseId).order('name')
+      .then(({ data }) => setCatalogAdminTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
+  }, [catalogAdminRealFranchiseId, isPlatformAdmin])
+
+  useEffect(() => {
+    const q = catalogAdminSubjectSearch.trim()
+    if (catalogAdminSubjectId || q.length < 2) { setCatalogAdminSubjectResults([]); return }
+    setCatalogAdminSubjectIsSearching(true)
+    const timer = setTimeout(() => {
+      supabase.from('subjects').select('subject_id, subject_name, subject_type').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        .then(({ data }) => {
+          setCatalogAdminSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+          setCatalogAdminSubjectIsSearching(false)
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [catalogAdminSubjectSearch, catalogAdminSubjectId])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || currentScreen !== 'catalog') { setCatalogAdminSpecies([]); return }
+    supabase.from('species').select('species_id, name').order('name')
+      .then(({ data }) => setCatalogAdminSpecies((data || []).map(r => ({ id: r.species_id, name: r.name }))))
+  }, [currentScreen, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !catalogAdminFranchiseId) { setCatalogAdminSubsets([]); setCatalogAdminSubsetId(''); return }
+    supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', catalogAdminFranchiseId).order('name')
+      .then(({ data }) => setCatalogAdminSubsets((data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))))
+  }, [catalogAdminFranchiseId, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isPlatformAdmin || !catalogAdminSubsetId) { setCatalogAdminPrintTypes([]); setCatalogAdminPrintTypeId(''); return }
+    supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', catalogAdminSubsetId).order('name')
+      .then(({ data }) => setCatalogAdminPrintTypes((data || []).map(r => ({ id: r.print_type_id, name: r.name }))))
+  }, [catalogAdminSubsetId, isPlatformAdmin])
+
+  // Edit panel: subject search across ALL subjects
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const q = catalogItemEditSubjectSearch.trim()
+    if (catalogItemEditValues.subject_id || q.length < 2) { setCatalogItemEditSubjectResults([]); return }
+    setCatalogItemEditSubjectIsSearching(true)
+    const timer = setTimeout(() => {
+      supabase.from('subjects').select('subject_id, subject_name, subject_type').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        .then(({ data }) => {
+          setCatalogItemEditSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+          setCatalogItemEditSubjectIsSearching(false)
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [isCatalogItemEditMode, catalogItemEditSubjectSearch, catalogItemEditValues.subject_id])
+
+  // Edit panel: franchise cascade from subcategory
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const subcategoryId = catalogItemEditValues.subcategory_id
+    if (!subcategoryId) {
+      setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
+      setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
+      return
+    }
+    supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
+      .then(({ data: fsRows }) => {
+        const ids = (fsRows || []).map(r => r.franchise_id)
+        if (!ids.length) { setCatalogItemEditLookups(v => ({ ...v, franchises: [] })); setCatalogItemEditValues(v => ({ ...v, franchise_id: '' })); return }
+        supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
+          .then(({ data }) => {
+            const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
+            setCatalogItemEditLookups(v => ({ ...v, franchises: list }))
+            setCatalogItemEditValues(v => ({ ...v, franchise_id: list.some(f => f.id === v.franchise_id) ? v.franchise_id : '' }))
+          })
+      })
+  }, [isCatalogItemEditMode, catalogItemEditValues.subcategory_id])
+
+  // Edit panel: cascade teams from franchise
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const franchiseId = catalogItemEditValues.franchise_id
+    if (!franchiseId) {
+      setCatalogItemEditLookups(v => ({ ...v, teams: [] }))
+      setCatalogItemEditTeamIds([])
+      return
+    }
+    supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
+      .then(({ data }) => {
+        const newTeams = (data || []).map(r => ({ id: r.team_id, name: r.name }))
+        setCatalogItemEditLookups(v => ({ ...v, teams: newTeams }))
+        setCatalogItemEditTeamIds(prev => prev.filter(id => newTeams.some(t => t.id === id)))
+      })
+  }, [isCatalogItemEditMode, catalogItemEditValues.franchise_id])
+
+  // Edit panel: cascade collectible sets from franchise + brand
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const franchiseId = catalogItemEditValues.franchise_id
+    const brandId = catalogItemEditValues.brand_id
+    if (!franchiseId && !brandId) {
+      setCatalogItemEditLookups(v => ({ ...v, sets: [] }))
+      setCatalogItemEditValues(v => ({ ...v, collectible_set_id: '' }))
+      return
+    }
+    let query = supabase.from('collectible_sets').select('collectible_set_id, name').order('name')
+    if (franchiseId) query = query.eq('franchise_id', franchiseId)
+    if (brandId) query = query.eq('brand_id', brandId)
+    query.then(({ data }) => {
+      const newSets = (data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))
+      setCatalogItemEditLookups(v => ({ ...v, sets: newSets }))
+      setCatalogItemEditValues(v => ({ ...v, collectible_set_id: newSets.some(s => s.id === v.collectible_set_id) ? v.collectible_set_id : '' }))
+    })
+  }, [isCatalogItemEditMode, catalogItemEditValues.franchise_id, catalogItemEditValues.brand_id])
+
+  // Edit panel: cascade subsets from collectible set
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const setId = catalogItemEditValues.collectible_set_id
+    if (!setId) {
+      setCatalogItemEditLookups(v => ({ ...v, subsets: [] }))
+      setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: '' }))
+      return
+    }
+    supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', setId).order('name')
+      .then(({ data }) => {
+        const newSubsets = (data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))
+        setCatalogItemEditLookups(v => ({ ...v, subsets: newSubsets }))
+        setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: newSubsets.some(s => s.id === v.subcollectble_set_id) ? v.subcollectble_set_id : '' }))
+      })
+  }, [isCatalogItemEditMode, catalogItemEditValues.collectible_set_id])
+
+  // Edit panel: cascade print types from subset
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const subsetId = catalogItemEditValues.subcollectble_set_id
+    if (!subsetId) {
+      setCatalogItemEditLookups(v => ({ ...v, printTypes: [] }))
+      setCatalogItemEditValues(v => ({ ...v, print_type_id: '' }))
+      return
+    }
+    supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', subsetId).order('name')
+      .then(({ data }) => {
+        const newTypes = (data || []).map(r => ({ id: r.print_type_id, name: r.name }))
+        setCatalogItemEditLookups(v => ({ ...v, printTypes: newTypes }))
+        setCatalogItemEditValues(v => ({ ...v, print_type_id: newTypes.some(t => t.id === v.print_type_id) ? v.print_type_id : '' }))
+      })
+  }, [isCatalogItemEditMode, catalogItemEditValues.subcollectble_set_id])
+
+  useEffect(() => {
     const loadExistingPeopleAndMinifigs = async () => {
       if (!isPlatformAdmin) return
 
-      const [peopleResult, minifigResult] = await Promise.all([
-        supabase.from('catalog_people').select('id, name').eq('is_active', true).order('name'),
-        supabase.from('catalog_minifigures').select('id, name').eq('is_active', true).order('name'),
-      ])
+      const { data: subjectsData } = await supabase
+        .from('subjects')
+        .select('subject_id, subject_name, subject_type')
+        .order('subject_name')
 
-      setCatalogAdminExistingPeople(peopleResult.data || [])
-      setCatalogAdminExistingMinifigs(minifigResult.data || [])
+      setCatalogAdminExistingPeople((subjectsData || []).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+      setCatalogAdminExistingMinifigs([])
     }
 
     loadExistingPeopleAndMinifigs()
@@ -2795,28 +3016,25 @@ function App() {
       if (!isPlatformAdmin || currentScreen !== 'catalog' || !catalogAdminCategoryId) {
         setCatalogAdminSubcategories([])
         setCatalogAdminSubcategoryId('')
-        setCatalogAdminFranchises([])
-        setCatalogAdminFranchiseId('')
         return
       }
 
-      const { data, error } = await supabase
-        .from('catalog_subcategories')
-        .select('id, name')
+      const { data: rawSubs, error } = await supabase
+        .from('subcategories')
+        .select('subcategory_id, name')
         .eq('category_id', catalogAdminCategoryId)
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true })
         .order('name', { ascending: true })
+
+      const data = (rawSubs || []).map(r => ({ id: r.subcategory_id, name: r.name }))
 
       if (error) {
         setCatalogAdminFormError(error.message || 'Could not load catalog subcategories.')
         return
       }
 
-      setCatalogAdminSubcategories(data || [])
+      setCatalogAdminSubcategories(data)
       if (!data?.some((subcategory) => subcategory.id === catalogAdminSubcategoryId)) {
         setCatalogAdminSubcategoryId('')
-        setCatalogAdminFranchiseId('')
       }
     }
 
@@ -2825,36 +3043,32 @@ function App() {
 
   useEffect(() => {
     const loadCatalogAdminFranchises = async () => {
-      if (!isPlatformAdmin || currentScreen !== 'catalog' || !catalogAdminSubcategoryId) {
+      if (!isPlatformAdmin || currentScreen !== 'catalog' || (!catalogAdminRealFranchiseId && !catalogAdminBrandId)) {
         setCatalogAdminFranchises([])
         setCatalogAdminFranchiseId('')
         return
       }
 
-      const { data, error } = await supabase
-        .from('collectible_sets')
-        .select('id, set_name')
-        .eq('subcategory_id', catalogAdminSubcategoryId)
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true })
-        .order('set_name', { ascending: true })
+      let query = supabase.from('collectible_sets').select('collectible_set_id, name').order('name', { ascending: true })
+      if (catalogAdminRealFranchiseId) query = query.eq('franchise_id', catalogAdminRealFranchiseId)
+      if (catalogAdminBrandId) query = query.eq('brand_id', catalogAdminBrandId)
+
+      const { data: rawSets, error } = await query
 
       if (error) {
-        setCatalogAdminFormError(error.message || 'Could not load catalog franchises.')
+        setCatalogAdminFormError(error.message || 'Could not load collectible sets.')
         return
       }
 
-      const normalizedSets = Array.isArray(data)
-        ? data.map((setRecord) => ({ id: setRecord.id, name: setRecord.set_name || '' }))
-        : []
+      const normalizedSets = (rawSets || []).map(r => ({ id: r.collectible_set_id, name: r.name || '' }))
       setCatalogAdminFranchises(normalizedSets)
-      if (!normalizedSets.some((franchise) => franchise.id === catalogAdminFranchiseId)) {
+      if (!normalizedSets.some((s) => s.id === catalogAdminFranchiseId)) {
         setCatalogAdminFranchiseId('')
       }
     }
 
     loadCatalogAdminFranchises()
-  }, [catalogAdminSubcategoryId, currentScreen, isPlatformAdmin])
+  }, [catalogAdminRealFranchiseId, catalogAdminBrandId, currentScreen, isPlatformAdmin])
 
   useEffect(() => {
     if (!authMessage) {
@@ -3112,14 +3326,30 @@ function App() {
       let catalogItemsById = {}
       if (catalogItemIds.length > 0) {
         const { data: catalogRows, error: catalogRowsError } = await supabase
-          .from('catalog_items')
-          .select('id, name, release_year, category_id, subcategory_id, collectible_set_id, metadata, dynamic_fields')
-          .in('id', catalogItemIds)
+          .from('item_details')
+          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id')
+          .in('item_id', catalogItemIds)
 
         if (!catalogRowsError && Array.isArray(catalogRows)) {
           catalogItemsById = catalogRows.reduce((accumulator, row) => {
-            if (row?.id) {
-              accumulator[row.id] = row
+            if (row?.item_id) {
+              const na = (v) => (v && v !== 'N/A' ? v : '')
+              const subjectName = na(row.subject)
+              const setName     = na(row.collectible_set)
+              const printType   = na(row.print_type)
+              const cardNum     = row.card_number && row.card_number !== 'N/A' ? `#${row.card_number}` : ''
+              const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
+              accumulator[row.item_id] = {
+                id:                row.item_id,
+                name:              nameParts.join(' — ') || row.description || 'Unnamed Item',
+                description:       row.description || '',
+                release_year:      null,
+                category_id:       row.category_id,
+                subcategory_id:    row.subcategory_id,
+                collectible_set_id: row.collectible_set_id,
+                metadata:          {},
+                dynamic_fields:    {},
+              }
             }
             return accumulator
           }, {})
@@ -3127,14 +3357,14 @@ function App() {
       }
 
       const [categoriesResult, subcategoriesResult] = await Promise.all([
-        supabase.from('catalog_categories').select('id, name').eq('is_active', true),
-        supabase.from('catalog_subcategories').select('id, name').eq('is_active', true),
+        supabase.from('categories').select('category_id, name'),
+        supabase.from('subcategories').select('subcategory_id, name'),
       ])
 
       const categoryNameById = Array.isArray(categoriesResult.data)
         ? categoriesResult.data.reduce((accumulator, row) => {
-            if (row?.id) {
-              accumulator[row.id] = row.name || ''
+            if (row?.category_id) {
+              accumulator[row.category_id] = row.name || ''
             }
             return accumulator
           }, {})
@@ -3142,8 +3372,8 @@ function App() {
 
       const subcategoryNameById = Array.isArray(subcategoriesResult.data)
         ? subcategoriesResult.data.reduce((accumulator, row) => {
-            if (row?.id) {
-              accumulator[row.id] = row.name || ''
+            if (row?.subcategory_id) {
+              accumulator[row.subcategory_id] = row.name || ''
             }
             return accumulator
           }, {})
@@ -3397,14 +3627,12 @@ function App() {
       const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult] = await Promise.all([
         supabase
           .from('collectible_sets')
-          .select('id, category_name, subcategory_name, franchise_name, set_name, total_items, total_estimated_value, breakdown, metadata')
-          .eq('is_active', true)
-          .order('category_name', { ascending: true })
-          .order('set_name', { ascending: true }),
+          .select('collectible_set_id, name')
+          .order('name', { ascending: true }),
         supabase
-          .from('collectible_set_entries')
-          .select('id, collectible_set_id, catalog_item_id, item_key, item_name, rarity, estimated_market_price, metadata')
-          .order('item_key', { ascending: true }),
+          .from('subcollectible_sets')
+          .select('subcollectble_set_id, collectible_set_id, name')
+          .order('name', { ascending: true }),
         supabase
           .from('user_collection_goals')
           .select('id, collection_id, collectible_set_id, title, notes, is_active, created_at')
@@ -3419,8 +3647,37 @@ function App() {
         return
       }
 
-      setCollectibleSets(Array.isArray(collectibleSetsResult.data) ? collectibleSetsResult.data : [])
-      setCollectibleSetEntries(Array.isArray(collectibleSetEntriesResult.data) ? collectibleSetEntriesResult.data : [])
+      setCollectibleSets(
+        Array.isArray(collectibleSetsResult.data)
+          ? collectibleSetsResult.data.map(r => ({
+              id:         r.collectible_set_id,
+              set_name:   r.name || '',
+              brand_name: '',
+              // keep fields downstream code may read, with safe defaults
+              category_name:    '',
+              subcategory_name: '',
+              franchise_name:   '',
+              total_items:      0,
+              total_estimated_value: 0,
+              breakdown: null,
+              metadata:  {},
+            }))
+          : [],
+      )
+      setCollectibleSetEntries(
+        Array.isArray(collectibleSetEntriesResult.data)
+          ? collectibleSetEntriesResult.data.map(r => ({
+              id:                  r.subcollectble_set_id,
+              collectible_set_id:  r.collectible_set_id,
+              catalog_item_id:     null,
+              item_key:            r.name || '',
+              item_name:           r.name || '',
+              rarity:              null,
+              estimated_market_price: null,
+              metadata:            {},
+            }))
+          : [],
+      )
       setTrackedCollectionGoals(Array.isArray(trackedGoalsResult.data) ? trackedGoalsResult.data : [])
     }
 
@@ -4121,12 +4378,11 @@ function App() {
   }
 
   const handleOpenCatalogItem = (item) => {
-    const categoryName = catalogCategoryById[item.category_id] || 'Uncategorized'
-    const subcategoryName = catalogSubcategoryById[item.subcategory_id] || 'Uncategorized'
-    const setRecord = catalogSetById[item.collectible_set_id] || null
-    const franchiseName = setRecord?.name || catalogFranchiseById[item.collectible_set_id] || 'Unassigned set'
-    const franchiseBrandName = setRecord?.franchise_id ? catalogFranchiseBrandById[setRecord.franchise_id] || '' : ''
-    const brandName = item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : ''
+    const categoryName     = catalogCategoryById[item.category_id] || 'Uncategorized'
+    const subcategoryName  = catalogSubcategoryById[item.subcategory_id] || 'Uncategorized'
+    const franchiseName    = item._set_name || 'Unassigned set'
+    const franchiseBrandName = item._franchise_name || ''
+    const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
     const imageUrl = item?.metadata?.image_url || item?.dynamic_fields?.image_url || ''
     const setName =
       (typeof item?.metadata?.set === 'string' && item.metadata.set.trim()) ||
@@ -4672,18 +4928,18 @@ function App() {
     setCatalogAdminIsSavingSubcategory(true)
     setCatalogAdminFormError('')
     const { data, error } = await supabase
-      .from('catalog_subcategories')
-      .insert({ name, category_id: catalogAdminCategoryId, is_active: true })
-      .select('id')
+      .from('subcategories')
+      .insert({ name, category_id: catalogAdminCategoryId })
+      .select('subcategory_id')
       .single()
     if (error) {
       setCatalogAdminFormError(error.message || 'Could not create subcategory.')
       setCatalogAdminIsSavingSubcategory(false)
       return
     }
-    const newSub = { id: data.id, name, category_id: catalogAdminCategoryId }
+    const newSub = { id: data.subcategory_id, name, category_id: catalogAdminCategoryId }
     setCatalogAdminSubcategories(prev => [...prev, newSub].sort((a, b) => a.name.localeCompare(b.name)))
-    setCatalogAdminSubcategoryId(data.id)
+    setCatalogAdminSubcategoryId(data.subcategory_id)
     setCatalogAdminNewSubcategoryName('')
     setCatalogAdminIsCreatingSubcategory(false)
     setCatalogAdminIsSavingSubcategory(false)
@@ -4696,12 +4952,11 @@ function App() {
     setCatalogAdminIsSavingFranchise(true)
     setCatalogAdminFormError('')
 
-    const { data: newId, error } = await supabase.rpc('upsert_catalog_collectible_set', {
-      p_category_id: catalogAdminCategoryId,
-      p_subcategory_id: catalogAdminSubcategoryId,
-      p_set_name: name,
-      p_franchise_id: null,
-    })
+    const { data: newSet, error } = await supabase
+      .from('collectible_sets')
+      .insert({ name })
+      .select('collectible_set_id')
+      .single()
 
     if (error) {
       setCatalogAdminFormError(error.message || 'Could not create franchise.')
@@ -4709,6 +4964,7 @@ function App() {
       return
     }
 
+    const newId = newSet.collectible_set_id
     const newFranchise = { id: newId, name }
     setCatalogAdminFranchises((current) => {
       const exists = current.some((f) => f.id === newId)
@@ -4729,9 +4985,11 @@ function App() {
     setCatalogAdminIsSavingBrand(true)
     setCatalogAdminFormError('')
 
-    const { data: newId, error } = await supabase.rpc('upsert_catalog_brand', {
-      p_name: name,
-    })
+    const { data: newBrandRow, error } = await supabase
+      .from('brands')
+      .insert({ name })
+      .select('brand_id')
+      .single()
 
     if (error) {
       setCatalogAdminFormError(error.message || 'Could not create brand.')
@@ -4739,6 +4997,7 @@ function App() {
       return
     }
 
+    const newId = newBrandRow.brand_id
     const newBrand = { id: newId, name }
     setCatalogAdminBrands((current) => {
       const exists = current.some((b) => b.id === newId)
@@ -4752,74 +5011,258 @@ function App() {
     setCatalogAdminIsSavingBrand(false)
   }
 
-  const handleCreateCatalogItemInApp = async (event) => {
-    event.preventDefault()
+  const handleOpenCatalogItemEdit = async () => {
+    const d = selectedCatalogItem?._details || {}
+    setCatalogItemEditValues({
+      description:          d.description          || '',
+      card_number:          d.card_number          || '',
+      print_count:          d.print_count          ?? '',
+      category_id:          d.category_id          || '',
+      subcategory_id:       d.subcategory_id        || '',
+      franchise_id:         d.franchise_id          || '',
+      brand_id:             d.brand_id              || '',
+      collectible_set_id:   d.collectible_set_id    || '',
+      subcollectble_set_id: d.subcollectble_set_id  || '',
+      subject_id:           d.subject_id            || '',
+      print_type_id:        d.print_type_id         || '',
+    })
+    setCatalogItemEditError('')
+    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }] = await Promise.all([
+      supabase.from('card_types').select('card_type_id, name').order('name'),
+      supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
+      supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
+    ])
+    setCatalogItemEditLookups({
+      franchises: [], subjects: [], sets: [], subsets: [], teams: [], printTypes: [],
+      cardTypes: (cardTypes || []).map(r => ({ id: r.card_type_id, name: r.name })),
+    })
+    setCatalogItemEditTeamIds((itemTeams || []).map(r => r.team_id))
+    setCatalogItemEditCardTypeIds((itemCardTypes || []).map(r => r.card_type_id))
+    setCatalogItemEditSubjectSearch(d.subject || '')
+    setCatalogItemEditSubjectResults([])
+    setIsCatalogItemEditMode(true)
+  }
+
+  const handleSaveCatalogItem = async () => {
+    if (!selectedCatalogItem?.id) return
+    setIsSavingCatalogItem(true)
+    setCatalogItemEditError('')
+    const v = catalogItemEditValues
+    const { error } = await supabase
+      .from('items')
+      .update({
+        description:          v.description.trim()          || null,
+        card_number:          v.card_number.trim()          || null,
+        print_count:          v.print_count !== '' ? Number(v.print_count) : null,
+        category_id:          v.category_id          || null,
+        subcategory_id:       v.subcategory_id        || null,
+        franchise_id:         v.franchise_id          || null,
+        brand_id:             v.brand_id              || null,
+        collectible_set_id:   v.collectible_set_id    || null,
+        subcollectble_set_id: v.subcollectble_set_id  || null,
+        subject_id:           v.subject_id            || null,
+        print_type_id:        v.print_type_id         || null,
+      })
+      .eq('item_id', selectedCatalogItem.id)
+    if (error) {
+      setCatalogItemEditError(error.message || 'Could not save changes.')
+      setIsSavingCatalogItem(false)
+      return
+    }
+    await supabase.from('item_teams').delete().eq('item_id', selectedCatalogItem.id)
+    if (catalogItemEditTeamIds.length > 0) {
+      await supabase.from('item_teams').insert(catalogItemEditTeamIds.map(tid => ({ item_id: selectedCatalogItem.id, team_id: tid })))
+    }
+    await supabase.from('item_card_types').delete().eq('item_id', selectedCatalogItem.id)
+    if (catalogItemEditCardTypeIds.length > 0) {
+      await supabase.from('item_card_types').insert(catalogItemEditCardTypeIds.map(ctid => ({ item_id: selectedCatalogItem.id, card_type_id: ctid })))
+    }
+    setCatalogReloadToken(t => t + 1)
+    setIsCatalogItemEditMode(false)
+    setIsSavingCatalogItem(false)
+  }
+
+  const handleUploadCatalogItemImage = async (file, position) => {
+    if (!file || !selectedCatalogItem?.id) return
+    if (!file.type.startsWith('image/')) {
+      setCatalogItemEditError('Only image files can be uploaded.')
+      return
+    }
+    setIsUploadingCatalogItemImage(true)
+    setCatalogItemEditError('')
+    const existing = catalogItemImages.find(img => img.position === position)
+    if (existing) {
+      await supabase.storage.from('item-images').remove([existing.image_path])
+      await supabase.from('item_images').delete().eq('item_image_id', existing.item_image_id)
+    }
+    const ext = file.name.split('.').pop()
+    const path = `items/${selectedCatalogItem.id}/${Date.now()}_${position}.${ext}`
+    const { error: uploadError } = await supabase.storage.from('item-images').upload(path, file)
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError)
+      setCatalogItemEditError(uploadError.message || 'Upload failed.')
+      setIsUploadingCatalogItemImage(false)
+      return
+    }
+    const { error: insertError } = await supabase.from('item_images').insert({ item_id: selectedCatalogItem.id, image_path: path, position })
+    if (insertError) {
+      console.error('item_images insert error:', insertError)
+      setCatalogItemEditError(insertError.message || 'Could not save image record.')
+      setIsUploadingCatalogItemImage(false)
+      return
+    }
+    setCatalogItemImagesReloadToken(t => t + 1)
+    setIsUploadingCatalogItemImage(false)
+  }
+
+  const handleDeleteCatalogItemImage = async (img) => {
+    const { error: storageError } = await supabase.storage.from('item-images').remove([img.image_path])
+    if (storageError) {
+      setCatalogItemEditError(storageError.message || 'Could not delete image from storage.')
+      return
+    }
+    await supabase.from('item_images').delete().eq('item_image_id', img.item_image_id)
+    setCatalogItemImagesReloadToken(t => t + 1)
+  }
+
+  const handleCatalogAdminSelectSubject = async (subject) => {
+    setCatalogAdminSubjectId(subject.id)
+    setCatalogAdminSubjectSearch(subject.name)
+    setCatalogAdminSubjectResults([])
+    if (catalogAdminRealFranchiseId) {
+      const { data: existing } = await supabase.from('subject_franchise')
+        .select('subject_id').eq('subject_id', subject.id).eq('franchise_id', catalogAdminRealFranchiseId).maybeSingle()
+      if (!existing) {
+        await supabase.from('subject_franchise').insert({ subject_id: subject.id, franchise_id: catalogAdminRealFranchiseId })
+      }
+    }
+  }
+
+  const handleCatalogItemEditSelectSubject = async (subject) => {
+    setCatalogItemEditValues(v => ({ ...v, subject_id: subject.id }))
+    setCatalogItemEditSubjectSearch(subject.name)
+    setCatalogItemEditSubjectResults([])
+    const franchiseId = catalogItemEditValues.franchise_id
+    if (franchiseId) {
+      const { data: existing } = await supabase.from('subject_franchise')
+        .select('subject_id').eq('subject_id', subject.id).eq('franchise_id', franchiseId).maybeSingle()
+      if (!existing) {
+        await supabase.from('subject_franchise').insert({ subject_id: subject.id, franchise_id: franchiseId })
+      }
+    }
+  }
+
+  const handleCatalogAdminInlineSave = async () => {
+    const { field, value, subjectType, speciesId } = catalogAdminInlineCreate
+    const name = value.trim()
+    if (!name) return
+    setIsSavingCatalogAdminInline(true)
+    setCatalogAdminInlineCreate(v => ({ ...v, error: '' }))
+    const fail = (msg) => { setCatalogAdminInlineCreate(v => ({ ...v, error: msg })); setIsSavingCatalogAdminInline(false) }
+    const reset = () => { setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }); setIsSavingCatalogAdminInline(false) }
+
+    if (field === 'category') {
+      const { data, error } = await supabase.from('categories').insert({ name }).select('category_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.category_id, name }
+      setCatalogAdminCategories(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminCategoryId(data.category_id)
+    } else if (field === 'subcategory') {
+      const { data, error } = await supabase.from('subcategories').insert({ name, category_id: catalogAdminCategoryId }).select('subcategory_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.subcategory_id, name }
+      setCatalogAdminSubcategories(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminSubcategoryId(data.subcategory_id)
+    } else if (field === 'franchise') {
+      const { data, error } = await supabase.from('franchises').insert({ name }).select('franchise_id').single()
+      if (error) { fail(error.message); return }
+      if (catalogAdminSubcategoryId) {
+        await supabase.from('franchise_subcategory').insert({ franchise_id: data.franchise_id, subcategory_id: catalogAdminSubcategoryId })
+      }
+      const item = { id: data.franchise_id, name }
+      setCatalogAdminRealFranchises(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminRealFranchiseId(data.franchise_id)
+    } else if (field === 'brand') {
+      const { data, error } = await supabase.from('brands').insert({ name }).select('brand_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.brand_id, name }
+      setCatalogAdminBrands(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminBrandId(data.brand_id)
+    } else if (field === 'set') {
+      const { data, error } = await supabase.from('collectible_sets').insert({ name, brand_id: catalogAdminBrandId || null, franchise_id: catalogAdminRealFranchiseId || null }).select('collectible_set_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.collectible_set_id, name }
+      setCatalogAdminFranchises(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminFranchiseId(data.collectible_set_id)
+    } else if (field === 'subset') {
+      const { data, error } = await supabase.from('subcollectible_sets').insert({ name, collectible_set_id: catalogAdminFranchiseId }).select('subcollectble_set_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.subcollectble_set_id, name }
+      setCatalogAdminSubsets(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminSubsetId(data.subcollectble_set_id)
+    } else if (field === 'subject') {
+      const { data, error } = await supabase.from('subjects').insert({ subject_name: name, subject_type: subjectType, species_id: (subjectType === 'character' && speciesId) ? speciesId : null }).select('subject_id').single()
+      if (error) { fail(error.message); return }
+      if (catalogAdminRealFranchiseId) {
+        await supabase.from('subject_franchise').insert({ subject_id: data.subject_id, franchise_id: catalogAdminRealFranchiseId })
+      }
+      setCatalogAdminSubjectId(data.subject_id)
+      setCatalogAdminSubjectSearch(name)
+      setCatalogAdminSubjectResults([])
+    } else if (field === 'team') {
+      const { data, error } = await supabase.from('teams').insert({ name, franchise_id: catalogAdminRealFranchiseId || null }).select('team_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.team_id, name }
+      setCatalogAdminTeams(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminTeamIds(prev => [...prev, data.team_id])
+    } else if (field === 'printType') {
+      const { data, error } = await supabase.from('print_types').insert({ name, subcollectble_set_id: catalogAdminSubsetId || null }).select('print_type_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.print_type_id, name }
+      setCatalogAdminPrintTypes(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminPrintTypeId(data.print_type_id)
+    } else if (field === 'cardType') {
+      const { data, error } = await supabase.from('card_types').insert({ name }).select('card_type_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.card_type_id, name }
+      setCatalogAdminCardTypes(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminCardTypeIds(prev => [...prev, data.card_type_id])
+    }
+    reset()
+  }
+
+  const handleCreateCatalogItemInApp = async (mode) => {
 
     if (!isPlatformAdmin) {
       setCatalogAdminFormError(t('adminItemCreateFailed'))
       return
     }
 
-    if (!catalogAdminCategoryId || !catalogAdminSubcategoryId || !catalogAdminFranchiseId) {
-      setCatalogAdminFormError(t('selectFranchiseFirstAdmin'))
-      return
-    }
-
-    const normalizedName = catalogAdminItemName.trim()
-    if (!normalizedName) {
-      setCatalogAdminFormError(t('itemNameLabel'))
-      return
-    }
-
-    if (catalogAdminItemImageFile && !['image/jpeg', 'image/jpg'].includes((catalogAdminItemImageFile.type || '').toLowerCase())) {
-      setCatalogAdminFormError(t('jpegOnlyError'))
+    if (!catalogAdminCategoryId || !catalogAdminSubcategoryId) {
+      setCatalogAdminFormError('Please select a category and subcategory.')
       return
     }
 
     setCatalogAdminFormError('')
     setIsCreatingCatalogItem(true)
 
-    const releaseYear = catalogAdminItemYear.trim() ? Number(catalogAdminItemYear.trim()) : null
-    let uploadedItemImageUrl = null
-
-    try {
-      if (catalogAdminItemImageFile) {
-        uploadedItemImageUrl = await uploadSettingsImage(catalogAdminItemImageFile, 'catalog-item')
-      }
-    } catch (error) {
-      setCatalogAdminFormError(error.message || t('adminItemCreateFailed'))
-      setIsCreatingCatalogItem(false)
-      return
-    }
-
-    const itemMetadata = uploadedItemImageUrl
-      ? { image_url: uploadedItemImageUrl }
-      : {}
-
-    const normalizedVariants = catalogAdminVariants
-      .map((variant) => ({
-        name: (variant.name || '').trim(),
-        sku: (variant.sku || '').trim(),
-        identifier: (variant.identifier || '').trim(),
-        condition: (variant.condition || '').trim(),
-      }))
-      .filter((variant) => variant.name || variant.sku || variant.identifier || variant.condition)
-
-    itemMetadata.identifier = catalogAdminItemIdentifier.trim() || null
-    itemMetadata.status = catalogAdminStatus
-    itemMetadata.dynamic_fields = catalogAdminDynamicFields
-    itemMetadata.variants = normalizedVariants
-
-    const { data: createdItem, error } = await supabase.rpc('create_catalog_item_direct', {
-      p_category_id: catalogAdminCategoryId,
-      p_subcategory_id: catalogAdminSubcategoryId,
-      p_collectible_set_id: catalogAdminFranchiseId,
-      p_item_name: normalizedName,
-      p_release_year: Number.isFinite(releaseYear) ? releaseYear : null,
-      p_description: catalogAdminItemDescription.trim() || null,
-      p_brand_id: catalogAdminBrandId || null,
-      p_metadata: itemMetadata,
-    })
+    const { data: createdItem, error } = await supabase
+      .from('items')
+      .insert({
+        category_id:          catalogAdminCategoryId          || null,
+        subcategory_id:       catalogAdminSubcategoryId        || null,
+        franchise_id:         catalogAdminRealFranchiseId      || null,
+        brand_id:             catalogAdminBrandId              || null,
+        collectible_set_id:   catalogAdminFranchiseId          || null,
+        subcollectble_set_id: catalogAdminSubsetId             || null,
+        subject_id:           catalogAdminSubjectId            || null,
+        print_type_id:        catalogAdminPrintTypeId          || null,
+        card_number:          catalogAdminCardNumber.trim()    || null,
+        print_count:          catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
+        description:          catalogAdminItemDescription.trim() || null,
+      })
+      .select('item_id')
+      .single()
 
     if (error) {
       setCatalogAdminFormError(error.message || t('adminItemCreateFailed'))
@@ -4827,77 +5270,59 @@ function App() {
       return
     }
 
-    const createdItemId = Array.isArray(createdItem) ? createdItem[0]?.id : createdItem?.id
-    let variantSaveFailed = false
-    let peopleSaveFailed = false
-    let minifigSaveFailed = false
-
-    if (createdItemId && normalizedVariants.length > 0) {
-      const { error: variantsError } = await supabase.rpc('replace_catalog_item_variants', {
-        p_item_id: createdItemId,
-        p_variants: normalizedVariants,
-      })
-      if (variantsError) variantSaveFailed = true
+    if (createdItem?.item_id) {
+      for (const [file, position] of [[catalogAdminFrontImageFile, 0], [catalogAdminBackImageFile, 1]]) {
+        if (!file) continue
+        const ext = file.name.split('.').pop()
+        const path = `items/${createdItem.item_id}/${Date.now()}_${position}.${ext}`
+        const { error: uploadError } = await supabase.storage.from('item-images').upload(path, file)
+        if (uploadError) {
+          console.error('Image upload error:', uploadError)
+          setCatalogAdminFormError(`Image upload failed: ${uploadError.message}`)
+        } else {
+          const { error: insertError } = await supabase.from('item_images').insert({ item_id: createdItem.item_id, image_path: path, position })
+          if (insertError) {
+            console.error('item_images insert error:', insertError)
+            setCatalogAdminFormError(`Image record save failed: ${insertError.message}`)
+          }
+        }
+      }
     }
 
-    // Save people credits
-    const normalizedPeopleByPerson = {}
-    for (const row of catalogAdminPeopleRows) {
-      const name = (row.name || '').trim()
-      if (!name) continue
-      if (!normalizedPeopleByPerson[name]) normalizedPeopleByPerson[name] = { name, roles: [], notes: row.notes || '' }
-      if (row.role) normalizedPeopleByPerson[name].roles.push(row.role)
+    if (createdItem?.item_id && catalogAdminTeamIds.length > 0) {
+      await supabase.from('item_teams').insert(catalogAdminTeamIds.map(tid => ({ item_id: createdItem.item_id, team_id: tid })))
     }
-    const normalizedPeople = Object.values(normalizedPeopleByPerson)
-    if (createdItemId && normalizedPeople.length > 0) {
-      const { error: peopleError } = await supabase.rpc('replace_catalog_item_people', {
-        p_item_id: createdItemId,
-        p_people: normalizedPeople,
-      })
-      if (peopleError) peopleSaveFailed = true
+    if (createdItem?.item_id && catalogAdminCardTypeIds.length > 0) {
+      await supabase.from('item_card_types').insert(catalogAdminCardTypeIds.map(ctid => ({ item_id: createdItem.item_id, card_type_id: ctid })))
     }
 
-    // Save minifigures (Building Blocks only)
-    const normalizedMinifigs = catalogAdminMinifigRows
-      .map((row) => ({
-        name: (row.name || '').trim(),
-        quantity: Number(row.quantity) > 0 ? Number(row.quantity) : 1,
-        identifier: (row.identifier || '').trim() || null,
-        theme: (row.theme || '').trim() || null,
-      }))
-      .filter((row) => row.name)
-    if (createdItemId && normalizedMinifigs.length > 0) {
-      const { error: minifigError } = await supabase.rpc('replace_catalog_item_minifigures', {
-        p_item_id: createdItemId,
-        p_minifigures: normalizedMinifigs,
-      })
-      if (minifigError) minifigSaveFailed = true
+    setCatalogAdminFrontImageFile(null)
+    setCatalogAdminBackImageFile(null)
+    setCatalogReloadToken(n => n + 1)
+
+    if (mode === 'another') {
+      setCatalogAdminSubjectId('')
+      setCatalogAdminSubjectSearch('')
+      setCatalogAdminSubjectResults([])
+      setCatalogAdminCardNumber('')
+      setCatalogAdminPrintCount('')
+      setCatalogAdminItemDescription('')
+    } else {
+      setCatalogAdminItemDescription('')
+      setCatalogAdminCardNumber('')
+      setCatalogAdminPrintCount('')
+      setCatalogAdminRealFranchiseId('')
+      setCatalogAdminSubjectId('')
+      setCatalogAdminSubjectSearch('')
+      setCatalogAdminSubjectResults([])
+      setCatalogAdminTeamIds([])
+      setCatalogAdminPrintTypeId('')
+      setCatalogAdminCardTypeIds([])
+      setCatalogAdminSubsetId('')
+      setCatalogAdminFranchiseId('')
+      setCatalogAdminBrandId('')
+      setIsCatalogItemModalOpen(false)
     }
-
-    setCatalogAdminItemName('')
-    setCatalogAdminItemYear('')
-    setCatalogAdminItemDescription('')
-    setCatalogAdminItemIdentifier('')
-    setCatalogAdminStatus('draft')
-    setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(selectedCatalogAdminCategoryName))
-    setCatalogAdminVariants([buildCatalogVariantRow()])
-    setCatalogAdminItemImageFile(null)
-    setCatalogAdminBrandId('')
-    setCatalogAdminNewBrandName('')
-    setCatalogAdminIsCreatingBrand(false)
-    setCatalogAdminNewFranchiseName('')
-    setCatalogAdminIsCreatingFranchise(false)
-    setCatalogAdminPeopleRows(buildDefaultCatalogPeopleRows(selectedCatalogAdminCategoryName))
-    setCatalogAdminMinifigRows(CATALOG_MINIFIG_CATEGORIES.has(selectedCatalogAdminCategoryName) ? [buildCatalogMinifigRow()] : [])
-    setIsCatalogItemModalOpen(false)
-    setCatalogReloadToken((currentToken) => currentToken + 1)
-
-    const warnings = [
-      variantSaveFailed && t('adminItemCreatedVariantWarning'),
-      peopleSaveFailed && t('adminItemCreatedPeopleWarning'),
-      minifigSaveFailed && t('adminItemCreatedMinifigWarning'),
-    ].filter(Boolean)
-    setAuthMessage(warnings.length > 0 ? warnings.join(' ') : t('adminItemCreated'))
     setIsCreatingCatalogItem(false)
   }
 
@@ -8925,6 +9350,8 @@ function App() {
                     onChange={(event) => setCatalogSortKey(event.target.value)}
                   >
                     <option value="newest_year">{t('sortNewestYear')}</option>
+                    <option value="oldest_year">Oldest Year</option>
+                    <option value="subject_az">Subject A–Z</option>
                   </select>
                 </label>
 
@@ -8938,14 +9365,19 @@ function App() {
                       className="catalog-action-pill"
                       onClick={() => {
                         setCatalogAdminFormError('')
-                        setCatalogAdminItemName('')
-                        setCatalogAdminItemYear('')
                         setCatalogAdminItemDescription('')
-                        setCatalogAdminItemIdentifier('')
-                        setCatalogAdminStatus('draft')
-                        setCatalogAdminItemImageFile(null)
-                        setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(selectedCatalogAdminCategoryName))
-                        setCatalogAdminVariants([buildCatalogVariantRow()])
+                        setCatalogAdminCardNumber('')
+                        setCatalogAdminPrintCount('')
+                        setCatalogAdminRealFranchiseId('')
+                        setCatalogAdminSubjectId('')
+                        setCatalogAdminTeamIds([])
+                        setCatalogAdminPrintTypeId('')
+                        setCatalogAdminCardTypeIds([])
+                        setCatalogAdminSubsetId('')
+                        setCatalogAdminFranchiseId('')
+                        setCatalogAdminBrandId('')
+                        setCatalogAdminFrontImageFile(null)
+                        setCatalogAdminBackImageFile(null)
                         setIsCatalogItemModalOpen(true)
                       }}
                     >
@@ -9081,13 +9513,12 @@ function App() {
                   <div>
                     <div className="catalog-results-grid">
                       {paginatedCatalogItems.map((item) => {
-                        const categoryName = catalogCategoryById[item.category_id] || 'Uncategorized'
-                        const subcategoryName = catalogSubcategoryById[item.subcategory_id] || 'Uncategorized'
-                        const setRecord = catalogSetById[item.collectible_set_id] || null
-                        const franchiseName = setRecord?.name || catalogFranchiseById[item.collectible_set_id] || 'Unassigned set'
-                        const franchiseBrandName = setRecord?.franchise_id ? catalogFranchiseBrandById[setRecord.franchise_id] || '' : ''
-                        const brandName = item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : ''
-                        const imageUrl = item?.metadata?.image_url || item?.dynamic_fields?.image_url || ''
+                        const categoryName     = catalogCategoryById[item.category_id] || 'Uncategorized'
+                        const subcategoryName  = catalogSubcategoryById[item.subcategory_id] || 'Uncategorized'
+                        const franchiseName    = item._set_name || 'Unassigned set'
+                        const franchiseBrandName = item._franchise_name || ''
+                        const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
+                        const imageUrl         = ''
 
                         return (
                           <article
@@ -9166,469 +9597,268 @@ function App() {
                     &#10005;
                   </button>
                   <h3>{t('adminCreateItem')}</h3>
-                  <form className="catalog-admin-form" onSubmit={handleCreateCatalogItemInApp}>
-                    <label htmlFor="catalog-admin-category">{t('categoryLabel')}</label>
-                    <select
-                      id="catalog-admin-category"
-                      value={catalogAdminCategoryId}
-                      onChange={(event) => {
-                        const nextCategoryId = event.target.value
-                        const nextCategoryName =
-                          catalogAdminCategories.find((category) => category.id === nextCategoryId)?.name || ''
-                        setCatalogAdminCategoryId(nextCategoryId)
-                        setCatalogAdminSubcategoryId('')
-                        setCatalogAdminFranchiseId('')
-                        setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(nextCategoryName))
-                        setCatalogAdminVariants([buildCatalogVariantRow()])
-                        setCatalogAdminFormError('')
-                      }}
-                    >
-                      <option value="">{t('selectCategoryFirstAdmin')}</option>
-                      {catalogAdminCategories.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name}
-                        </option>
-                      ))}
-                    </select>
+                  <form className="catalog-admin-form" onSubmit={e => e.preventDefault()}>
 
-                    <label htmlFor="catalog-admin-subcategory">{t('subcategoryLabel')}</label>
-                    <select
-                      id="catalog-admin-subcategory"
-                      value={catalogAdminSubcategoryId}
-                      onChange={(event) => {
-                        setCatalogAdminSubcategoryId(event.target.value)
-                        setCatalogAdminFranchiseId('')
-                        setCatalogAdminFormError('')
-                      }}
-                      disabled={!catalogAdminCategoryId}
-                    >
-                      <option value="">{t('selectSubcategoryFirstAdmin')}</option>
-                      {catalogAdminSubcategories.map((subcategory) => (
-                        <option key={subcategory.id} value={subcategory.id}>
-                          {subcategory.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    {catalogAdminCategoryId && (
-                      <div className="catalog-admin-inline-create">
-                        {catalogAdminIsCreatingSubcategory ? (
-                          <>
-                            <input
-                              type="text"
-                              className="catalog-admin-inline-input"
-                              placeholder="New subcategory name"
-                              value={catalogAdminNewSubcategoryName}
-                              onChange={(e) => setCatalogAdminNewSubcategoryName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') { e.preventDefault(); handleCreateCatalogSubcategory() }
-                                if (e.key === 'Escape') { setCatalogAdminIsCreatingSubcategory(false); setCatalogAdminNewSubcategoryName('') }
-                              }}
-                              autoFocus
-                            />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminNewSubcategoryName.trim() || catalogAdminIsSavingSubcategory} onClick={handleCreateCatalogSubcategory}>
-                              {catalogAdminIsSavingSubcategory ? '…' : 'Save'}
-                            </button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogAdminIsCreatingSubcategory(false); setCatalogAdminNewSubcategoryName('') }}>
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
-                          <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminIsCreatingSubcategory(true)}>
-                            + New subcategory
-                          </button>
-                        )}
+                    <p className="catalog-admin-section-title">Classification</p>
+                    <div className="catalog-admin-two-col">
+                      <div>
+                        <label htmlFor="cai-category">Category</label>
+                        <select id="cai-category" value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId(''); setCatalogAdminFormError('') }}>
+                          <option value="">Select category…</option>
+                          {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        {catalogAdminInlineCreate.field === 'category' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Category name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'category', value: '', subjectType: 'player' })}>+ New Category</button>}
                       </div>
-                    )}
-
-                    <label htmlFor="catalog-admin-franchise">{t('franchiseLabel')}</label>
-                    <select
-                      id="catalog-admin-franchise"
-                      value={catalogAdminFranchiseId}
-                      onChange={(event) => {
-                        setCatalogAdminFranchiseId(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                      disabled={!catalogAdminSubcategoryId}
-                    >
-                      <option value="">{t('selectFranchiseFirstAdmin')}</option>
-                      {catalogAdminFranchises.map((franchise) => (
-                        <option key={franchise.id} value={franchise.id}>
-                          {franchise.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    {catalogAdminSubcategoryId && (
-                      <div className="catalog-admin-inline-create">
-                        {catalogAdminIsCreatingFranchise ? (
-                          <>
-                            <input
-                              type="text"
-                              className="catalog-admin-inline-input"
-                              placeholder={t('newFranchiseNamePlaceholder')}
-                              value={catalogAdminNewFranchiseName}
-                              onChange={(e) => setCatalogAdminNewFranchiseName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') { e.preventDefault(); handleCreateCatalogFranchise() }
-                                if (e.key === 'Escape') { setCatalogAdminIsCreatingFranchise(false); setCatalogAdminNewFranchiseName('') }
-                              }}
-                              autoFocus
-                            />
-                            <button
-                              type="button"
-                              className="catalog-admin-inline-save"
-                              disabled={!catalogAdminNewFranchiseName.trim() || catalogAdminIsSavingFranchise}
-                              onClick={handleCreateCatalogFranchise}
-                            >
-                              {catalogAdminIsSavingFranchise ? '…' : t('saveAction')}
-                            </button>
-                            <button
-                              type="button"
-                              className="catalog-admin-inline-cancel"
-                              onClick={() => { setCatalogAdminIsCreatingFranchise(false); setCatalogAdminNewFranchiseName('') }}
-                            >
-                              {t('cancelAction')}
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            className="catalog-admin-inline-toggle"
-                            onClick={() => setCatalogAdminIsCreatingFranchise(true)}
-                          >
-                            {t('createFranchiseInlineAction')}
-                          </button>
-                        )}
+                      <div>
+                        <label htmlFor="cai-subcategory">Subcategory</label>
+                        <select id="cai-subcategory" value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminCategoryId}>
+                          <option value="">Select subcategory…</option>
+                          {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        {catalogAdminCategoryId && (catalogAdminInlineCreate.field === 'subcategory' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subcategory name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subcategory', value: '', subjectType: 'player' })}>+ New Subcategory</button>)}
                       </div>
-                    )}
-
-                    <label htmlFor="catalog-admin-brand">{t('brandLabel')}</label>
-                    <select
-                      id="catalog-admin-brand"
-                      value={catalogAdminBrandId}
-                      onChange={(event) => {
-                        setCatalogAdminBrandId(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                    >
-                      <option value="">{t('noBrandOption')}</option>
-                      {catalogAdminBrands.map((brand) => (
-                        <option key={brand.id} value={brand.id}>
-                          {brand.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <div className="catalog-admin-inline-create">
-                      {catalogAdminIsCreatingBrand ? (
-                        <>
-                          <input
-                            type="text"
-                            className="catalog-admin-inline-input"
-                            placeholder={t('newBrandNamePlaceholder')}
-                            value={catalogAdminNewBrandName}
-                            onChange={(e) => setCatalogAdminNewBrandName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') { e.preventDefault(); handleCreateCatalogBrand() }
-                              if (e.key === 'Escape') { setCatalogAdminIsCreatingBrand(false); setCatalogAdminNewBrandName('') }
-                            }}
-                            autoFocus
-                          />
-                          <button
-                            type="button"
-                            className="catalog-admin-inline-save"
-                            disabled={!catalogAdminNewBrandName.trim() || catalogAdminIsSavingBrand}
-                            onClick={handleCreateCatalogBrand}
-                          >
-                            {catalogAdminIsSavingBrand ? '…' : t('saveAction')}
-                          </button>
-                          <button
-                            type="button"
-                            className="catalog-admin-inline-cancel"
-                            onClick={() => { setCatalogAdminIsCreatingBrand(false); setCatalogAdminNewBrandName('') }}
-                          >
-                            {t('cancelAction')}
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          className="catalog-admin-inline-toggle"
-                          onClick={() => setCatalogAdminIsCreatingBrand(true)}
-                        >
-                          {t('createBrandInlineAction')}
-                        </button>
-                      )}
+                      <div>
+                        <label htmlFor="cai-franchise">Franchise</label>
+                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
+                          <option value="">None</option>
+                          {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                        {catalogAdminInlineCreate.field === 'franchise' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Franchise name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'franchise', value: '', subjectType: 'player' })}>+ New Franchise</button>}
+                      </div>
+                      <div>
+                        <label htmlFor="cai-brand">Brand</label>
+                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
+                          <option value="">None</option>
+                          {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        {catalogAdminInlineCreate.field === 'brand' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Brand name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'brand', value: '', subjectType: 'player' })}>+ New Brand</button>}
+                      </div>
+                      <div>
+                        <label htmlFor="cai-set">Collectible Set</label>
+                        <select id="cai-set" value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId(''); setCatalogAdminFormError('') }}>
+                          <option value="">None</option>
+                          {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        {catalogAdminInlineCreate.field === 'set' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Set name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'set', value: '', subjectType: 'player' })}>+ New Set</button>}
+                      </div>
+                      <div>
+                        <label htmlFor="cai-subset">Subset {!catalogAdminFranchiseId && <span className="catalog-admin-hint">(select a set first)</span>}</label>
+                        <select id="cai-subset" value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
+                          <option value="">None</option>
+                          {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        {catalogAdminFranchiseId && (catalogAdminInlineCreate.field === 'subset' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subset name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subset', value: '', subjectType: 'player' })}>+ New Subset</button>)}
+                      </div>
                     </div>
-                    <input
-                      id="catalog-admin-item-name"
-                      type="text"
-                      value={catalogAdminItemName}
-                      onChange={(event) => {
-                        setCatalogAdminItemName(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                      placeholder={t('itemNameLabel')}
-                    />
 
-                    <label htmlFor="catalog-admin-item-year">{t('releaseYearLabel')}</label>
-                    <input
-                      id="catalog-admin-item-year"
-                      type="number"
-                      min="1800"
-                      max="2200"
-                      value={catalogAdminItemYear}
-                      onChange={(event) => {
-                        setCatalogAdminItemYear(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                      placeholder="e.g. 2024"
-                    />
-
-                    <label htmlFor="catalog-admin-item-description">{t('descriptionLabel')}</label>
-                    <textarea
-                      id="catalog-admin-item-description"
-                      rows={3}
-                      value={catalogAdminItemDescription}
-                      onChange={(event) => {
-                        setCatalogAdminItemDescription(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                      placeholder={t('descriptionLabel')}
-                    />
-
-                    <label htmlFor="catalog-admin-item-identifier">{t('identifierLabel')}</label>
-                    <input
-                      id="catalog-admin-item-identifier"
-                      type="text"
-                      value={catalogAdminItemIdentifier}
-                      onChange={(event) => {
-                        setCatalogAdminItemIdentifier(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                      placeholder={t('identifierLabel')}
-                    />
-
-                    <label htmlFor="catalog-admin-status">{t('statusLabel')}</label>
-                    <select
-                      id="catalog-admin-status"
-                      value={catalogAdminStatus}
-                      onChange={(event) => {
-                        setCatalogAdminStatus(event.target.value)
-                        setCatalogAdminFormError('')
-                      }}
-                    >
-                      <option value="draft">{t('statusDraft')}</option>
-                      <option value="published">{t('statusPublished')}</option>
-                    </select>
-
-                    {catalogAdminDynamicFieldDefinitions.length > 0 && (
-                      <>
-                        <p className="catalog-admin-section-title">{t('dynamicFieldsLabel')}</p>
-                        <div className="catalog-admin-dynamic-grid">
-                          {catalogAdminDynamicFieldDefinitions.map((field) => {
-                            if (field.type === 'boolean') {
-                              return (
-                                <label key={field.key} className="catalog-admin-checkbox-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(catalogAdminDynamicFields[field.key])}
-                                    onChange={(event) =>
-                                      handleSetCatalogAdminDynamicField(field.key, event.target.checked)
-                                    }
-                                  />
-                                  <span>{field.label}</span>
-                                </label>
-                              )
-                            }
-
-                            return (
-                              <label key={field.key} htmlFor={`catalog-admin-dynamic-${field.key}`}>
-                                {field.label}
-                                <input
-                                  id={`catalog-admin-dynamic-${field.key}`}
-                                  type={field.type === 'number' ? 'number' : 'text'}
-                                  value={catalogAdminDynamicFields[field.key] ?? ''}
-                                  onChange={(event) =>
-                                    handleSetCatalogAdminDynamicField(field.key, event.target.value)
-                                  }
-                                />
-                              </label>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )}
-
-                    {catalogAdminShowPeople && (
-                      <>
-                        <p className="catalog-admin-section-title">{t('peopleCreditsLabel')}</p>
-                        <datalist id="catalog-admin-people-datalist">
-                          {catalogAdminExistingPeople.map((person) => (
-                            <option key={person.id} value={person.name} />
-                          ))}
-                        </datalist>
-                        <div className="catalog-admin-people-rows">
-                          {catalogAdminPeopleRows.map((row, index) => (
-                            <div key={`people-row-${index}`} className="catalog-admin-people-row">
-                              <input
-                                type="text"
-                                list="catalog-admin-people-datalist"
-                                placeholder={t('personNamePlaceholder')}
-                                value={row.name}
-                                onChange={(e) => handleSetCatalogPeopleRowField(index, 'name', e.target.value)}
-                              />
-                              <select
-                                value={row.role}
-                                onChange={(e) => handleSetCatalogPeopleRowField(index, 'role', e.target.value)}
-                              >
-                                {catalogAdminPeopleRoles.map((role) => (
-                                  <option key={role} value={role}>{role}</option>
+                    <p className="catalog-admin-section-title">Subject</p>
+                    <div className="catalog-admin-two-col">
+                      <div>
+                        <label>Subject</label>
+                        {catalogAdminSubjectId ? (
+                          <div className="catalog-admin-subject-selected">
+                            <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{catalogAdminSubjectSearch}</span>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]) }}>✕ Clear</button>
+                          </div>
+                        ) : (
+                          <div className="catalog-admin-subject-search-wrap">
+                            <input
+                              className="catalog-admin-inline-input"
+                              style={{ width: '100%' }}
+                              placeholder="Search all subjects…"
+                              value={catalogAdminSubjectSearch}
+                              onChange={e => setCatalogAdminSubjectSearch(e.target.value)}
+                              autoComplete="off"
+                            />
+                            {catalogAdminSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
+                            {catalogAdminSubjectResults.length > 0 && (
+                              <div className="catalog-admin-subject-results">
+                                {catalogAdminSubjectResults.map(s => (
+                                  <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogAdminSelectSubject(s)}>
+                                    <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                    <span className="catalog-admin-hint"> · {s.type}</span>
+                                  </button>
                                 ))}
-                              </select>
-                              <button
-                                type="button"
-                                className="catalog-variant-remove"
-                                onClick={() => handleRemoveCatalogPeopleRow(index)}
-                                aria-label={t('removePersonAction')}
-                              >
-                                {t('removeVariantAction')}
-                              </button>
-                            </div>
-                          ))}
-                          <button type="button" className="catalog-variant-add" onClick={handleAddCatalogPeopleRow}>
-                            {t('addPersonAction')}
-                          </button>
-                        </div>
-                      </>
-                    )}
-
-                    {catalogAdminShowMinifigs && (
-                      <>
-                        <p className="catalog-admin-section-title">{t('minifigsLabel')}</p>
-                        <datalist id="catalog-admin-minifig-datalist">
-                          {catalogAdminExistingMinifigs.map((fig) => (
-                            <option key={fig.id} value={fig.name} />
-                          ))}
-                        </datalist>
-                        <div className="catalog-admin-people-rows">
-                          {catalogAdminMinifigRows.map((row, index) => (
-                            <div key={`minifig-row-${index}`} className="catalog-admin-minifig-row">
-                              <input
-                                type="text"
-                                list="catalog-admin-minifig-datalist"
-                                placeholder={t('minifigNamePlaceholder')}
-                                value={row.name}
-                                onChange={(e) => handleSetCatalogMinifigRowField(index, 'name', e.target.value)}
-                              />
-                              <input
-                                type="number"
-                                min="1"
-                                placeholder="Qty"
-                                value={row.quantity}
-                                onChange={(e) => handleSetCatalogMinifigRowField(index, 'quantity', e.target.value)}
-                                style={{ width: '64px' }}
-                              />
-                              <input
-                                type="text"
-                                placeholder={t('minifigIdentifierPlaceholder')}
-                                value={row.identifier}
-                                onChange={(e) => handleSetCatalogMinifigRowField(index, 'identifier', e.target.value)}
-                              />
-                              <button
-                                type="button"
-                                className="catalog-variant-remove"
-                                onClick={() => handleRemoveCatalogMinifigRow(index)}
-                                aria-label={t('removeMinifigAction')}
-                              >
-                                {t('removeVariantAction')}
-                              </button>
-                            </div>
-                          ))}
-                          <button type="button" className="catalog-variant-add" onClick={handleAddCatalogMinifigRow}>
-                            {t('addMinifigAction')}
-                          </button>
-                        </div>
-                      </>
-                    )}
-
-                    <p className="catalog-admin-section-title">{t('variantsLabel')}</p>
-                    <div className="catalog-admin-variants">
-                      {catalogAdminVariants.map((variant, index) => (
-                        <div key={`catalog-admin-variant-${index}`} className="catalog-admin-variant-row">
-                          <input
-                            type="text"
-                            value={variant.name}
-                            onChange={(event) => handleSetCatalogVariantField(index, 'name', event.target.value)}
-                            placeholder={t('variantNameLabel')}
-                          />
-                          <input
-                            type="text"
-                            value={variant.sku}
-                            onChange={(event) => handleSetCatalogVariantField(index, 'sku', event.target.value)}
-                            placeholder={t('variantSkuLabel')}
-                          />
-                          <input
-                            type="text"
-                            value={variant.identifier}
-                            onChange={(event) => handleSetCatalogVariantField(index, 'identifier', event.target.value)}
-                            placeholder={t('variantIdentifierLabel')}
-                          />
-                          {catalogAdminConditionOptions.length > 0 ? (
-                            <select
-                              value={variant.condition}
-                              onChange={(event) => handleSetCatalogVariantField(index, 'condition', event.target.value)}
-                            >
-                              <option value="">{t('variantConditionLabel')}</option>
-                              {catalogAdminConditionOptions.map((conditionOption) => (
-                                <option key={conditionOption} value={conditionOption}>
-                                  {conditionOption}
-                                </option>
-                              ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {!catalogAdminSubjectId && (catalogAdminInlineCreate.field === 'subject' ? (
+                          <div className="catalog-admin-inline-create" style={{ marginTop: 6 }}>
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subject name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }) }} />
+                            <select value={catalogAdminInlineCreate.subjectType} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, subjectType: e.target.value, speciesId: '' }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
+                              <option value="player">Player</option>
+                              <option value="character">Character</option>
+                              <option value="comic">Comic</option>
                             </select>
-                          ) : (
-                            <input
-                              type="text"
-                              value={variant.condition}
-                              onChange={(event) => handleSetCatalogVariantField(index, 'condition', event.target.value)}
-                              placeholder={t('variantConditionLabel')}
-                            />
-                          )}
-                          <button
-                            type="button"
-                            className="catalog-variant-remove"
-                            onClick={() => handleRemoveCatalogVariant(index)}
-                          >
-                            {t('removeVariantAction')}
-                          </button>
-                        </div>
-                      ))}
-                      <button type="button" className="catalog-variant-add" onClick={handleAddCatalogVariant}>
-                        {t('addVariantAction')}
-                      </button>
+                            {catalogAdminInlineCreate.subjectType === 'character' && (
+                              <select value={catalogAdminInlineCreate.speciesId} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, speciesId: e.target.value }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
+                                <option value="">No species</option>
+                                {catalogAdminSpecies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            )}
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" style={{ marginTop: 4 }} onClick={() => setCatalogAdminInlineCreate({ field: 'subject', value: catalogAdminSubjectSearch, subjectType: 'player', speciesId: '', error: '' })}>+ New Subject</button>)}
+                      </div>
+                      <div>
+                        <label>Team / Affiliation {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a franchise first)</span>}</label>
+                        {catalogAdminRealFranchiseId ? (
+                          catalogAdminTeams.length > 0 ? (
+                            <div className="catalog-admin-team-list">
+                              {catalogAdminTeams.map(tm => (
+                                <label key={tm.id} className="catalog-admin-team-checkbox">
+                                  <input type="checkbox" checked={catalogAdminTeamIds.includes(tm.id)} onChange={e => setCatalogAdminTeamIds(prev => e.target.checked ? [...prev, tm.id] : prev.filter(id => id !== tm.id))} />
+                                  <span style={{ textTransform: 'uppercase' }}>{tm.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No teams in this franchise yet.</p>
+                        ) : null}
+                        {catalogAdminInlineCreate.field === 'team' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Team name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : catalogAdminRealFranchiseId ? <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'team', value: '', subjectType: 'player', speciesId: '', error: '' })}>+ New Team</button> : null}
+                      </div>
                     </div>
 
-                    <label htmlFor="catalog-admin-item-image">{t('itemImageJpegLabel')}</label>
-                    <input
-                      id="catalog-admin-item-image"
-                      type="file"
-                      accept=".jpg,.jpeg,image/jpeg"
-                      onChange={(event) => {
-                        const selectedFile = event.target.files?.[0] || null
-                        setCatalogAdminItemImageFile(selectedFile)
-                        setCatalogAdminFormError('')
-                      }}
-                    />
-                    {catalogAdminItemImageFile && (
-                      <p className="catalog-admin-file-name">{catalogAdminItemImageFile.name}</p>
-                    )}
+                    <p className="catalog-admin-section-title">Card Details</p>
+                    <div className="catalog-admin-two-col">
+                      <div>
+                        <label htmlFor="cai-print-type">Print Type {!catalogAdminSubsetId && <span className="catalog-admin-hint">(select a subset first)</span>}</label>
+                        <select id="cai-print-type" value={catalogAdminPrintTypeId} onChange={e => setCatalogAdminPrintTypeId(e.target.value)} disabled={!catalogAdminSubsetId}>
+                          <option value="">None</option>
+                          {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        {catalogAdminInlineCreate.field === 'printType' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Print type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'printType', value: '', subjectType: 'player' })}>+ New Print Type</button>}
+                      </div>
+                      <div>
+                        <label>Card Types <span className="catalog-admin-hint">(none = Normal)</span></label>
+                        {catalogAdminCardTypes.filter(c => c.name !== 'Normal').length > 0 && (
+                          <div className="catalog-admin-team-list">
+                            {catalogAdminCardTypes.filter(c => c.name !== 'Normal').map(c => (
+                              <label key={c.id} className="catalog-admin-team-checkbox">
+                                <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
+                                  onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
+                                <span>{c.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        {catalogAdminInlineCreate.field === 'cardType' ? (
+                          <div className="catalog-admin-inline-create">
+                            <input autoFocus className="catalog-admin-inline-input" placeholder="Card type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          </div>
+                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'cardType', value: '', subjectType: 'player' })}>+ New Card Type</button>}
+                      </div>
+                      <div>
+                        <label htmlFor="cai-card-number">Card Number</label>
+                        <input id="cai-card-number" type="text" value={catalogAdminCardNumber} onChange={e => setCatalogAdminCardNumber(e.target.value)} placeholder="e.g. 150" />
+                      </div>
+                      <div>
+                        <label htmlFor="cai-print-count">Print Count</label>
+                        <input id="cai-print-count" type="number" min="1" value={catalogAdminPrintCount} onChange={e => setCatalogAdminPrintCount(e.target.value)} placeholder="e.g. 99" />
+                      </div>
+                    </div>
+
+                    <p className="catalog-admin-section-title">Notes</p>
+                    <label htmlFor="cai-description">Description</label>
+                    <textarea id="cai-description" rows={3} value={catalogAdminItemDescription} onChange={e => { setCatalogAdminItemDescription(e.target.value); setCatalogAdminFormError('') }} placeholder="Optional notes about this card" />
+
+                    <p className="catalog-admin-section-title">Images</p>
+                    <div className="catalog-admin-two-col">
+                      <div>
+                        <label className="catalog-admin-image-slot-label">Front <span className="catalog-admin-hint">(optional)</span></label>
+                        <label className="catalog-admin-image-pick">
+                          {catalogAdminFrontImageFile
+                            ? <><span className="catalog-admin-image-pick-name">{catalogAdminFrontImageFile.name}</span><span className="catalog-admin-image-pick-change">Change</span></>
+                            : <><span className="catalog-admin-image-pick-icon">+</span><span>Add front image</span></>
+                          }
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { setCatalogAdminFrontImageFile(e.target.files?.[0] || null); e.target.value = '' }} />
+                        </label>
+                        {catalogAdminFrontImageFile && <button type="button" className="catalog-admin-inline-cancel" style={{ marginTop: 4 }} onClick={() => setCatalogAdminFrontImageFile(null)}>Remove</button>}
+                      </div>
+                      <div>
+                        <label className="catalog-admin-image-slot-label">Back <span className="catalog-admin-hint">(optional)</span></label>
+                        <label className="catalog-admin-image-pick">
+                          {catalogAdminBackImageFile
+                            ? <><span className="catalog-admin-image-pick-name">{catalogAdminBackImageFile.name}</span><span className="catalog-admin-image-pick-change">Change</span></>
+                            : <><span className="catalog-admin-image-pick-icon">+</span><span>Add back image</span></>
+                          }
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { setCatalogAdminBackImageFile(e.target.files?.[0] || null); e.target.value = '' }} />
+                        </label>
+                        {catalogAdminBackImageFile && <button type="button" className="catalog-admin-inline-cancel" style={{ marginTop: 4 }} onClick={() => setCatalogAdminBackImageFile(null)}>Remove</button>}
+                      </div>
+                    </div>
 
                     {catalogAdminFormError && <p className="catalog-admin-error">{catalogAdminFormError}</p>}
 
-                    <button type="submit" className="catalog-action-pill catalog-admin-submit" disabled={isCreatingCatalogItem}>
-                      {isCreatingCatalogItem ? t('creatingItemAction') : t('createItemAction')}
-                    </button>
+                    <div className="catalog-admin-form-footer">
+                      <button type="button" className="catalog-action-pill catalog-admin-submit" disabled={isCreatingCatalogItem} onClick={() => handleCreateCatalogItemInApp('another')}>
+                        {isCreatingCatalogItem ? '…' : '+ Add Another'}
+                      </button>
+                      <button type="button" className="catalog-action-pill catalog-admin-submit catalog-admin-submit-finish" disabled={isCreatingCatalogItem} onClick={() => handleCreateCatalogItemInApp('finish')}>
+                        {isCreatingCatalogItem ? 'Saving…' : 'Finish'}
+                      </button>
+                    </div>
                   </form>
                 </section>
               </div>
@@ -9740,6 +9970,11 @@ function App() {
                     </p>
                   </div>
                   <div className="catalog-detail-actions">
+                    {isPlatformAdmin && !isCatalogItemEditMode && (
+                      <button type="button" className="catalog-detail-btn catalog-detail-btn-edit" onClick={handleOpenCatalogItemEdit}>
+                        Edit Item
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="catalog-detail-btn catalog-detail-btn-collect"
@@ -9753,6 +9988,133 @@ function App() {
                     </a>
                   </div>
                 </header>
+
+                {isCatalogItemEditMode && (
+                  <section className="catalog-card catalog-detail-section catalog-item-edit-panel">
+                    <div className="catalog-item-edit-header">
+                      <h3>Edit Item</h3>
+                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
+                    </div>
+                    {catalogItemEditError && <p className="catalog-admin-form-error">{catalogItemEditError}</p>}
+                    <div className="catalog-item-edit-grid">
+                      {[
+                        ['Category',       'category_id',          catalogCategories,               false],
+                        ['Subcategory',     'subcategory_id',       catalogSubcategories,            false],
+                        ['Franchise',       'franchise_id',         catalogItemEditLookups.franchises, false],
+                        ['Brand',           'brand_id',             catalogBrands,                    false],
+                        ['Collectible Set', 'collectible_set_id',   catalogItemEditLookups.sets,      false],
+                        ['Subset',          'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
+                        ['Print Type',      'print_type_id',        catalogItemEditLookups.printTypes, false],
+                      ].map(([label, field, options, upper]) => (
+                        <label key={field} className="catalog-item-edit-field">
+                          <span>{label}</span>
+                          <select value={catalogItemEditValues[field] || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, [field]: e.target.value }))} style={upper ? { textTransform: 'uppercase' } : {}}>
+                            <option value="">— None —</option>
+                            {(options || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                          </select>
+                        </label>
+                      ))}
+                      <div className="catalog-item-edit-field">
+                        <span>Subject</span>
+                        {catalogItemEditValues.subject_id ? (
+                          <div className="catalog-admin-subject-selected">
+                            <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{catalogItemEditSubjectSearch}</span>
+                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogItemEditValues(v => ({ ...v, subject_id: '' })); setCatalogItemEditSubjectSearch(''); setCatalogItemEditSubjectResults([]) }}>✕ Clear</button>
+                          </div>
+                        ) : (
+                          <div className="catalog-admin-subject-search-wrap">
+                            <input className="catalog-admin-inline-input" style={{ width: '100%' }} placeholder="Search all subjects…" value={catalogItemEditSubjectSearch} onChange={e => setCatalogItemEditSubjectSearch(e.target.value)} autoComplete="off" />
+                            {catalogItemEditSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
+                            {catalogItemEditSubjectResults.length > 0 && (
+                              <div className="catalog-admin-subject-results">
+                                {catalogItemEditSubjectResults.map(s => (
+                                  <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogItemEditSelectSubject(s)}>
+                                    <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                    <span className="catalog-admin-hint"> · {s.type}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <label className="catalog-item-edit-field">
+                        <span>Card Number</span>
+                        <input type="text" value={catalogItemEditValues.card_number || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, card_number: e.target.value }))} />
+                      </label>
+                      <label className="catalog-item-edit-field">
+                        <span>Print Count</span>
+                        <input type="number" min="1" value={catalogItemEditValues.print_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, print_count: e.target.value }))} />
+                      </label>
+                      <label className="catalog-item-edit-field catalog-item-edit-field--wide">
+                        <span>Description</span>
+                        <textarea rows={3} value={catalogItemEditValues.description || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, description: e.target.value }))} />
+                      </label>
+                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
+                        <span>Teams / Affiliation</span>
+                        {catalogItemEditLookups.teams.length > 0 ? (
+                          <div className="catalog-admin-team-list">
+                            {catalogItemEditLookups.teams.map(t => (
+                              <label key={t.id} className="catalog-admin-team-checkbox">
+                                <input type="checkbox" checked={catalogItemEditTeamIds.includes(t.id)} onChange={e => setCatalogItemEditTeamIds(prev => e.target.checked ? [...prev, t.id] : prev.filter(id => id !== t.id))} />
+                                <span style={{ textTransform: 'uppercase' }}>{t.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>{catalogItemEditValues.franchise_id ? 'No teams in this franchise' : 'Select a franchise to see teams'}</p>
+                        )}
+                      </div>
+                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
+                        <span>Card Types <span className="catalog-admin-hint">(none = Normal)</span></span>
+                        {catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal').length > 0 ? (
+                          <div className="catalog-admin-team-list">
+                            {catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal').map(ct => (
+                              <label key={ct.id} className="catalog-admin-team-checkbox">
+                                <input type="checkbox" checked={catalogItemEditCardTypeIds.includes(ct.id)}
+                                  onChange={e => setCatalogItemEditCardTypeIds(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))} />
+                                <span>{ct.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No special card types defined.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="catalog-item-edit-images">
+                      <p className="catalog-item-edit-images-label">Images</p>
+                      <div className="catalog-item-edit-image-slots">
+                        {[{ label: 'Front', position: 0 }, { label: 'Back', position: 1 }].map(({ label, position }) => {
+                          const img = catalogItemImages.find(i => i.position === position)
+                          const urlData = img ? supabase.storage.from('item-images').getPublicUrl(img.image_path).data : null
+                          return (
+                            <div key={position} className="catalog-item-edit-image-slot">
+                              <span className="catalog-item-edit-image-slot-label">{label}</span>
+                              {img ? (
+                                <div className="catalog-item-edit-image-wrap">
+                                  <img src={urlData.publicUrl} alt={label} className="catalog-detail-item-image" />
+                                  <button type="button" className="catalog-item-edit-image-delete" onClick={() => handleDeleteCatalogItemImage(img)} title={`Remove ${label}`} disabled={isUploadingCatalogItemImage}>✕</button>
+                                </div>
+                              ) : (
+                                <label className="catalog-item-edit-image-upload">
+                                  {isUploadingCatalogItemImage ? <span>Uploading…</span> : <><span className="catalog-item-edit-upload-icon">+</span><span>Add {label}</span></>}
+                                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={isUploadingCatalogItemImage} onChange={e => { if (e.target.files?.[0]) handleUploadCatalogItemImage(e.target.files[0], position); e.target.value = '' }} />
+                                </label>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div className="catalog-item-edit-footer">
+                      <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={isSavingCatalogItem} onClick={handleSaveCatalogItem}>
+                        {isSavingCatalogItem ? 'Saving…' : 'Save Changes'}
+                      </button>
+                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
+                    </div>
+                  </section>
+                )}
 
                 <section className="catalog-detail-market-card">
                   <div className={`catalog-detail-market-image-wrap${isPsaActive ? ' psa-slab-wrap' : ''}${isBgsActive ? ` bgs-slab-wrap${isBgsBlackLabel ? ' bgs-black-label-wrap' : ''}` : ''}${isCgcActive ? ' cgc-slab-wrap' : ''}${isTAGActive ? ' tag-slab-wrap' : ''}`}>
@@ -10131,6 +10493,11 @@ function App() {
                   </div>
                 </section>
 
+                {/* ── Description band ── */}
+                <section className="catalog-detail-description-band">
+                  <p>{selectedCatalogItem._details?.description || selectedCatalogItem.description || 'N/A'}</p>
+                </section>
+
                 <section className="catalog-detail-grid">
                   <article className="catalog-card catalog-detail-section">
                     <h3>Available Listings on CollectorsHub</h3>
@@ -10269,6 +10636,57 @@ function App() {
                     })
                   )}
                 </section>
+
+                {/* ── Item images ── */}
+                {catalogItemImages.length > 0 && (
+                  <section className="catalog-card catalog-detail-section catalog-detail-images-section">
+                    <h3>Card Images</h3>
+                    <div className="catalog-detail-images-row">
+                      {catalogItemImages.map((img) => {
+                        const { data: urlData } = supabase.storage.from('item-images').getPublicUrl(img.image_path)
+                        return (
+                          <img
+                            key={img.item_image_id}
+                            src={urlData.publicUrl}
+                            alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
+                            className="catalog-detail-item-image"
+                          />
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {/* ── Full card information ── */}
+                {selectedCatalogItem._details && (
+                  <section className="catalog-card catalog-detail-section catalog-detail-card-info">
+                    <h3>Full Card Information</h3>
+                    <div className="catalog-detail-card-info-grid">
+                      {[
+                        ['Category',          selectedCatalogItem._details.category],
+                        ['Subcategory',        selectedCatalogItem._details.subcategory],
+                        ['Franchise',          selectedCatalogItem._details.franchise],
+                        ['Brand',              selectedCatalogItem._details.brand],
+                        ['Collectible Set',    selectedCatalogItem._details.collectible_set],
+                        ['Release Year',       selectedCatalogItem._details.release_year ?? 'N/A'],
+                        ['Subset',             selectedCatalogItem._details.subcollectible_set],
+                        ['Subject',            selectedCatalogItem._details.subject],
+                        ['Subject Type',       selectedCatalogItem._details.subject_type],
+                        ['Species',            selectedCatalogItem._details.species],
+                        ['Team(s)',            selectedCatalogItem._details.teams],
+                        ['Print Type',         selectedCatalogItem._details.print_type],
+                        ['Card Type',          selectedCatalogItem._details.card_type],
+                        ['Card Number',        selectedCatalogItem._details.card_number],
+                        ['Print Count',        selectedCatalogItem._details.print_count ?? 'N/A'],
+                      ].map(([label, value]) => (
+                        <div key={label} className="catalog-detail-info-cell">
+                          <span className="catalog-detail-info-label">{label}</span>
+                          <span className="catalog-detail-info-value">{value ?? 'N/A'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 <div className="catalog-detail-cartbar">
                   <button type="button" className="catalog-detail-cartbtn">Add to Cart</button>

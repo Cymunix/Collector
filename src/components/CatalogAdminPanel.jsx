@@ -55,18 +55,19 @@ function SubcategoryTab({ categories }) {
 
   useEffect(() => {
     if (!categoryId) { setItems([]); return }
-    supabase.from('catalog_subcategories').select('id, name').eq('category_id', categoryId).eq('is_active', true).order('name')
-      .then(({ data }) => setItems(data || []))
+    supabase.from('subcategories').select('subcategory_id, name').eq('category_id', categoryId).order('name')
+      .then(({ data }) => setItems((data || []).map(r => ({ id: r.subcategory_id, name: r.name }))))
   }, [categoryId])
 
   const save = async () => {
     if (!name.trim() || !categoryId) return
     setSaving(true); setError(''); setSuccess('')
-    const { data, error: err } = await supabase.from('catalog_subcategories')
-      .insert({ name: name.trim(), category_id: categoryId, is_active: true })
-      .select('id').single()
+    const { data, error: err } = await supabase.from('subcategories')
+      .insert({ name: name.trim(), category_id: categoryId })
+      .select('subcategory_id')
+      .single()
     if (err) { setError(err.message || 'Could not create subcategory.'); setSaving(false); return }
-    setItems(prev => [...prev, { id: data.id, name: name.trim() }].sort((a, b) => a.name.localeCompare(b.name)))
+    setItems(prev => [...prev, { id: data.subcategory_id, name: name.trim() }].sort((a, b) => a.name.localeCompare(b.name)))
     setSuccess(`"${name.trim()}" created.`)
     setName('')
     setSaving(false)
@@ -84,8 +85,8 @@ function SubcategoryTab({ categories }) {
         </FormRow>
         <div style={{ marginTop: 14 }}>
           <FormRow label="Subcategory Name">
-            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Pokémon" style={s.fld}
-              onKeyDown={e => e.key === 'Enter' && save()} />
+            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Pokémon"
+              style={s.fld} onKeyDown={e => e.key === 'Enter' && save()} />
           </FormRow>
         </div>
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -110,26 +111,35 @@ function SubcategoryTab({ categories }) {
 
 // ── Franchise Tab ─────────────────────────────────────────────────────────────
 function FranchiseTab() {
-  const [name, setName]     = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
+  const [name, setName]       = useState('')
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
   const [success, setSuccess] = useState('')
-  const [items, setItems]   = useState([])
+  const [items, setItems]     = useState([])
 
   useEffect(() => {
-    supabase.from('catalog_franchise').select('id, name').eq('is_active', true).order('name')
-      .then(({ data }) => setItems(data || []))
+    supabase.from('franchises').select('franchise_id, name').order('name')
+      .then(({ data, error }) => {
+        if (error) console.error('franchises load error:', error)
+        setItems((data || []).map(r => ({ id: r.franchise_id, name: r.name })))
+      })
   }, [])
 
   const save = async () => {
     if (!name.trim()) return
     setSaving(true); setError(''); setSuccess('')
-    const { data, error: err } = await supabase.from('catalog_franchise')
-      .insert({ name: name.trim(), is_active: true })
-      .select('id').single()
-    if (err) { setError(err.message || 'Could not create franchise.'); setSaving(false); return }
-    setItems(prev => [...prev, { id: data.id, name: name.trim() }].sort((a, b) => a.name.localeCompare(b.name)))
-    setSuccess(`"${name.trim()}" created.`)
+    const { data, error: err } = await supabase.from('franchises')
+      .insert({ name: name.trim() })
+      .select('franchise_id, name')
+      .single()
+    if (err) {
+      console.error('franchises insert error:', err)
+      setError(err.message || 'Could not create franchise.')
+      setSaving(false)
+      return
+    }
+    setItems(prev => [...prev, { id: data.franchise_id, name: data.name }].sort((a, b) => a.name.localeCompare(b.name)))
+    setSuccess(`"${data.name}" created.`)
     setName('')
     setSaving(false)
   }
@@ -139,7 +149,7 @@ function FranchiseTab() {
       <div style={s.card}>
         <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 14px', fontSize: '0.9rem' }}>Create Franchise</p>
         <FormRow label="Franchise Name">
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. The Pokémon Company"
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. NFL"
             style={s.fld} onKeyDown={e => e.key === 'Enter' && save()} />
         </FormRow>
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -163,47 +173,36 @@ function FranchiseTab() {
 }
 
 // ── Collectible Set Tab ───────────────────────────────────────────────────────
-function CollectibleSetTab({ categories }) {
-  const [categoryId,    setCategoryId]    = useState('')
-  const [subcategoryId, setSubcategoryId] = useState('')
-  const [franchiseId,   setFranchiseId]   = useState('')
-  const [name,          setName]          = useState('')
-  const [saving,        setSaving]        = useState(false)
-  const [error,         setError]         = useState('')
-  const [success,       setSuccess]       = useState('')
-  const [subcategories, setSubcategories] = useState([])
-  const [franchises,    setFranchises]    = useState([])
-  const [items,         setItems]         = useState([])
+// collectible_sets: collectible_set_id, name, brand_id → brands
+function CollectibleSetTab() {
+  const [brandId,  setBrandId]  = useState('')
+  const [name,     setName]     = useState('')
+  const [saving,   setSaving]   = useState(false)
+  const [error,    setError]    = useState('')
+  const [success,  setSuccess]  = useState('')
+  const [brands,   setBrands]   = useState([])
+  const [items,    setItems]    = useState([])
 
   useEffect(() => {
-    if (!categoryId) { setSubcategories([]); setSubcategoryId(''); return }
-    supabase.from('catalog_subcategories').select('id, name').eq('category_id', categoryId).eq('is_active', true).order('name')
-      .then(({ data }) => setSubcategories(data || []))
-  }, [categoryId])
-
-  useEffect(() => {
-    supabase.from('catalog_franchise').select('id, name').eq('is_active', true).order('name')
-      .then(({ data }) => setFranchises(data || []))
+    supabase.from('brands').select('brand_id, name').order('name')
+      .then(({ data }) => setBrands((data || []).map(r => ({ id: r.brand_id, name: r.name }))))
   }, [])
 
   useEffect(() => {
-    if (!subcategoryId) { setItems([]); return }
-    supabase.from('collectible_sets').select('id, set_name').eq('subcategory_id', subcategoryId).eq('is_active', true).order('set_name')
-      .then(({ data }) => setItems(data || []))
-  }, [subcategoryId])
+    supabase.from('collectible_sets').select('collectible_set_id, name').order('name')
+      .then(({ data }) => setItems((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
+  }, [])
 
   const save = async () => {
-    if (!name.trim() || !categoryId || !subcategoryId) return
+    if (!name.trim()) return
     setSaving(true); setError(''); setSuccess('')
-    const { data: newId, error: err } = await supabase.rpc('upsert_catalog_collectible_set', {
-      p_category_id:    categoryId,
-      p_subcategory_id: subcategoryId,
-      p_set_name:       name.trim(),
-      p_franchise_id:   franchiseId || null,
-    })
+    const { data, error: err } = await supabase.from('collectible_sets')
+      .insert({ name: name.trim(), brand_id: brandId || null })
+      .select('collectible_set_id, name')
+      .single()
     if (err) { setError(err.message || 'Could not create collectible set.'); setSaving(false); return }
-    setItems(prev => [...prev, { id: newId, set_name: name.trim() }].sort((a, b) => a.set_name.localeCompare(b.set_name)))
-    setSuccess(`"${name.trim()}" created.`)
+    setItems(prev => [...prev, { id: data.collectible_set_id, name: data.name }].sort((a, b) => a.name.localeCompare(b.name)))
+    setSuccess(`"${data.name}" created.`)
     setName('')
     setSaving(false)
   }
@@ -213,30 +212,18 @@ function CollectibleSetTab({ categories }) {
       <div style={s.card}>
         <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 14px', fontSize: '0.9rem' }}>Create Collectible Set</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <FormRow label="Category">
-            <select value={categoryId} onChange={e => { setCategoryId(e.target.value); setSubcategoryId(''); setSuccess('') }} style={s.fld}>
-              <option value="">Select category…</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Subcategory">
-            <select value={subcategoryId} onChange={e => { setSubcategoryId(e.target.value); setSuccess('') }} style={s.fld} disabled={!categoryId}>
-              <option value="">Select subcategory…</option>
-              {subcategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Franchise (optional)">
-            <select value={franchiseId} onChange={e => setFranchiseId(e.target.value)} style={s.fld}>
+          <FormRow label="Brand (optional)">
+            <select value={brandId} onChange={e => { setBrandId(e.target.value); setSuccess('') }} style={s.fld}>
               <option value="">None</option>
-              {franchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </FormRow>
           <FormRow label="Set Name">
-            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Scarlet & Violet" style={s.fld} onKeyDown={e => e.key === 'Enter' && save()} />
+            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. 2024 Panini Prizm" style={s.fld} onKeyDown={e => e.key === 'Enter' && save()} />
           </FormRow>
         </div>
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || !categoryId || !subcategoryId || saving}>
+          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || saving}>
             {saving ? 'Saving…' : 'Create Set'}
           </button>
           <Feedback error={error} success={success} />
@@ -245,9 +232,9 @@ function CollectibleSetTab({ categories }) {
 
       {items.length > 0 && (
         <div style={s.card}>
-          <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 12px', fontSize: '0.9rem' }}>Sets in Selected Subcategory</p>
+          <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 12px', fontSize: '0.9rem' }}>Existing Collectible Sets</p>
           <div style={s.list}>
-            {items.map(i => <div key={i.id} style={s.listRow}>{i.set_name}</div>)}
+            {items.map(i => <div key={i.id} style={s.listRow}>{i.name}</div>)}
           </div>
         </div>
       )}
@@ -256,38 +243,26 @@ function CollectibleSetTab({ categories }) {
 }
 
 // ── Collectible Subset Tab ────────────────────────────────────────────────────
-function CollectibleSubsetTab({ categories }) {
-  const [categoryId,    setCategoryId]    = useState('')
-  const [subcategoryId, setSubcategoryId] = useState('')
-  const [parentSetId,   setParentSetId]   = useState('')
-  const [name,          setName]          = useState('')
-  const [saving,        setSaving]        = useState(false)
-  const [error,         setError]         = useState('')
-  const [success,       setSuccess]       = useState('')
-  const [subcategories, setSubcategories] = useState([])
-  const [parentSets,    setParentSets]    = useState([])
+// subcollectible_sets: subcollectble_set_id (note: intentional typo), collectible_set_id, name
+function CollectibleSubsetTab() {
+  const [parentSetId, setParentSetId] = useState('')
+  const [name,        setName]        = useState('')
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState('')
+  const [success,     setSuccess]     = useState('')
+  const [parentSets,  setParentSets]  = useState([])
 
   useEffect(() => {
-    if (!categoryId) { setSubcategories([]); setSubcategoryId(''); return }
-    supabase.from('catalog_subcategories').select('id, name').eq('category_id', categoryId).eq('is_active', true).order('name')
-      .then(({ data }) => setSubcategories(data || []))
-  }, [categoryId])
-
-  useEffect(() => {
-    if (!subcategoryId) { setParentSets([]); setParentSetId(''); return }
-    supabase.from('collectible_sets').select('id, set_name').eq('subcategory_id', subcategoryId).eq('is_active', true).order('set_name')
-      .then(({ data }) => setParentSets(data || []))
-  }, [subcategoryId])
+    supabase.from('collectible_sets').select('collectible_set_id, name').order('name')
+      .then(({ data }) => setParentSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
+  }, [])
 
   const save = async () => {
-    if (!name.trim() || !categoryId || !subcategoryId || !parentSetId) return
+    if (!name.trim() || !parentSetId) return
     setSaving(true); setError(''); setSuccess('')
-    const { error: err } = await supabase.from('collectible_sets').insert({
-      set_name:       name.trim(),
-      category_id:    categoryId,
-      subcategory_id: subcategoryId,
-      franchise_id:   parentSetId,
-      is_active:      true,
+    const { error: err } = await supabase.from('subcollectible_sets').insert({
+      name:               name.trim(),
+      collectible_set_id: parentSetId,
     })
     if (err) { setError(err.message || 'Could not create subset.'); setSaving(false); return }
     setSuccess(`"${name.trim()}" created as a subset.`)
@@ -306,22 +281,10 @@ function CollectibleSubsetTab({ categories }) {
       <div style={s.card}>
         <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 14px', fontSize: '0.9rem' }}>Create Collectible Subset</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <FormRow label="Category">
-            <select value={categoryId} onChange={e => { setCategoryId(e.target.value); setSubcategoryId(''); setParentSetId(''); setSuccess('') }} style={s.fld}>
-              <option value="">Select category…</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </FormRow>
-          <FormRow label="Subcategory">
-            <select value={subcategoryId} onChange={e => { setSubcategoryId(e.target.value); setParentSetId(''); setSuccess('') }} style={s.fld} disabled={!categoryId}>
-              <option value="">Select subcategory…</option>
-              {subcategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </FormRow>
           <FormRow label="Parent Set">
-            <select value={parentSetId} onChange={e => setParentSetId(e.target.value)} style={s.fld} disabled={!subcategoryId}>
+            <select value={parentSetId} onChange={e => { setParentSetId(e.target.value); setSuccess('') }} style={s.fld}>
               <option value="">Select parent set…</option>
-              {parentSets.map(p => <option key={p.id} value={p.id}>{p.set_name}</option>)}
+              {parentSets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </FormRow>
           <FormRow label="Subset Name">
@@ -329,7 +292,7 @@ function CollectibleSubsetTab({ categories }) {
           </FormRow>
         </div>
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || !categoryId || !subcategoryId || !parentSetId || saving}>
+          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || !parentSetId || saving}>
             {saving ? 'Saving…' : 'Create Subset'}
           </button>
           <Feedback error={error} success={success} />
@@ -361,8 +324,8 @@ export default function CatalogAdminPanel({ categories = [], onClose }) {
 
         {activeTab === 'subcategory' && <SubcategoryTab categories={categories} />}
         {activeTab === 'franchise'   && <FranchiseTab />}
-        {activeTab === 'set'         && <CollectibleSetTab categories={categories} />}
-        {activeTab === 'subset'      && <CollectibleSubsetTab categories={categories} />}
+        {activeTab === 'set'         && <CollectibleSetTab />}
+        {activeTab === 'subset'      && <CollectibleSubsetTab />}
       </div>
     </div>
   )

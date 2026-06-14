@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { page, card, fld, btnPrimary, btnSecondary, PageHeader, StatCard, SectionLabel, EmptyState, Badge, STATUS_STYLES, Th, Td } from './shared'
 
@@ -20,22 +20,64 @@ export default function InventoryScreen() {
   const [total,      setTotal]      = useState(0)
   const PAGE_SIZE = 20
 
+  const lookupRef = useRef({ subjectMap: {}, setMap: {}, printTypeMap: {} })
+
+  useEffect(() => {
+    const loadLookups = async () => {
+      const [{ data: subjects }, { data: sets }, { data: printTypes }] = await Promise.all([
+        supabase.from('subjects').select('subject_id, subject_name'),
+        supabase.from('collectible_sets').select('collectible_set_id, name'),
+        supabase.from('print_types').select('print_type_id, name'),
+      ])
+      lookupRef.current = {
+        subjectMap:   Object.fromEntries((subjects   || []).map(r => [r.subject_id,          r.subject_name])),
+        setMap:       Object.fromEntries((sets        || []).map(r => [r.collectible_set_id,  r.name])),
+        printTypeMap: Object.fromEntries((printTypes  || []).map(r => [r.print_type_id,       r.name])),
+      }
+    }
+    loadLookups()
+  }, [])
+
   useEffect(() => {
     const load = async () => {
       setIsLoading(true)
+      let playerIds = null
+      if (search.trim().length >= 2) {
+        const { data: matchingPlayers } = await supabase
+          .from('subjects')
+          .select('subject_id')
+          .ilike('subject_name', `%${search.trim()}%`)
+        playerIds = (matchingPlayers || []).map(p => p.subject_id)
+      }
+
       let q = supabase
-        .from('catalog_items')
-        .select('id, name, release_year, metadata, dynamic_fields', { count: 'exact' })
-        .eq('is_active', true)
-        .order('name')
+        .from('items')
+        .select('item_id, card_number, print_count, description, subject_id, collectible_set_id, print_type_id', { count: 'exact' })
+        .order('card_number')
         .range((page_ - 1) * PAGE_SIZE, page_ * PAGE_SIZE - 1)
 
-      if (search.trim().length >= 2) {
-        q = q.ilike('name', `%${search.trim()}%`)
+      if (playerIds !== null) {
+        if (playerIds.length === 0) {
+          setItems([])
+          setTotal(0)
+          setIsLoading(false)
+          return
+        }
+        q = q.in('subject_id', playerIds)
       }
 
       const { data, count } = await q
-      setItems(data || [])
+      const { subjectMap, setMap, printTypeMap } = lookupRef.current
+      const buildName = (item) => {
+        const parts = [
+          subjectMap[item.subject_id],
+          setMap[item.collectible_set_id],
+          printTypeMap[item.print_type_id],
+          item.card_number ? `#${item.card_number}` : null,
+        ].filter(Boolean)
+        return parts.join(' — ') || item.description || 'Unknown Item'
+      }
+      setItems((data || []).map(item => ({ ...item, id: item.item_id, name: buildName(item) })))
       setTotal(count || 0)
       setIsLoading(false)
     }
@@ -43,7 +85,7 @@ export default function InventoryScreen() {
     return () => clearTimeout(t)
   }, [search, page_])
 
-  const displayed = condFilter === 'All' ? items : items.filter(i => i.dynamic_fields?.condition === condFilter)
+  const displayed = items
 
   const inStock  = items.length
   const lowStock = 0
