@@ -1567,6 +1567,21 @@ function App() {
   const [catalogFranchises, setCatalogFranchises] = useState([])
   const [catalogFranchiseBrands, setCatalogFranchiseBrands] = useState([])
   const [catalogBrands, setCatalogBrands] = useState([])
+  const [catalogBrandId, setCatalogBrandId] = useState('')
+  const [catalogTeamId, setCatalogTeamId] = useState('')
+  const [catalogSetId, setCatalogSetId] = useState('')
+  const [catalogSubsetId, setCatalogSubsetId] = useState('')
+  const [catalogPrintTypeId, setCatalogPrintTypeId] = useState('')
+  const [catalogCardTypeId, setCatalogCardTypeId] = useState('')
+  const [catalogSubjectId, setCatalogSubjectId] = useState('')
+  const [catalogSubjectSearch, setCatalogSubjectSearch] = useState('')
+  const [catalogSubjectResults, setCatalogSubjectResults] = useState([])
+  const [catalogSubjectSearching, setCatalogSubjectSearching] = useState(false)
+  const [catalogAllCardTypes, setCatalogAllCardTypes] = useState([])
+  const [catalogTeams, setCatalogTeams] = useState([])
+  const [catalogSets, setCatalogSets] = useState([])
+  const [catalogSubsets, setCatalogSubsets] = useState([])
+  const [catalogPrintTypes, setCatalogPrintTypes] = useState([])
   const [isCatalogLoading, setIsCatalogLoading] = useState(false)
   const [catalogLoadError, setCatalogLoadError] = useState('')
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
@@ -2399,40 +2414,24 @@ function App() {
     loadPlans()
   }, [currentScreen])
 
+  // Effect A: stable lookups — categories, subcategories, brands, card types
   useEffect(() => {
-    const loadCatalogScreenData = async () => {
-      if (currentScreen !== 'catalog') {
-        return
-      }
+    if (currentScreen !== 'catalog') return
+    Promise.all([
+      supabase.from('categories').select('category_id, name').order('name'),
+      supabase.from('subcategories').select('subcategory_id, name, category_id').order('name'),
+      supabase.from('brands').select('brand_id, name').order('name'),
+      supabase.from('card_types').select('card_type_id, name').order('name'),
+    ]).then(([cats, subs, brands, cts]) => {
+      if (cats.error) console.error('catalog categories load error:', cats.error)
+      setCatalogCategories((cats.data || []).map(r => ({ id: r.category_id, name: r.name })))
+      setCatalogSubcategories((subs.data || []).map(r => ({ id: r.subcategory_id, name: r.name, category_id: r.category_id })))
+      setCatalogBrands((brands.data || []).map(r => ({ id: r.brand_id, name: r.name })))
+      setCatalogAllCardTypes((cts.data || []).map(r => ({ id: r.card_type_id, name: r.name })))
+    })
+  }, [currentScreen, catalogReloadToken])
 
-      const [categoriesResult, subcategoriesResult, franchisesResult, brandsResult] = await Promise.all([
-        supabase.from('categories').select('category_id, name').order('name'),
-        supabase.from('subcategories').select('subcategory_id, name, category_id').order('name'),
-        supabase.from('franchises').select('franchise_id, name').order('name'),
-        supabase.from('brands').select('brand_id, name').order('name'),
-      ])
-
-      const firstError = categoriesResult.error || subcategoriesResult.error || franchisesResult.error || brandsResult.error
-      if (firstError) {
-        console.error('Catalog screen data load error:', firstError)
-        setCatalogCategories([])
-        setCatalogSubcategories([])
-        setCatalogFranchises([])
-        setCatalogFranchiseBrands([])
-        setCatalogBrands([])
-        return
-      }
-
-      setCatalogCategories((categoriesResult.data || []).map(r => ({ id: r.category_id, name: r.name })))
-      setCatalogSubcategories((subcategoriesResult.data || []).map(r => ({ id: r.subcategory_id, name: r.name, category_id: r.category_id })))
-      setCatalogFranchises([])
-      setCatalogFranchiseBrands((franchisesResult.data || []).map(r => ({ id: r.franchise_id, name: r.name })))
-      setCatalogBrands((brandsResult.data || []).map(r => ({ id: r.brand_id, name: r.name })))
-    }
-
-    loadCatalogScreenData()
-  }, [catalogReloadToken, currentScreen])
-
+  // Effect B: franchise cascade from subcategory via franchise_subcategory
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const subcategoryId = selectedCatalogSubcategoryRecord?.id
@@ -2441,6 +2440,11 @@ function App() {
         .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
       return
     }
+    setCatalogFranchise('all')
+    setCatalogTeamId('')
+    setCatalogSetId('')
+    setCatalogSubsetId('')
+    setCatalogPrintTypeId('')
     supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
       .then(({ data: fsRows }) => {
         const ids = (fsRows || []).map(r => r.franchise_id)
@@ -2449,6 +2453,73 @@ function App() {
           .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
       })
   }, [currentScreen, selectedCatalogSubcategoryRecord])
+
+  // Effect C: team + set cascade from franchise (set also depends on brand)
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const franchiseId = selectedCatalogFranchiseRecord?.id
+    if (!franchiseId) {
+      setCatalogTeams([])
+      setCatalogSets([])
+      setCatalogSubsets([])
+      setCatalogPrintTypes([])
+      return
+    }
+    setCatalogTeamId('')
+    setCatalogSetId('')
+    setCatalogSubsetId('')
+    setCatalogPrintTypeId('')
+    supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
+      .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
+    let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
+    if (catalogBrandId) setQ = setQ.eq('brand_id', catalogBrandId)
+    setQ.then(({ data }) => setCatalogSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
+  }, [currentScreen, selectedCatalogFranchiseRecord, catalogBrandId])
+
+  // Effect D: subcollectible set cascade from collectible set
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    if (!catalogSetId) {
+      setCatalogSubsets([])
+      setCatalogSubsetId('')
+      setCatalogPrintTypes([])
+      setCatalogPrintTypeId('')
+      return
+    }
+    setCatalogSubsetId('')
+    setCatalogPrintTypeId('')
+    supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', catalogSetId).order('name')
+      .then(({ data }) => setCatalogSubsets((data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))))
+  }, [currentScreen, catalogSetId])
+
+  // Effect E: print type cascade from subcollectible set
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    if (!catalogSubsetId) {
+      setCatalogPrintTypes([])
+      setCatalogPrintTypeId('')
+      return
+    }
+    setCatalogPrintTypeId('')
+    supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', catalogSubsetId).order('name')
+      .then(({ data }) => setCatalogPrintTypes((data || []).map(r => ({ id: r.print_type_id, name: r.name }))))
+  }, [currentScreen, catalogSubsetId])
+
+  // Effect F: subject typeahead search
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const q = catalogSubjectSearch.trim()
+    if (catalogSubjectId || q.length < 2) { setCatalogSubjectResults([]); return }
+    setCatalogSubjectSearching(true)
+    const timer = setTimeout(() => {
+      supabase.from('subjects').select('subject_id, subject_name').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        .then(({ data }) => {
+          setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
+          setCatalogSubjectSearching(false)
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [currentScreen, catalogSubjectSearch, catalogSubjectId])
 
   useEffect(() => {
     const loadCatalogItems = async () => {
@@ -2473,6 +2544,39 @@ function App() {
       }
       if (selectedCatalogFranchiseRecord) {
         itemsQuery = itemsQuery.eq('franchise_id', selectedCatalogFranchiseRecord.id)
+      }
+      if (catalogBrandId) {
+        itemsQuery = itemsQuery.eq('brand_id', catalogBrandId)
+      }
+      if (catalogSetId) {
+        itemsQuery = itemsQuery.eq('collectible_set_id', catalogSetId)
+      }
+      if (catalogSubsetId) {
+        itemsQuery = itemsQuery.eq('subcollectble_set_id', catalogSubsetId)
+      }
+      if (catalogPrintTypeId) {
+        itemsQuery = itemsQuery.eq('print_type_id', catalogPrintTypeId)
+      }
+      if (catalogSubjectId) {
+        itemsQuery = itemsQuery.eq('subject_id', catalogSubjectId)
+      }
+      // M2M: team — pre-query item_ids from item_teams
+      if (catalogTeamId) {
+        const { data: teamRows } = await supabase.from('item_teams').select('item_id').eq('team_id', catalogTeamId)
+        const teamItemIds = (teamRows || []).map(r => r.item_id)
+        if (!teamItemIds.length) {
+          setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
+        }
+        itemsQuery = itemsQuery.in('item_id', teamItemIds)
+      }
+      // M2M: card type — pre-query item_ids from item_card_types
+      if (catalogCardTypeId) {
+        const { data: ctRows } = await supabase.from('item_card_types').select('item_id').eq('card_type_id', catalogCardTypeId)
+        const ctItemIds = (ctRows || []).map(r => r.item_id)
+        if (!ctItemIds.length) {
+          setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
+        }
+        itemsQuery = itemsQuery.in('item_id', ctItemIds)
       }
       if (queryText) {
         const escapedText = queryText.replace(/[%_]/g, '\\$&')
@@ -2553,14 +2657,21 @@ function App() {
 
     loadCatalogItems()
   }, [
+    catalogBrandId,
+    catalogCardTypeId,
     catalogCategory,
     catalogFranchise,
     catalogMaxYear,
     catalogMinYear,
     catalogPage,
+    catalogPrintTypeId,
     catalogReloadToken,
+    catalogSetId,
     catalogSortKey,
     catalogSubcategory,
+    catalogSubjectId,
+    catalogSubsetId,
+    catalogTeamId,
     currentScreen,
     selectedCatalogCategoryRecord,
     selectedCatalogFranchiseRecord,
@@ -2575,13 +2686,11 @@ function App() {
       setCatalogFranchise('all')
       return
     }
-
     if (catalogSubcategory && !catalogSubcategoryOptions.includes(catalogSubcategory)) {
       setCatalogSubcategory('')
       setCatalogFranchise('all')
       return
     }
-
     if (catalogFranchise !== 'all' && !catalogFranchiseOptions.includes(catalogFranchise)) {
       setCatalogFranchise('all')
     }
@@ -2589,7 +2698,12 @@ function App() {
 
   useEffect(() => {
     setCatalogPage(1)
-  }, [catalogCategory, catalogSubcategory, catalogFranchise, catalogMinYear, catalogMaxYear, catalogSortKey])
+  }, [
+    catalogBrandId, catalogCardTypeId, catalogCategory, catalogFranchise,
+    catalogMaxYear, catalogMinYear, catalogPrintTypeId, catalogSetId,
+    catalogSortKey, catalogSubcategory, catalogSubjectId, catalogSubsetId,
+    catalogTeamId,
+  ])
 
   useEffect(() => {
     if (currentScreen !== 'catalog_item' || !selectedCatalogItem?.id) {
@@ -9419,6 +9533,15 @@ function App() {
                       setCatalogCategory('all')
                       setCatalogSubcategory('')
                       setCatalogFranchise('all')
+                      setCatalogBrandId('')
+                      setCatalogTeamId('')
+                      setCatalogSetId('')
+                      setCatalogSubsetId('')
+                      setCatalogPrintTypeId('')
+                      setCatalogCardTypeId('')
+                      setCatalogSubjectId('')
+                      setCatalogSubjectSearch('')
+                      setCatalogSubjectResults([])
                       setCatalogMinYear('')
                       setCatalogMaxYear('')
                     }}
@@ -9427,6 +9550,7 @@ function App() {
                   </button>
                 </div>
 
+                {/* Category — standalone */}
                 <label htmlFor="catalog-category">{t('categoryLabel')}</label>
                 <select
                   id="catalog-category"
@@ -9434,45 +9558,186 @@ function App() {
                   onChange={(event) => {
                     setCatalogCategory(event.target.value)
                     setCatalogSubcategory('')
-                    setCatalogFranchise('all')
                   }}
                 >
                   <option value="all">All</option>
                   {catalogCategoryOptions.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
+                    <option key={category} value={category}>{category}</option>
                   ))}
                 </select>
 
+                {/* Subcategory — cascades from category */}
                 <label htmlFor="catalog-subcategory">{t('subcategoryLabel')}</label>
                 <select
                   id="catalog-subcategory"
                   value={catalogSubcategory}
-                  onChange={(event) => {
-                    setCatalogSubcategory(event.target.value)
-                    setCatalogFranchise('all')
-                  }}
                   disabled={catalogCategory === 'all'}
+                  onChange={(event) => setCatalogSubcategory(event.target.value)}
                 >
-                  <option value="">{t('selectCategoryFirst')}</option>
+                  <option value="">{catalogCategory === 'all' ? t('selectCategoryFirst') : 'All'}</option>
                   {catalogSubcategoryOptions.map((subcategory) => (
-                    <option key={subcategory} value={subcategory}>
-                      {subcategory}
-                    </option>
+                    <option key={subcategory} value={subcategory}>{subcategory}</option>
                   ))}
                 </select>
 
+                {/* Franchise — cascades from subcategory via franchise_subcategory */}
                 <label htmlFor="catalog-franchise">{t('franchiseLabel')}</label>
-                <select id="catalog-franchise" value={catalogFranchise} onChange={(event) => setCatalogFranchise(event.target.value)}>
+                <select
+                  id="catalog-franchise"
+                  value={catalogFranchise}
+                  disabled={!catalogSubcategory}
+                  onChange={(event) => setCatalogFranchise(event.target.value)}
+                >
                   <option value="all">All</option>
                   {catalogFranchiseOptions.map((franchise) => (
-                    <option key={franchise} value={franchise}>
-                      {franchise}
-                    </option>
+                    <option key={franchise} value={franchise}>{franchise}</option>
                   ))}
                 </select>
 
+                {/* Brand — standalone */}
+                <label htmlFor="catalog-brand">Brand</label>
+                <select
+                  id="catalog-brand"
+                  value={catalogBrandId}
+                  onChange={(event) => setCatalogBrandId(event.target.value)}
+                >
+                  <option value="">All</option>
+                  {catalogBrands.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+
+                {/* Team — cascades from franchise, only shown when options exist */}
+                {catalogTeams.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-team">Team</label>
+                    <select
+                      id="catalog-team"
+                      value={catalogTeamId}
+                      onChange={(event) => setCatalogTeamId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogTeams.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Collectible Set — cascades from franchise + brand */}
+                {catalogSets.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-set">Set</label>
+                    <select
+                      id="catalog-set"
+                      value={catalogSetId}
+                      onChange={(event) => setCatalogSetId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogSets.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Subcollectible Set — cascades from set */}
+                {catalogSubsets.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-subset">Sub-Set</label>
+                    <select
+                      id="catalog-subset"
+                      value={catalogSubsetId}
+                      onChange={(event) => setCatalogSubsetId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogSubsets.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Print Type — cascades from subset */}
+                {catalogPrintTypes.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-print-type">Print Type</label>
+                    <select
+                      id="catalog-print-type"
+                      value={catalogPrintTypeId}
+                      onChange={(event) => setCatalogPrintTypeId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogPrintTypes.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Card Type — standalone */}
+                {catalogAllCardTypes.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-card-type">Card Type</label>
+                    <select
+                      id="catalog-card-type"
+                      value={catalogCardTypeId}
+                      onChange={(event) => setCatalogCardTypeId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogAllCardTypes.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Subject — typeahead search across all subjects */}
+                <label>Subject</label>
+                <div className="catalog-admin-subject-search-wrap">
+                  <input
+                    type="text"
+                    value={catalogSubjectSearch}
+                    placeholder={catalogSubjectSearching ? 'Searching…' : 'Search subjects…'}
+                    style={{ width: '100%' }}
+                    onChange={(event) => {
+                      setCatalogSubjectSearch(event.target.value)
+                      if (!event.target.value) { setCatalogSubjectId(''); setCatalogSubjectResults([]) }
+                    }}
+                  />
+                  {catalogSubjectResults.length > 0 && (
+                    <div className="catalog-admin-subject-results">
+                      {catalogSubjectResults.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="catalog-admin-subject-result"
+                          onClick={() => {
+                            setCatalogSubjectId(s.id)
+                            setCatalogSubjectSearch(s.name)
+                            setCatalogSubjectResults([])
+                          }}
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {catalogSubjectId && (
+                    <div className="catalog-admin-subject-selected">
+                      <span style={{ fontSize: '0.82rem' }}>{catalogSubjectSearch}</span>
+                      <button
+                        type="button"
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
+                        onClick={() => { setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogSubjectResults([]) }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Year range */}
                 <div className="catalog-year-grid">
                   <label htmlFor="catalog-min-year">
                     {t('minYearLabel')}
@@ -9486,7 +9751,6 @@ function App() {
                       onChange={(event) => setCatalogMinYear(event.target.value)}
                     />
                   </label>
-
                   <label htmlFor="catalog-max-year">
                     {t('maxYearLabel')}
                     <input
