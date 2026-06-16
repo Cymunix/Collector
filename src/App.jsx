@@ -1681,6 +1681,11 @@ function App() {
   const [catalogAdminCardTypes, setCatalogAdminCardTypes] = useState([])
   const [catalogAdminSpecies, setCatalogAdminSpecies] = useState([])
   const [catalogAdminSubsets, setCatalogAdminSubsets] = useState([])
+  const [catalogAdminBricklinkId, setCatalogAdminBricklinkId] = useState('')
+  const [catalogAdminRebrickableId, setCatalogAdminRebrickableId] = useState('')
+  const [catalogAdminReleaseYear, setCatalogAdminReleaseYear] = useState('')
+  const [catalogAdminUpc, setCatalogAdminUpc] = useState('')
+  const [catalogAdminPieceCount, setCatalogAdminPieceCount] = useState('')
   const [catalogAdminDynamicFields, setCatalogAdminDynamicFields] = useState({})
   const [catalogAdminVariants, setCatalogAdminVariants] = useState([buildCatalogVariantRow()])
   const [catalogAdminFrontImageFile, setCatalogAdminFrontImageFile] = useState(null)
@@ -2557,8 +2562,8 @@ function App() {
       if (catalogPrintTypeId) {
         itemsQuery = itemsQuery.eq('print_type_id', catalogPrintTypeId)
       }
-      if (catalogSubjectId) {
-        itemsQuery = itemsQuery.eq('subject_id', catalogSubjectId)
+      if (catalogSubjectId && catalogSubjectSearch) {
+        itemsQuery = itemsQuery.ilike('subject', catalogSubjectSearch.trim())
       }
       // M2M: team — pre-query item_ids from item_teams
       if (catalogTeamId) {
@@ -2648,6 +2653,7 @@ function App() {
           _brand_name:        brandName,
           _franchise_name:    franchiseName,
           _details:           raw,
+          front_image_path:   raw.front_image_path || null,
         }
       }
       setCatalogItems((itemsResult.data || []).map(normalizeItem))
@@ -2906,25 +2912,26 @@ function App() {
   }, [selectedCatalogAdminCategoryName])
 
   useEffect(() => {
-    const loadCatalogAdminBrands = async () => {
-      if (currentScreen !== 'catalog' || !isPlatformAdmin) {
-        setCatalogAdminBrands([])
-        return
-      }
-
-      const { data: rawBrands } = await supabase
-        .from('brands')
-        .select('brand_id, name')
-        .order('name', { ascending: true })
-
-      setCatalogAdminBrands((rawBrands || []).map(r => ({ id: r.brand_id, name: r.name })))
-    }
-
-    loadCatalogAdminBrands()
-  }, [currentScreen, isPlatformAdmin])
+    if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminBrands([]); return }
+    if (!catalogAdminRealFranchiseId) { setCatalogAdminBrands([]); setCatalogAdminBrandId(''); return }
+    supabase.from('brand_franchise').select('brand_id').eq('franchise_id', catalogAdminRealFranchiseId)
+      .then(({ data: bfRows }) => {
+        const ids = (bfRows || []).map(r => r.brand_id)
+        if (!ids.length) { setCatalogAdminBrands([]); setCatalogAdminBrandId(''); return }
+        supabase.from('brands').select('brand_id, name').in('brand_id', ids).order('name')
+          .then(({ data }) => {
+            const list = (data || []).map(r => ({ id: r.brand_id, name: r.name }))
+            setCatalogAdminBrands(list)
+            setCatalogAdminBrandId(prev => list.some(b => b.id === prev) ? prev : '')
+          })
+      })
+  }, [currentScreen, isPlatformAdmin, catalogAdminRealFranchiseId])
 
   useEffect(() => {
-    if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminCardTypes([]); return }
+    if (currentScreen !== 'catalog' || !isPlatformAdmin) {
+      setCatalogAdminCardTypes([])
+      return
+    }
     supabase.from('card_types').select('card_type_id, name').order('name')
       .then(({ data }) => setCatalogAdminCardTypes((data || []).map(r => ({ id: r.card_type_id, name: r.name }))))
   }, [currentScreen, isPlatformAdmin])
@@ -3156,32 +3163,21 @@ function App() {
   }, [catalogAdminCategoryId, catalogAdminSubcategoryId, currentScreen, isPlatformAdmin])
 
   useEffect(() => {
-    const loadCatalogAdminFranchises = async () => {
-      if (!isPlatformAdmin || currentScreen !== 'catalog' || (!catalogAdminRealFranchiseId && !catalogAdminBrandId)) {
-        setCatalogAdminFranchises([])
-        setCatalogAdminFranchiseId('')
-        return
-      }
-
-      let query = supabase.from('collectible_sets').select('collectible_set_id, name').order('name', { ascending: true })
-      if (catalogAdminRealFranchiseId) query = query.eq('franchise_id', catalogAdminRealFranchiseId)
-      if (catalogAdminBrandId) query = query.eq('brand_id', catalogAdminBrandId)
-
-      const { data: rawSets, error } = await query
-
-      if (error) {
-        setCatalogAdminFormError(error.message || 'Could not load collectible sets.')
-        return
-      }
-
-      const normalizedSets = (rawSets || []).map(r => ({ id: r.collectible_set_id, name: r.name || '' }))
-      setCatalogAdminFranchises(normalizedSets)
-      if (!normalizedSets.some((s) => s.id === catalogAdminFranchiseId)) {
-        setCatalogAdminFranchiseId('')
-      }
+    if (!isPlatformAdmin || currentScreen !== 'catalog' || !catalogAdminRealFranchiseId || !catalogAdminBrandId) {
+      setCatalogAdminFranchises([])
+      setCatalogAdminFranchiseId('')
+      return
     }
-
-    loadCatalogAdminFranchises()
+    supabase.from('collectible_sets').select('collectible_set_id, name')
+      .eq('franchise_id', catalogAdminRealFranchiseId)
+      .eq('brand_id', catalogAdminBrandId)
+      .order('name')
+      .then(({ data, error }) => {
+        if (error) { setCatalogAdminFormError(error.message || 'Could not load sets.'); return }
+        const list = (data || []).map(r => ({ id: r.collectible_set_id, name: r.name || '' }))
+        setCatalogAdminFranchises(list)
+        setCatalogAdminFranchiseId(prev => list.some(s => s.id === prev) ? prev : '')
+      })
   }, [catalogAdminRealFranchiseId, catalogAdminBrandId, currentScreen, isPlatformAdmin])
 
   useEffect(() => {
@@ -5165,8 +5161,8 @@ function App() {
     const { error } = await supabase
       .from('items')
       .update({
-        description:          v.description.trim()          || null,
-        card_number:          v.card_number.trim()          || null,
+        description:          v.description?.trim()          || null,
+        card_number:          v.card_number?.trim()          || null,
         print_count:          v.print_count !== '' ? Number(v.print_count) : null,
         category_id:          v.category_id          || null,
         subcategory_id:       v.subcategory_id        || null,
@@ -5176,6 +5172,11 @@ function App() {
         subcollectble_set_id: v.subcollectble_set_id  || null,
         subject_id:           v.subject_id            || null,
         print_type_id:        v.print_type_id         || null,
+        bricklink_id:         v.bricklink_id?.trim()         || null,
+        rebrickable_fig_id:   v.rebrickable_fig_id?.trim()   || null,
+        release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
+        upc:                  v.upc?.trim()                   || null,
+        piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
       })
       .eq('item_id', selectedCatalogItem.id)
     if (error) {
@@ -5360,20 +5361,29 @@ function App() {
     setCatalogAdminFormError('')
     setIsCreatingCatalogItem(true)
 
+    const isLegoInsert = selectedCatalogAdminCategoryName === 'Building Blocks'
     const { data: createdItem, error } = await supabase
       .from('items')
       .insert({
-        category_id:          catalogAdminCategoryId          || null,
-        subcategory_id:       catalogAdminSubcategoryId        || null,
-        franchise_id:         catalogAdminRealFranchiseId      || null,
-        brand_id:             catalogAdminBrandId              || null,
-        collectible_set_id:   catalogAdminFranchiseId          || null,
-        subcollectble_set_id: catalogAdminSubsetId             || null,
-        subject_id:           catalogAdminSubjectId            || null,
-        print_type_id:        catalogAdminPrintTypeId          || null,
-        card_number:          catalogAdminCardNumber.trim()    || null,
-        print_count:          catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
-        description:          catalogAdminItemDescription.trim() || null,
+        category_id:          catalogAdminCategoryId             || null,
+        subcategory_id:       catalogAdminSubcategoryId           || null,
+        franchise_id:         catalogAdminRealFranchiseId         || null,
+        brand_id:             catalogAdminBrandId                 || null,
+        collectible_set_id:   catalogAdminFranchiseId             || null,
+        subcollectble_set_id: catalogAdminSubsetId                || null,
+        subject_id:           isLegoInsert ? null : (catalogAdminSubjectId || null),
+        description:          catalogAdminItemDescription.trim()  || null,
+        bricklink_id:         catalogAdminBricklinkId.trim()      || null,
+        release_year:         catalogAdminReleaseYear !== '' ? Number(catalogAdminReleaseYear) : null,
+        ...(isLegoInsert ? {
+          rebrickable_fig_id: catalogAdminRebrickableId.trim()   || null,
+          upc:                catalogAdminUpc.trim()              || null,
+          piece_count:        catalogAdminPieceCount !== '' ? Number(catalogAdminPieceCount) : null,
+        } : {
+          print_type_id: catalogAdminPrintTypeId || null,
+          card_number:   catalogAdminCardNumber.trim() || null,
+          print_count:   catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
+        }),
       })
       .select('item_id')
       .single()
@@ -5420,11 +5430,21 @@ function App() {
       setCatalogAdminSubjectResults([])
       setCatalogAdminCardNumber('')
       setCatalogAdminPrintCount('')
+      setCatalogAdminBricklinkId('')
+      setCatalogAdminRebrickableId('')
+      setCatalogAdminReleaseYear('')
+      setCatalogAdminUpc('')
+      setCatalogAdminPieceCount('')
       setCatalogAdminItemDescription('')
     } else {
       setCatalogAdminItemDescription('')
       setCatalogAdminCardNumber('')
       setCatalogAdminPrintCount('')
+      setCatalogAdminBricklinkId('')
+      setCatalogAdminRebrickableId('')
+      setCatalogAdminReleaseYear('')
+      setCatalogAdminUpc('')
+      setCatalogAdminPieceCount('')
       setCatalogAdminRealFranchiseId('')
       setCatalogAdminSubjectId('')
       setCatalogAdminSubjectSearch('')
@@ -9550,6 +9570,51 @@ function App() {
                   </button>
                 </div>
 
+                {/* Subject — typeahead search across all subjects */}
+                <label>Subject</label>
+                <div className="catalog-admin-subject-search-wrap">
+                  <input
+                    type="text"
+                    value={catalogSubjectSearch}
+                    placeholder={catalogSubjectSearching ? 'Searching…' : 'Search subjects…'}
+                    style={{ width: '100%' }}
+                    onChange={(event) => {
+                      setCatalogSubjectSearch(event.target.value)
+                      if (!event.target.value) { setCatalogSubjectId(''); setCatalogSubjectResults([]) }
+                    }}
+                  />
+                  {catalogSubjectResults.length > 0 && (
+                    <div className="catalog-admin-subject-results">
+                      {catalogSubjectResults.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="catalog-admin-subject-result"
+                          onClick={() => {
+                            setCatalogSubjectId(s.id)
+                            setCatalogSubjectSearch(s.name)
+                            setCatalogSubjectResults([])
+                          }}
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {catalogSubjectId && (
+                    <div className="catalog-admin-subject-selected">
+                      <span style={{ fontSize: '0.82rem' }}>{catalogSubjectSearch}</span>
+                      <button
+                        type="button"
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
+                        onClick={() => { setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogSubjectResults([]) }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Category — standalone */}
                 <label htmlFor="catalog-category">{t('categoryLabel')}</label>
                 <select
@@ -9692,51 +9757,6 @@ function App() {
                   </>
                 )}
 
-                {/* Subject — typeahead search across all subjects */}
-                <label>Subject</label>
-                <div className="catalog-admin-subject-search-wrap">
-                  <input
-                    type="text"
-                    value={catalogSubjectSearch}
-                    placeholder={catalogSubjectSearching ? 'Searching…' : 'Search subjects…'}
-                    style={{ width: '100%' }}
-                    onChange={(event) => {
-                      setCatalogSubjectSearch(event.target.value)
-                      if (!event.target.value) { setCatalogSubjectId(''); setCatalogSubjectResults([]) }
-                    }}
-                  />
-                  {catalogSubjectResults.length > 0 && (
-                    <div className="catalog-admin-subject-results">
-                      {catalogSubjectResults.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          className="catalog-admin-subject-result"
-                          onClick={() => {
-                            setCatalogSubjectId(s.id)
-                            setCatalogSubjectSearch(s.name)
-                            setCatalogSubjectResults([])
-                          }}
-                        >
-                          {s.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {catalogSubjectId && (
-                    <div className="catalog-admin-subject-selected">
-                      <span style={{ fontSize: '0.82rem' }}>{catalogSubjectSearch}</span>
-                      <button
-                        type="button"
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
-                        onClick={() => { setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogSubjectResults([]) }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                </div>
-
                 {/* Year range */}
                 <div className="catalog-year-grid">
                   <label htmlFor="catalog-min-year">
@@ -9782,7 +9802,11 @@ function App() {
                         const franchiseName    = item._set_name || 'Unassigned set'
                         const franchiseBrandName = item._franchise_name || ''
                         const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
-                        const imageUrl         = ''
+                        const imageUrl         = item.front_image_path
+                          ? item.front_image_path.startsWith('http')
+                            ? item.front_image_path
+                            : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
+                          : ''
 
                         return (
                           <article
@@ -9897,7 +9921,7 @@ function App() {
                       </div>
                       <div>
                         <label htmlFor="cai-franchise">Franchise</label>
-                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
+                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
                           <option value="">None</option>
                           {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                         </select>
@@ -9912,7 +9936,7 @@ function App() {
                       </div>
                       <div>
                         <label htmlFor="cai-brand">Brand</label>
-                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
+                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminRealFranchiseId}>
                           <option value="">None</option>
                           {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
@@ -9927,7 +9951,7 @@ function App() {
                       </div>
                       <div>
                         <label htmlFor="cai-set">Collectible Set</label>
-                        <select id="cai-set" value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId(''); setCatalogAdminFormError('') }}>
+                        <select id="cai-set" value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminBrandId}>
                           <option value="">None</option>
                           {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
@@ -10034,53 +10058,86 @@ function App() {
                       </div>
                     </div>
 
-                    <p className="catalog-admin-section-title">Card Details</p>
+                    <p className="catalog-admin-section-title">Item Info</p>
                     <div className="catalog-admin-two-col">
                       <div>
-                        <label htmlFor="cai-print-type">Print Type {!catalogAdminSubsetId && <span className="catalog-admin-hint">(select a subset first)</span>}</label>
-                        <select id="cai-print-type" value={catalogAdminPrintTypeId} onChange={e => setCatalogAdminPrintTypeId(e.target.value)} disabled={!catalogAdminSubsetId}>
-                          <option value="">None</option>
-                          {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
-                        {catalogAdminInlineCreate.field === 'printType' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Print type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'printType', value: '', subjectType: 'player' })}>+ New Print Type</button>}
+                        <label htmlFor="cai-bricklink-id">BrickLink ID <span className="catalog-admin-hint">{selectedCatalogAdminCategoryName === 'Building Blocks' ? '(e.g. col473 or 75192)' : '(optional)'}</span></label>
+                        <input id="cai-bricklink-id" type="text" value={catalogAdminBricklinkId} onChange={e => setCatalogAdminBricklinkId(e.target.value)} placeholder={selectedCatalogAdminCategoryName === 'Building Blocks' ? 'e.g. col473' : ''} />
                       </div>
                       <div>
-                        <label>Card Types <span className="catalog-admin-hint">(none = Normal)</span></label>
-                        {catalogAdminCardTypes.filter(c => c.name !== 'Normal').length > 0 && (
-                          <div className="catalog-admin-team-list">
-                            {catalogAdminCardTypes.filter(c => c.name !== 'Normal').map(c => (
-                              <label key={c.id} className="catalog-admin-team-checkbox">
-                                <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
-                                  onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
-                                <span>{c.name}</span>
-                              </label>
-                            ))}
+                        <label htmlFor="cai-release-year">Release Year</label>
+                        <input id="cai-release-year" type="number" min="1932" max="2100" value={catalogAdminReleaseYear} onChange={e => setCatalogAdminReleaseYear(e.target.value)} placeholder="e.g. 2023" />
+                      </div>
+                    </div>
+
+                    <p className="catalog-admin-section-title">
+                      {selectedCatalogAdminCategoryName === 'Building Blocks' ? 'Set / Minifig Details' : 'Card Details'}
+                    </p>
+                    <div className="catalog-admin-two-col">
+                      {selectedCatalogAdminCategoryName === 'Building Blocks' ? (
+                        <>
+                          <div>
+                            <label htmlFor="cai-rebrickable-id">Rebrickable ID <span className="catalog-admin-hint">(e.g. fig-001234)</span></label>
+                            <input id="cai-rebrickable-id" type="text" value={catalogAdminRebrickableId} onChange={e => setCatalogAdminRebrickableId(e.target.value)} placeholder="e.g. fig-001234" />
                           </div>
-                        )}
-                        {catalogAdminInlineCreate.field === 'cardType' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Card type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                          <div>
+                            <label htmlFor="cai-upc">UPC <span className="catalog-admin-hint">(barcode)</span></label>
+                            <input id="cai-upc" type="text" value={catalogAdminUpc} onChange={e => setCatalogAdminUpc(e.target.value)} placeholder="e.g. 673419376358" />
                           </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'cardType', value: '', subjectType: 'player' })}>+ New Card Type</button>}
-                      </div>
-                      <div>
-                        <label htmlFor="cai-card-number">Card Number</label>
-                        <input id="cai-card-number" type="text" value={catalogAdminCardNumber} onChange={e => setCatalogAdminCardNumber(e.target.value)} placeholder="e.g. 150" />
-                      </div>
-                      <div>
-                        <label htmlFor="cai-print-count">Print Count</label>
-                        <input id="cai-print-count" type="number" min="1" value={catalogAdminPrintCount} onChange={e => setCatalogAdminPrintCount(e.target.value)} placeholder="e.g. 99" />
-                      </div>
+                          <div>
+                            <label htmlFor="cai-piece-count">Piece Count</label>
+                            <input id="cai-piece-count" type="number" min="1" value={catalogAdminPieceCount} onChange={e => setCatalogAdminPieceCount(e.target.value)} placeholder="e.g. 1989" />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <label htmlFor="cai-print-type">Print Type {!catalogAdminSubsetId && <span className="catalog-admin-hint">(select a subset first)</span>}</label>
+                            <select id="cai-print-type" value={catalogAdminPrintTypeId} onChange={e => setCatalogAdminPrintTypeId(e.target.value)} disabled={!catalogAdminSubsetId}>
+                              <option value="">None</option>
+                              {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            {catalogAdminInlineCreate.field === 'printType' ? (
+                              <div className="catalog-admin-inline-create">
+                                <input autoFocus className="catalog-admin-inline-input" placeholder="Print type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                              </div>
+                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'printType', value: '', subjectType: 'player' })}>+ New Print Type</button>}
+                          </div>
+                          <div>
+                            <label>Card Types <span className="catalog-admin-hint">(none = Normal)</span></label>
+                            {catalogAdminCardTypes.filter(c => c.name !== 'Normal').length > 0 && (
+                              <div className="catalog-admin-team-list">
+                                {catalogAdminCardTypes.filter(c => c.name !== 'Normal').map(c => (
+                                  <label key={c.id} className="catalog-admin-team-checkbox">
+                                    <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
+                                      onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
+                                    <span>{c.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                            {catalogAdminInlineCreate.field === 'cardType' ? (
+                              <div className="catalog-admin-inline-create">
+                                <input autoFocus className="catalog-admin-inline-input" placeholder="Card type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                              </div>
+                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'cardType', value: '', subjectType: 'player' })}>+ New Card Type</button>}
+                          </div>
+                          <div>
+                            <label htmlFor="cai-card-number">Card Number</label>
+                            <input id="cai-card-number" type="text" value={catalogAdminCardNumber} onChange={e => setCatalogAdminCardNumber(e.target.value)} placeholder="e.g. 150" />
+                          </div>
+                          <div>
+                            <label htmlFor="cai-print-count">Print Count</label>
+                            <input id="cai-print-count" type="number" min="1" value={catalogAdminPrintCount} onChange={e => setCatalogAdminPrintCount(e.target.value)} placeholder="e.g. 99" />
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <p className="catalog-admin-section-title">Notes</p>
@@ -10351,7 +10408,11 @@ function App() {
                       <div className="catalog-item-edit-image-slots">
                         {[{ label: 'Front', position: 0 }, { label: 'Back', position: 1 }].map(({ label, position }) => {
                           const img = catalogItemImages.find(i => i.position === position)
-                          const urlData = img ? supabase.storage.from('item-images').getPublicUrl(img.image_path).data : null
+                          const urlData = img
+                            ? img.image_path.startsWith('http')
+                              ? { publicUrl: img.image_path }
+                              : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
+                            : null
                           return (
                             <div key={position} className="catalog-item-edit-image-slot">
                               <span className="catalog-item-edit-image-slot-label">{label}</span>
@@ -10383,15 +10444,19 @@ function App() {
                 <section className="catalog-detail-market-card">
                   <div className={`catalog-detail-market-image-wrap${isPsaActive ? ' psa-slab-wrap' : ''}${isBgsActive ? ` bgs-slab-wrap${isBgsBlackLabel ? ' bgs-black-label-wrap' : ''}` : ''}${isCgcActive ? ' cgc-slab-wrap' : ''}${isTAGActive ? ' tag-slab-wrap' : ''}`}>
                     <div className={`catalog-detail-image-frame${isPsaActive ? ' psa-slab-frame' : ''}${isBgsActive ? ` bgs-slab-frame${isBgsBlackLabel ? ' bgs-black-label-frame' : ''}` : ''}${isCgcActive ? ' cgc-slab-frame' : ''}${isTAGActive ? ' tag-slab-frame' : ''}`}>
-                    {selectedCatalogItem.imageUrl ? (
-                      <img
-                        src={selectedCatalogItem.imageUrl}
-                        alt={selectedCatalogItem.name || 'Catalog item'}
-                        className="catalog-detail-market-image"
-                      />
-                    ) : (
-                      <div className="catalog-detail-market-image catalog-item-image-placeholder">N/A</div>
-                    )}
+                    {(() => {
+                      const frontImg = catalogItemImages.find(i => i.position === 0)
+                      const frontUrl = frontImg
+                        ? frontImg.image_path.startsWith('http')
+                          ? frontImg.image_path
+                          : supabase.storage.from('item-images').getPublicUrl(frontImg.image_path).data?.publicUrl
+                        : null
+                      return frontUrl ? (
+                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image" />
+                      ) : (
+                        <div className="catalog-detail-market-image catalog-item-image-placeholder">N/A</div>
+                      )
+                    })()}
                     </div>
                     {isPsaActive ? (
                       <div className="catalog-detail-slab-cert-label">
@@ -10907,7 +10972,9 @@ function App() {
                     <h3>Card Images</h3>
                     <div className="catalog-detail-images-row">
                       {catalogItemImages.map((img) => {
-                        const { data: urlData } = supabase.storage.from('item-images').getPublicUrl(img.image_path)
+                        const urlData = img.image_path.startsWith('http')
+                          ? { publicUrl: img.image_path }
+                          : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
                         return (
                           <img
                             key={img.item_image_id}
@@ -10942,6 +11009,8 @@ function App() {
                         ['Card Type',          selectedCatalogItem._details.card_type],
                         ['Card Number',        selectedCatalogItem._details.card_number],
                         ['Print Count',        selectedCatalogItem._details.print_count ?? 'N/A'],
+                        ['BrickLink ID',       selectedCatalogItem._details.bricklink_id ?? 'N/A'],
+                        ['Rebrickable ID',     selectedCatalogItem._details.rebrickable_fig_id ?? 'N/A'],
                       ].map(([label, value]) => (
                         <div key={label} className="catalog-detail-info-cell">
                           <span className="catalog-detail-info-label">{label}</span>
