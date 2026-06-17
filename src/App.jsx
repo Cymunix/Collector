@@ -1599,6 +1599,8 @@ function App() {
   const [catalogItemEditSubjectSearch, setCatalogItemEditSubjectSearch] = useState('')
   const [catalogItemEditSubjectResults, setCatalogItemEditSubjectResults] = useState([])
   const [catalogItemEditSubjectIsSearching, setCatalogItemEditSubjectIsSearching] = useState(false)
+  const [catalogMarketVariants, setCatalogMarketVariants] = useState([])
+  const [catalogItemConditionId, setCatalogItemConditionId] = useState('')
   const [isSavingCatalogItem, setIsSavingCatalogItem] = useState(false)
   const [catalogItemEditError, setCatalogItemEditError] = useState('')
   const [catalogItemImagesReloadToken, setCatalogItemImagesReloadToken] = useState(0)
@@ -1955,7 +1957,7 @@ function App() {
     ? selectedCatalogItemMetadata.conditions.filter((item) => typeof item === 'string' && item.trim())
     : isCardConditionCategory
       ? CARD_CONDITION_SCALE
-      : []
+      : catalogMarketVariants.map(v => v.name)
   const selectedCondition =
     typeof catalogDetailSelectedCondition === 'string' && catalogDetailSelectedCondition.trim()
       ? catalogDetailSelectedCondition
@@ -2727,14 +2729,21 @@ function App() {
     }
     let cancelled = false
     const load = async () => {
-      const [{ data: images, error: imgErr }, { data: subjects }] = await Promise.all([
+      const itemBrandId = selectedCatalogItem._details?.brand_id
+      const isMinifig = selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col')
+      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }] = await Promise.all([
         supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
         supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
+        isMinifig && itemBrandId
+          ? supabase.from('market_variants').select('market_variant_id, name, sort_order').eq('brand_id', itemBrandId).order('sort_order')
+          : Promise.resolve({ data: [] }),
       ])
       if (imgErr) console.error('item_images load error:', imgErr)
       if (!cancelled) {
         setCatalogItemImages(images || [])
         setCatalogDetailSubjects((subjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
+        setCatalogMarketVariants(variants || [])
+        setCatalogItemConditionId('')
       }
     }
     load()
@@ -5147,6 +5156,8 @@ function App() {
       collectible_set_id:   d.collectible_set_id    || '',
       subcollectble_set_id: d.subcollectble_set_id  || '',
       print_type_id:        d.print_type_id         || '',
+      bricklink_id:         d.bricklink_id          || '',
+      rebrickable_fig_id:   d.rebrickable_fig_id    || '',
     })
     setCatalogItemEditError('')
     const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }] = await Promise.all([
@@ -10435,6 +10446,25 @@ function App() {
                         <span>Print Count</span>
                         <input type="number" min="1" value={catalogItemEditValues.print_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, print_count: e.target.value }))} />
                       </label>
+                      {selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col') && (<>
+                        <label className="catalog-item-edit-field">
+                          <span>BrickLink ID</span>
+                          <input type="text" value={catalogItemEditValues.bricklink_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, bricklink_id: e.target.value }))} placeholder="e.g. col473" />
+                        </label>
+                        <label className="catalog-item-edit-field">
+                          <span>Rebrickable ID</span>
+                          <input type="text" value={catalogItemEditValues.rebrickable_fig_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, rebrickable_fig_id: e.target.value }))} placeholder="e.g. fig-001234" />
+                        </label>
+                        {catalogMarketVariants.length > 0 && (
+                          <label className="catalog-item-edit-field">
+                            <span>Condition <span title="Damaged = missing accessories or visible damage" style={{ cursor: 'help' }}>ⓘ</span></span>
+                            <select value={catalogItemConditionId} onChange={e => setCatalogItemConditionId(e.target.value)}>
+                              <option value="">— Select condition —</option>
+                              {catalogMarketVariants.map(v => <option key={v.market_variant_id} value={v.market_variant_id}>{v.name}</option>)}
+                            </select>
+                          </label>
+                        )}
+                      </>)}
                       <label className="catalog-item-edit-field catalog-item-edit-field--wide">
                         <span>Description</span>
                         <textarea rows={3} value={catalogItemEditValues.description || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, description: e.target.value }))} />
@@ -10642,20 +10672,26 @@ function App() {
                     </div>
                     <aside className={`catalog-detail-market-controls${isPsaActive ? ' psa-active' : ''}${isBgsActive ? ' bgs-active' : ''}${isBgsBlackLabel ? ' bgs-black-label' : ''}${isTAGActive ? ' tag-active' : ''}`}>
                       {/* ── Market Variant (Condition) ─────────────────────── */}
-                      {isCardConditionCategory ? null : (
+                      {isCardConditionCategory ? null : conditionOptions.length > 0 ? (
                         <>
-                          <label htmlFor="catalog-detail-condition" className="catalog-detail-label">Market Variant</label>
+                          <label htmlFor="catalog-detail-condition" className="catalog-detail-label">
+                            {catalogMarketVariants.length > 0 ? 'Condition' : 'Market Variant'}
+                            {catalogMarketVariants.length > 0 && (
+                              <span title="Damaged = missing accessories or visible damage" style={{ cursor: 'help', marginLeft: 4, fontWeight: 'normal' }}>ⓘ</span>
+                            )}
+                          </label>
                           <select
                             id="catalog-detail-condition"
-                            value={selectedCondition || conditionOptions[0] || ''}
+                            value={selectedCondition || ''}
                             onChange={(event) => setCatalogDetailSelectedCondition(event.target.value)}
                           >
-                            {(conditionOptions.length > 0 ? conditionOptions : []).map((condition) => (
+                            <option value="">— Select —</option>
+                            {conditionOptions.map((condition) => (
                               <option key={condition} value={condition}>{condition}</option>
                             ))}
                           </select>
                         </>
-                      )}
+                      ) : null}
 
                       {/* ── Graded toggle ─────────────────────────────────── */}
                       {isCardConditionCategory ? (
@@ -11110,8 +11146,10 @@ function App() {
                           { label: 'Card Type',     value: d.card_types,          onClick: null },
                           { label: 'Card Number',   value: d.card_number,         onClick: null },
                           { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
-                          { label: 'BrickLink ID',  value: d.bricklink_id ?? 'N/A', onClick: null },
-                          { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
+                          ...(d.bricklink_id?.toLowerCase().startsWith('col') ? [
+                            { label: 'BrickLink ID',   value: d.bricklink_id ?? 'N/A',       onClick: null },
+                            { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
+                          ] : []),
                         ]
                         return rows.map(({ label, value, onClick, subjects }) => (
                           <div key={label} className="catalog-detail-info-cell">
