@@ -1589,11 +1589,13 @@ function App() {
   const [catalogTotalItemCount, setCatalogTotalItemCount] = useState(0)
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
   const [catalogItemImages, setCatalogItemImages] = useState([])
+  const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
   const [isCatalogItemEditMode, setIsCatalogItemEditMode] = useState(false)
   const [catalogItemEditValues, setCatalogItemEditValues] = useState({})
   const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [] })
   const [catalogItemEditTeamIds, setCatalogItemEditTeamIds] = useState([])
   const [catalogItemEditCardTypeIds, setCatalogItemEditCardTypeIds] = useState([])
+  const [catalogItemEditSubjectIds, setCatalogItemEditSubjectIds] = useState([])
   const [catalogItemEditSubjectSearch, setCatalogItemEditSubjectSearch] = useState('')
   const [catalogItemEditSubjectResults, setCatalogItemEditSubjectResults] = useState([])
   const [catalogItemEditSubjectIsSearching, setCatalogItemEditSubjectIsSearching] = useState(false)
@@ -1666,7 +1668,7 @@ function App() {
   const [catalogAdminCardNumber, setCatalogAdminCardNumber] = useState('')
   const [catalogAdminPrintCount, setCatalogAdminPrintCount] = useState('')
   const [catalogAdminRealFranchiseId, setCatalogAdminRealFranchiseId] = useState('')
-  const [catalogAdminSubjectId, setCatalogAdminSubjectId] = useState('')
+  const [catalogAdminSubjectIds, setCatalogAdminSubjectIds] = useState([])
   const [catalogAdminSubjectSearch, setCatalogAdminSubjectSearch] = useState('')
   const [catalogAdminSubjectResults, setCatalogAdminSubjectResults] = useState([])
   const [catalogAdminSubjectIsSearching, setCatalogAdminSubjectIsSearching] = useState(false)
@@ -2562,8 +2564,14 @@ function App() {
       if (catalogPrintTypeId) {
         itemsQuery = itemsQuery.eq('print_type_id', catalogPrintTypeId)
       }
-      if (catalogSubjectId && catalogSubjectSearch) {
-        itemsQuery = itemsQuery.ilike('subject', catalogSubjectSearch.trim())
+      // M2M: subject — pre-query item_ids from item_subjects
+      if (catalogSubjectId) {
+        const { data: subjectRows } = await supabase.from('item_subjects').select('item_id').eq('subject_id', catalogSubjectId)
+        const subjectItemIds = (subjectRows || []).map(r => r.item_id)
+        if (!subjectItemIds.length) {
+          setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
+        }
+        itemsQuery = itemsQuery.in('item_id', subjectItemIds)
       }
       // M2M: team — pre-query item_ids from item_teams
       if (catalogTeamId) {
@@ -2714,19 +2722,22 @@ function App() {
   useEffect(() => {
     if (currentScreen !== 'catalog_item' || !selectedCatalogItem?.id) {
       setCatalogItemImages([])
+      setCatalogDetailSubjects([])
       return
     }
     let cancelled = false
-    const loadImages = async () => {
-      const { data, error } = await supabase
-        .from('item_images')
-        .select('item_image_id, image_path, position')
-        .eq('item_id', selectedCatalogItem.id)
-        .order('position')
-      if (error) console.error('item_images load error:', error)
-      if (!cancelled) setCatalogItemImages(data || [])
+    const load = async () => {
+      const [{ data: images, error: imgErr }, { data: subjects }] = await Promise.all([
+        supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
+        supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
+      ])
+      if (imgErr) console.error('item_images load error:', imgErr)
+      if (!cancelled) {
+        setCatalogItemImages(images || [])
+        setCatalogDetailSubjects((subjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
+      }
     }
-    loadImages()
+    load()
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
 
@@ -2956,7 +2967,7 @@ function App() {
   }, [catalogAdminSubcategoryId, isPlatformAdmin])
 
   useEffect(() => {
-    if (!isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminSubjects([]); setCatalogAdminSubjectId(''); return }
+    if (!isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminSubjects([]); return }
     supabase
       .from('subject_franchise')
       .select('subject_id')
@@ -2977,17 +2988,18 @@ function App() {
 
   useEffect(() => {
     const q = catalogAdminSubjectSearch.trim()
-    if (catalogAdminSubjectId || q.length < 2) { setCatalogAdminSubjectResults([]); return }
+    if (q.length < 2) { setCatalogAdminSubjectResults([]); return }
     setCatalogAdminSubjectIsSearching(true)
     const timer = setTimeout(() => {
       supabase.from('subjects').select('subject_id, subject_name, subject_type').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
         .then(({ data }) => {
-          setCatalogAdminSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+          const already = new Set(catalogAdminSubjectIds.map(s => s.id))
+          setCatalogAdminSubjectResults((data || []).filter(r => !already.has(r.subject_id)).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
           setCatalogAdminSubjectIsSearching(false)
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [catalogAdminSubjectSearch, catalogAdminSubjectId])
+  }, [catalogAdminSubjectSearch, catalogAdminSubjectIds])
 
   useEffect(() => {
     if (!isPlatformAdmin || currentScreen !== 'catalog') { setCatalogAdminSpecies([]); return }
@@ -3011,17 +3023,18 @@ function App() {
   useEffect(() => {
     if (!isCatalogItemEditMode) return
     const q = catalogItemEditSubjectSearch.trim()
-    if (catalogItemEditValues.subject_id || q.length < 2) { setCatalogItemEditSubjectResults([]); return }
+    if (q.length < 2) { setCatalogItemEditSubjectResults([]); return }
     setCatalogItemEditSubjectIsSearching(true)
     const timer = setTimeout(() => {
       supabase.from('subjects').select('subject_id, subject_name, subject_type').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
         .then(({ data }) => {
-          setCatalogItemEditSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+          const already = new Set(catalogItemEditSubjectIds.map(s => s.id))
+          setCatalogItemEditSubjectResults((data || []).filter(r => !already.has(r.subject_id)).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
           setCatalogItemEditSubjectIsSearching(false)
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [isCatalogItemEditMode, catalogItemEditSubjectSearch, catalogItemEditValues.subject_id])
+  }, [isCatalogItemEditMode, catalogItemEditSubjectSearch, catalogItemEditSubjectIds])
 
   // Edit panel: franchise cascade from subcategory
   useEffect(() => {
@@ -5133,14 +5146,14 @@ function App() {
       brand_id:             d.brand_id              || '',
       collectible_set_id:   d.collectible_set_id    || '',
       subcollectble_set_id: d.subcollectble_set_id  || '',
-      subject_id:           d.subject_id            || '',
       print_type_id:        d.print_type_id         || '',
     })
     setCatalogItemEditError('')
-    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }] = await Promise.all([
+    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }] = await Promise.all([
       supabase.from('card_types').select('card_type_id, name').order('name'),
       supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
+      supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
     ])
     setCatalogItemEditLookups({
       franchises: [], subjects: [], sets: [], subsets: [], teams: [], printTypes: [],
@@ -5148,7 +5161,8 @@ function App() {
     })
     setCatalogItemEditTeamIds((itemTeams || []).map(r => r.team_id))
     setCatalogItemEditCardTypeIds((itemCardTypes || []).map(r => r.card_type_id))
-    setCatalogItemEditSubjectSearch(d.subject || '')
+    setCatalogItemEditSubjectIds((itemSubjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
+    setCatalogItemEditSubjectSearch('')
     setCatalogItemEditSubjectResults([])
     setIsCatalogItemEditMode(true)
   }
@@ -5170,7 +5184,6 @@ function App() {
         brand_id:             v.brand_id              || null,
         collectible_set_id:   v.collectible_set_id    || null,
         subcollectble_set_id: v.subcollectble_set_id  || null,
-        subject_id:           v.subject_id            || null,
         print_type_id:        v.print_type_id         || null,
         bricklink_id:         v.bricklink_id?.trim()         || null,
         rebrickable_fig_id:   v.rebrickable_fig_id?.trim()   || null,
@@ -5183,6 +5196,10 @@ function App() {
       setCatalogItemEditError(error.message || 'Could not save changes.')
       setIsSavingCatalogItem(false)
       return
+    }
+    await supabase.from('item_subjects').delete().eq('item_id', selectedCatalogItem.id)
+    if (catalogItemEditSubjectIds.length > 0) {
+      await supabase.from('item_subjects').insert(catalogItemEditSubjectIds.map(s => ({ item_id: selectedCatalogItem.id, subject_id: s.id })))
     }
     await supabase.from('item_teams').delete().eq('item_id', selectedCatalogItem.id)
     if (catalogItemEditTeamIds.length > 0) {
@@ -5241,8 +5258,8 @@ function App() {
   }
 
   const handleCatalogAdminSelectSubject = async (subject) => {
-    setCatalogAdminSubjectId(subject.id)
-    setCatalogAdminSubjectSearch(subject.name)
+    setCatalogAdminSubjectIds(prev => prev.some(s => s.id === subject.id) ? prev : [...prev, { id: subject.id, name: subject.name, type: subject.type }])
+    setCatalogAdminSubjectSearch('')
     setCatalogAdminSubjectResults([])
     if (catalogAdminRealFranchiseId) {
       const { data: existing } = await supabase.from('subject_franchise')
@@ -5253,9 +5270,13 @@ function App() {
     }
   }
 
+  const handleCatalogAdminRemoveSubject = (subjectId) => {
+    setCatalogAdminSubjectIds(prev => prev.filter(s => s.id !== subjectId))
+  }
+
   const handleCatalogItemEditSelectSubject = async (subject) => {
-    setCatalogItemEditValues(v => ({ ...v, subject_id: subject.id }))
-    setCatalogItemEditSubjectSearch(subject.name)
+    setCatalogItemEditSubjectIds(prev => prev.some(s => s.id === subject.id) ? prev : [...prev, { id: subject.id, name: subject.name, type: subject.type }])
+    setCatalogItemEditSubjectSearch('')
     setCatalogItemEditSubjectResults([])
     const franchiseId = catalogItemEditValues.franchise_id
     if (franchiseId) {
@@ -5265,6 +5286,10 @@ function App() {
         await supabase.from('subject_franchise').insert({ subject_id: subject.id, franchise_id: franchiseId })
       }
     }
+  }
+
+  const handleCatalogItemEditRemoveSubject = (subjectId) => {
+    setCatalogItemEditSubjectIds(prev => prev.filter(s => s.id !== subjectId))
   }
 
   const handleCatalogAdminInlineSave = async () => {
@@ -5321,8 +5346,8 @@ function App() {
       if (catalogAdminRealFranchiseId) {
         await supabase.from('subject_franchise').insert({ subject_id: data.subject_id, franchise_id: catalogAdminRealFranchiseId })
       }
-      setCatalogAdminSubjectId(data.subject_id)
-      setCatalogAdminSubjectSearch(name)
+      setCatalogAdminSubjectIds(prev => [...prev, { id: data.subject_id, name, type: subjectType }])
+      setCatalogAdminSubjectSearch('')
       setCatalogAdminSubjectResults([])
     } else if (field === 'team') {
       const { data, error } = await supabase.from('teams').insert({ name, franchise_id: catalogAdminRealFranchiseId || null }).select('team_id').single()
@@ -5371,7 +5396,7 @@ function App() {
         brand_id:             catalogAdminBrandId                 || null,
         collectible_set_id:   catalogAdminFranchiseId             || null,
         subcollectble_set_id: catalogAdminSubsetId                || null,
-        subject_id:           isLegoInsert ? null : (catalogAdminSubjectId || null),
+        subject_id:           null,
         description:          catalogAdminItemDescription.trim()  || null,
         bricklink_id:         catalogAdminBricklinkId.trim()      || null,
         release_year:         catalogAdminReleaseYear !== '' ? Number(catalogAdminReleaseYear) : null,
@@ -5413,6 +5438,9 @@ function App() {
       }
     }
 
+    if (createdItem?.item_id && catalogAdminSubjectIds.length > 0) {
+      await supabase.from('item_subjects').insert(catalogAdminSubjectIds.map(s => ({ item_id: createdItem.item_id, subject_id: s.id })))
+    }
     if (createdItem?.item_id && catalogAdminTeamIds.length > 0) {
       await supabase.from('item_teams').insert(catalogAdminTeamIds.map(tid => ({ item_id: createdItem.item_id, team_id: tid })))
     }
@@ -5425,7 +5453,7 @@ function App() {
     setCatalogReloadToken(n => n + 1)
 
     if (mode === 'another') {
-      setCatalogAdminSubjectId('')
+      setCatalogAdminSubjectIds([])
       setCatalogAdminSubjectSearch('')
       setCatalogAdminSubjectResults([])
       setCatalogAdminCardNumber('')
@@ -5446,7 +5474,7 @@ function App() {
       setCatalogAdminUpc('')
       setCatalogAdminPieceCount('')
       setCatalogAdminRealFranchiseId('')
-      setCatalogAdminSubjectId('')
+      setCatalogAdminSubjectIds([])
       setCatalogAdminSubjectSearch('')
       setCatalogAdminSubjectResults([])
       setCatalogAdminTeamIds([])
@@ -9503,7 +9531,7 @@ function App() {
                         setCatalogAdminCardNumber('')
                         setCatalogAdminPrintCount('')
                         setCatalogAdminRealFranchiseId('')
-                        setCatalogAdminSubjectId('')
+                        setCatalogAdminSubjectIds([])
                         setCatalogAdminTeamIds([])
                         setCatalogAdminPrintTypeId('')
                         setCatalogAdminCardTypeIds([])
@@ -9921,7 +9949,7 @@ function App() {
                       </div>
                       <div>
                         <label htmlFor="cai-franchise">Franchise</label>
-                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
+                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminSubjectIds([]); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
                           <option value="">None</option>
                           {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                         </select>
@@ -9984,36 +10012,40 @@ function App() {
                     <p className="catalog-admin-section-title">Subject</p>
                     <div className="catalog-admin-two-col">
                       <div>
-                        <label>Subject</label>
-                        {catalogAdminSubjectId ? (
-                          <div className="catalog-admin-subject-selected">
-                            <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{catalogAdminSubjectSearch}</span>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogAdminSubjectId(''); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]) }}>✕ Clear</button>
-                          </div>
-                        ) : (
-                          <div className="catalog-admin-subject-search-wrap">
-                            <input
-                              className="catalog-admin-inline-input"
-                              style={{ width: '100%' }}
-                              placeholder="Search all subjects…"
-                              value={catalogAdminSubjectSearch}
-                              onChange={e => setCatalogAdminSubjectSearch(e.target.value)}
-                              autoComplete="off"
-                            />
-                            {catalogAdminSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
-                            {catalogAdminSubjectResults.length > 0 && (
-                              <div className="catalog-admin-subject-results">
-                                {catalogAdminSubjectResults.map(s => (
-                                  <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogAdminSelectSubject(s)}>
-                                    <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                    <span className="catalog-admin-hint"> · {s.type}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
+                        <label>Subject(s)</label>
+                        {catalogAdminSubjectIds.length > 0 && (
+                          <div className="catalog-admin-subject-tags">
+                            {catalogAdminSubjectIds.map(s => (
+                              <span key={s.id} className="catalog-admin-subject-tag">
+                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{s.name}</span>
+                                <span className="catalog-admin-hint"> · {s.type}</span>
+                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => handleCatalogAdminRemoveSubject(s.id)}>✕</button>
+                              </span>
+                            ))}
                           </div>
                         )}
-                        {!catalogAdminSubjectId && (catalogAdminInlineCreate.field === 'subject' ? (
+                        <div className="catalog-admin-subject-search-wrap">
+                          <input
+                            className="catalog-admin-inline-input"
+                            style={{ width: '100%' }}
+                            placeholder="Search subjects to add…"
+                            value={catalogAdminSubjectSearch}
+                            onChange={e => setCatalogAdminSubjectSearch(e.target.value)}
+                            autoComplete="off"
+                          />
+                          {catalogAdminSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
+                          {catalogAdminSubjectResults.length > 0 && (
+                            <div className="catalog-admin-subject-results">
+                              {catalogAdminSubjectResults.map(s => (
+                                <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogAdminSelectSubject(s)}>
+                                  <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                  <span className="catalog-admin-hint"> · {s.type}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {catalogAdminInlineCreate.field === 'subject' ? (
                           <div className="catalog-admin-inline-create" style={{ marginTop: 6 }}>
                             <input autoFocus className="catalog-admin-inline-input" placeholder="Subject name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }) }} />
                             <select value={catalogAdminInlineCreate.subjectType} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, subjectType: e.target.value, speciesId: '' }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
@@ -10031,7 +10063,7 @@ function App() {
                             <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })}>Cancel</button>
                             {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
                           </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" style={{ marginTop: 4 }} onClick={() => setCatalogAdminInlineCreate({ field: 'subject', value: catalogAdminSubjectSearch, subjectType: 'player', speciesId: '', error: '' })}>+ New Subject</button>)}
+                        ) : <button type="button" className="catalog-admin-inline-toggle" style={{ marginTop: 4 }} onClick={() => setCatalogAdminInlineCreate({ field: 'subject', value: catalogAdminSubjectSearch, subjectType: 'player', speciesId: '', error: '' })}>+ New Subject</button>}
                       </div>
                       <div>
                         <label>Team / Affiliation {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a franchise first)</span>}</label>
@@ -10270,25 +10302,57 @@ function App() {
               <>
                 <header className="catalog-detail-title-row">
                   <div className="catalog-detail-title-block">
-                    <h1 className="catalog-detail-title">{selectedCatalogItem.name || 'N/A'}</h1>
-                    <p className="catalog-detail-subtitle">
-                      <span className="catalog-detail-label">Set Number:</span>{' '}
-                      {selectedCatalogItem.identifier || selectedCatalogItem?.dynamic_fields?.set_number || 'N/A'}
-                      {' | '}
-                      <span className="catalog-detail-label">Release Year:</span> {selectedCatalogItem.release_year || 'N/A'}
-                    </p>
-                    <p className="catalog-detail-subtitle">
-                      <span className="catalog-detail-label">Theme:</span>{' '}
-                      {selectedCatalogItem.subcategoryName || selectedCatalogItem.categoryName || 'N/A'}
-                      {' | '}
-                      <span className="catalog-detail-label">Sub Theme:</span> {selectedCatalogItem.franchiseName || 'N/A'}
-                      {selectedCatalogItem.franchiseBrandName ? (
-                        <>
-                          {' | '}
-                          <span className="catalog-detail-label">Franchise:</span> {selectedCatalogItem.franchiseBrandName}
-                        </>
-                      ) : null}
-                    </p>
+                    <h1 className="catalog-detail-title">{selectedCatalogItem._details?.subject || selectedCatalogItem.name || 'N/A'}</h1>
+                    <div className="catalog-detail-meta-list">
+                      {selectedCatalogItem._details?.card_number && (
+                        <span className="catalog-detail-meta-item">
+                          <span className="catalog-detail-label">Card Number</span> #{selectedCatalogItem._details.card_number}
+                        </span>
+                      )}
+                      {(selectedCatalogItem._details?.release_year ?? selectedCatalogItem.release_year) && (
+                        <span className="catalog-detail-meta-item">
+                          <span className="catalog-detail-label">Release Year</span> {selectedCatalogItem._details?.release_year ?? selectedCatalogItem.release_year}
+                        </span>
+                      )}
+                    </div>
+                    <div className="catalog-detail-meta-list">
+                      {selectedCatalogItem._details?.subcategory && (
+                        <span className="catalog-detail-meta-item">
+                          <span className="catalog-detail-label">Theme</span>
+                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
+                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
+                            setCatalogSubcategory(selectedCatalogItem._details.subcategory)
+                            setCatalogFranchise('all')
+                            setCatalogSetId('')
+                            setCurrentScreen('catalog')
+                          }}>{selectedCatalogItem._details.subcategory}</button>
+                        </span>
+                      )}
+                      {selectedCatalogItem._details?.franchise && (
+                        <span className="catalog-detail-meta-item">
+                          <span className="catalog-detail-label">Franchise</span>
+                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
+                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
+                            setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
+                            setCatalogFranchise(selectedCatalogItem._details.franchise)
+                            setCatalogSetId('')
+                            setCurrentScreen('catalog')
+                          }}>{selectedCatalogItem._details.franchise}</button>
+                        </span>
+                      )}
+                      {selectedCatalogItem._details?.collectible_set && (
+                        <span className="catalog-detail-meta-item">
+                          <span className="catalog-detail-label">Sub Theme</span>
+                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
+                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
+                            setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
+                            setCatalogFranchise(selectedCatalogItem._details.franchise || 'all')
+                            setCatalogSetId(selectedCatalogItem._details.collectible_set_id || '')
+                            setCurrentScreen('catalog')
+                          }}>{selectedCatalogItem._details.collectible_set}</button>
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="catalog-detail-actions">
                     {isPlatformAdmin && !isCatalogItemEditMode && (
@@ -10335,29 +10399,33 @@ function App() {
                           </select>
                         </label>
                       ))}
-                      <div className="catalog-item-edit-field">
-                        <span>Subject</span>
-                        {catalogItemEditValues.subject_id ? (
-                          <div className="catalog-admin-subject-selected">
-                            <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{catalogItemEditSubjectSearch}</span>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setCatalogItemEditValues(v => ({ ...v, subject_id: '' })); setCatalogItemEditSubjectSearch(''); setCatalogItemEditSubjectResults([]) }}>✕ Clear</button>
-                          </div>
-                        ) : (
-                          <div className="catalog-admin-subject-search-wrap">
-                            <input className="catalog-admin-inline-input" style={{ width: '100%' }} placeholder="Search all subjects…" value={catalogItemEditSubjectSearch} onChange={e => setCatalogItemEditSubjectSearch(e.target.value)} autoComplete="off" />
-                            {catalogItemEditSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
-                            {catalogItemEditSubjectResults.length > 0 && (
-                              <div className="catalog-admin-subject-results">
-                                {catalogItemEditSubjectResults.map(s => (
-                                  <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogItemEditSelectSubject(s)}>
-                                    <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                    <span className="catalog-admin-hint"> · {s.type}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
+                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
+                        <span>Subject(s)</span>
+                        {catalogItemEditSubjectIds.length > 0 && (
+                          <div className="catalog-admin-subject-tags">
+                            {catalogItemEditSubjectIds.map(s => (
+                              <span key={s.id} className="catalog-admin-subject-tag">
+                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{s.name}</span>
+                                <span className="catalog-admin-hint"> · {s.type}</span>
+                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => handleCatalogItemEditRemoveSubject(s.id)}>✕</button>
+                              </span>
+                            ))}
                           </div>
                         )}
+                        <div className="catalog-admin-subject-search-wrap">
+                          <input className="catalog-admin-inline-input" style={{ width: '100%' }} placeholder="Search subjects to add…" value={catalogItemEditSubjectSearch} onChange={e => setCatalogItemEditSubjectSearch(e.target.value)} autoComplete="off" />
+                          {catalogItemEditSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
+                          {catalogItemEditSubjectResults.length > 0 && (
+                            <div className="catalog-admin-subject-results">
+                              {catalogItemEditSubjectResults.map(s => (
+                                <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogItemEditSelectSubject(s)}>
+                                  <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                  <span className="catalog-admin-hint"> · {s.type}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <label className="catalog-item-edit-field">
                         <span>Card Number</span>
@@ -10967,56 +11035,101 @@ function App() {
                 </section>
 
                 {/* ── Item images ── */}
-                {catalogItemImages.length > 0 && (
+                {(catalogItemImages.length > 0 || isPlatformAdmin) && (
                   <section className="catalog-card catalog-detail-section catalog-detail-images-section">
-                    <h3>Card Images</h3>
-                    <div className="catalog-detail-images-row">
-                      {catalogItemImages.map((img) => {
-                        const urlData = img.image_path.startsWith('http')
-                          ? { publicUrl: img.image_path }
-                          : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
-                        return (
-                          <img
-                            key={img.item_image_id}
-                            src={urlData.publicUrl}
-                            alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
-                            className="catalog-detail-item-image"
+                    <div className="catalog-detail-images-header">
+                      <h3>Card Images</h3>
+                      {isPlatformAdmin && !isCatalogItemEditMode && (
+                        <label className="catalog-detail-add-photo-btn">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            disabled={isUploadingCatalogItemImage}
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (!file) return
+                              const usedPositions = new Set(catalogItemImages.map(i => i.position))
+                              const nextPosition = [0, 1, 2, 3, 4].find(p => !usedPositions.has(p)) ?? catalogItemImages.length
+                              handleUploadCatalogItemImage(file, nextPosition)
+                              e.target.value = ''
+                            }}
                           />
-                        )
-                      })}
+                          {isUploadingCatalogItemImage ? 'Uploading…' : '+ Add Photo'}
+                        </label>
+                      )}
                     </div>
+                    {catalogItemImages.length > 0 && (
+                      <div className="catalog-detail-images-row">
+                        {catalogItemImages.map((img) => {
+                          const urlData = img.image_path.startsWith('http')
+                            ? { publicUrl: img.image_path }
+                            : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
+                          return (
+                            <img
+                              key={img.item_image_id}
+                              src={urlData.publicUrl}
+                              alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
+                              className="catalog-detail-item-image"
+                            />
+                          )
+                        })}
+                      </div>
+                    )}
                   </section>
                 )}
 
                 {/* ── Full card information ── */}
                 {selectedCatalogItem._details && (
                   <section className="catalog-card catalog-detail-section catalog-detail-card-info">
-                    <h3>Full Card Information</h3>
+                    <h3>Full Information</h3>
                     <div className="catalog-detail-card-info-grid">
-                      {[
-                        ['Category',          selectedCatalogItem._details.category],
-                        ['Subcategory',        selectedCatalogItem._details.subcategory],
-                        ['Franchise',          selectedCatalogItem._details.franchise],
-                        ['Brand',              selectedCatalogItem._details.brand],
-                        ['Collectible Set',    selectedCatalogItem._details.collectible_set],
-                        ['Release Year',       selectedCatalogItem._details.release_year ?? 'N/A'],
-                        ['Subset',             selectedCatalogItem._details.subcollectible_set],
-                        ['Subject',            selectedCatalogItem._details.subject],
-                        ['Subject Type',       selectedCatalogItem._details.subject_type],
-                        ['Species',            selectedCatalogItem._details.species],
-                        ['Team(s)',            selectedCatalogItem._details.teams],
-                        ['Print Type',         selectedCatalogItem._details.print_type],
-                        ['Card Type',          selectedCatalogItem._details.card_type],
-                        ['Card Number',        selectedCatalogItem._details.card_number],
-                        ['Print Count',        selectedCatalogItem._details.print_count ?? 'N/A'],
-                        ['BrickLink ID',       selectedCatalogItem._details.bricklink_id ?? 'N/A'],
-                        ['Rebrickable ID',     selectedCatalogItem._details.rebrickable_fig_id ?? 'N/A'],
-                      ].map(([label, value]) => (
-                        <div key={label} className="catalog-detail-info-cell">
-                          <span className="catalog-detail-info-label">{label}</span>
-                          <span className="catalog-detail-info-value">{value ?? 'N/A'}</span>
-                        </div>
-                      ))}
+                      {(() => {
+                        const d = selectedCatalogItem._details
+                        const goTo = (filters) => {
+                          setCatalogCategory('all'); setCatalogSubcategory(''); setCatalogFranchise('all')
+                          setCatalogBrandId(''); setCatalogSetId(''); setCatalogSubsetId('')
+                          setCatalogPrintTypeId(''); setCatalogCardTypeId(''); setCatalogTeamId('')
+                          setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogMinYear(''); setCatalogMaxYear('')
+                          filters()
+                          setCurrentScreen('catalog')
+                        }
+                        const rows = [
+                          { label: 'Category',      value: d.category,            onClick: d.category ? () => goTo(() => setCatalogCategory(d.category)) : null },
+                          { label: 'Subcategory',   value: d.subcategory,         onClick: d.subcategory ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory) }) : null },
+                          { label: 'Franchise',     value: d.franchise,           onClick: d.franchise ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise) }) : null },
+                          { label: 'Brand',         value: d.brand,               onClick: d.brand_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id) }) : null },
+                          { label: 'Collectible Set', value: d.collectible_set,   onClick: d.collectible_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id) }) : null },
+                          { label: 'Release Year',  value: d.release_year ?? 'N/A', onClick: d.release_year ? () => goTo(() => { setCatalogMinYear(String(d.release_year)); setCatalogMaxYear(String(d.release_year)) }) : null },
+                          { label: 'Subset',        value: d.subcollectible_set,  onClick: d.subcollectble_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id) }) : null },
+                          { label: 'Print Type',    value: d.print_type,          onClick: d.print_type_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id || ''); setCatalogPrintTypeId(d.print_type_id) }) : null },
+                          { label: 'Subject',       value: d.subject,             onClick: null, subjects: catalogDetailSubjects },
+                          { label: 'Subject Type',  value: d.subject_type,        onClick: null },
+                          { label: 'Species',       value: d.species,             onClick: null },
+                          { label: 'Team(s)',       value: d.teams,               onClick: null },
+                          { label: 'Card Type',     value: d.card_types,          onClick: null },
+                          { label: 'Card Number',   value: d.card_number,         onClick: null },
+                          { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
+                          { label: 'BrickLink ID',  value: d.bricklink_id ?? 'N/A', onClick: null },
+                          { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
+                        ]
+                        return rows.map(({ label, value, onClick, subjects }) => (
+                          <div key={label} className="catalog-detail-info-cell">
+                            <span className="catalog-detail-info-label">{label}</span>
+                            {subjects && subjects.length > 0 ? (
+                              <div className="catalog-detail-subject-links">
+                                {subjects.map(s => (
+                                  <button key={s.id} type="button" className="catalog-detail-info-value catalog-detail-meta-link" onClick={() => goTo(() => { setCatalogSubjectId(s.id); setCatalogSubjectSearch(s.name) })}>{s.name.toUpperCase()}</button>
+                                ))}
+                              </div>
+                            ) : onClick ? (
+                              <button type="button" className="catalog-detail-info-value catalog-detail-meta-link" onClick={onClick}>{value ?? 'N/A'}</button>
+                            ) : (
+                              <span className="catalog-detail-info-value">{value ?? 'N/A'}</span>
+                            )}
+                          </div>
+                        ))
+                      })()}
                     </div>
                   </section>
                 )}
