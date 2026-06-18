@@ -84,6 +84,8 @@ const CATALOG_SUBCATEGORY_OPTIONS = {
   'Video Games': ['PlayStation', 'Xbox', 'Nintendo', 'PC', 'Retro'],
 }
 const CARD_CONDITION_CATEGORIES = new Set(['Trading Cards', 'Sports Cards'])
+const MTG_CARD_TREATMENT_NAMES  = new Set(['Foil', 'Etched', 'Borderless', 'Extended Art', 'Showcase', 'Retro', 'Textless'])
+const SPORTS_CARD_TYPE_NAMES    = new Set(['Foil', 'Patch', 'Rookie', 'Signature'])
 
 // ─── Grading Company Registry ────────────────────────────────────────────────
 const GRADING_COMPANIES = [
@@ -1572,7 +1574,7 @@ function App() {
   const [catalogSetId, setCatalogSetId] = useState('')
   const [catalogSubsetId, setCatalogSubsetId] = useState('')
   const [catalogPrintTypeId, setCatalogPrintTypeId] = useState('')
-  const [catalogCardTypeId, setCatalogCardTypeId] = useState('')
+  const [catalogCardTypeIds, setCatalogCardTypeIds] = useState([])
   const [catalogSubjectId, setCatalogSubjectId] = useState('')
   const [catalogSubjectSearch, setCatalogSubjectSearch] = useState('')
   const [catalogSubjectResults, setCatalogSubjectResults] = useState([])
@@ -1683,6 +1685,15 @@ function App() {
   const [catalogAdminTeams, setCatalogAdminTeams] = useState([])
   const [catalogAdminPrintTypes, setCatalogAdminPrintTypes] = useState([])
   const [catalogAdminCardTypes, setCatalogAdminCardTypes] = useState([])
+  const [catalogMtgCardTypes, setCatalogMtgCardTypes] = useState([])
+  const [catalogRarities, setCatalogRarities] = useState([])
+  const [catalogRarityId, setCatalogRarityId] = useState('')
+  const [catalogAdminMtgCardTypeId, setCatalogAdminMtgCardTypeId] = useState('')
+  const [catalogAdminRarityId, setCatalogAdminRarityId] = useState('')
+  const [catalogItemEditMtgCardTypeId, setCatalogItemEditMtgCardTypeId] = useState('')
+  const [catalogItemEditRarityId, setCatalogItemEditRarityId] = useState('')
+  const [catalogDetailMtgCardTypeId, setCatalogDetailMtgCardTypeId] = useState('')
+  const [catalogDetailRarityId, setCatalogDetailRarityId] = useState('')
   const [catalogAdminSpecies, setCatalogAdminSpecies] = useState([])
   const [catalogAdminSubsets, setCatalogAdminSubsets] = useState([])
   const [catalogAdminBricklinkId, setCatalogAdminBricklinkId] = useState('')
@@ -2034,6 +2045,9 @@ function App() {
   const selectedCatalogAdminCategory =
     catalogAdminCategories.find((category) => category.id === catalogAdminCategoryId) || null
   const selectedCatalogAdminCategoryName = selectedCatalogAdminCategory?.name || ''
+  const selectedCatalogAdminSubcategoryObj = catalogAdminSubcategories.find(s => s.id === catalogAdminSubcategoryId)
+  const catalogAdminIsMtg = selectedCatalogAdminSubcategoryObj?.name === 'Magic: The Gathering'
+  const catalogItemIsMtg = selectedCatalogItem?.subcategoryName === 'Magic: The Gathering' || selectedCatalogItem?._details?.subcategory === 'Magic: The Gathering'
   const catalogAdminConditionOptions = CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName)
     ? CARD_CONDITION_SCALE
     : []
@@ -2431,12 +2445,16 @@ function App() {
       supabase.from('subcategories').select('subcategory_id, name, category_id').order('name'),
       supabase.from('brands').select('brand_id, name').order('name'),
       supabase.from('card_types').select('card_type_id, name').order('name'),
-    ]).then(([cats, subs, brands, cts]) => {
+      supabase.from('mtg_card_types').select('mtg_card_type_id, name').order('sort_order'),
+      supabase.from('rarities').select('rarity_id, name').order('sort_order'),
+    ]).then(([cats, subs, brands, cts, mtgTypes, rarityList]) => {
       if (cats.error) console.error('catalog categories load error:', cats.error)
       setCatalogCategories((cats.data || []).map(r => ({ id: r.category_id, name: r.name })))
       setCatalogSubcategories((subs.data || []).map(r => ({ id: r.subcategory_id, name: r.name, category_id: r.category_id })))
       setCatalogBrands((brands.data || []).map(r => ({ id: r.brand_id, name: r.name })))
       setCatalogAllCardTypes((cts.data || []).map(r => ({ id: r.card_type_id, name: r.name })))
+      setCatalogMtgCardTypes((mtgTypes.data || []).map(r => ({ id: r.mtg_card_type_id, name: r.name })))
+      setCatalogRarities((rarityList.data || []).map(r => ({ id: r.rarity_id, name: r.name })))
     })
   }, [currentScreen, catalogReloadToken])
 
@@ -2584,14 +2602,23 @@ function App() {
         }
         itemsQuery = itemsQuery.in('item_id', teamItemIds)
       }
-      // M2M: card type — pre-query item_ids from item_card_types
-      if (catalogCardTypeId) {
-        const { data: ctRows } = await supabase.from('item_card_types').select('item_id').eq('card_type_id', catalogCardTypeId)
+      // Card type filter — pre-query item_ids from item_card_types junction table
+      if (catalogCardTypeIds.length > 0) {
+        const { data: ctRows } = await supabase.from('item_card_types').select('item_id').in('card_type_id', catalogCardTypeIds)
         const ctItemIds = (ctRows || []).map(r => r.item_id)
         if (!ctItemIds.length) {
           setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
         }
         itemsQuery = itemsQuery.in('item_id', ctItemIds)
+      }
+      // Rarity filter — pre-query item_ids from items table
+      if (catalogRarityId) {
+        const { data: rarityRows } = await supabase.from('items').select('item_id').eq('rarity_id', catalogRarityId)
+        const rarityItemIds = (rarityRows || []).map(r => r.item_id)
+        if (!rarityItemIds.length) {
+          setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
+        }
+        itemsQuery = itemsQuery.in('item_id', rarityItemIds)
       }
       if (queryText) {
         const escapedText = queryText.replace(/[%_]/g, '\\$&')
@@ -2674,7 +2701,7 @@ function App() {
     loadCatalogItems()
   }, [
     catalogBrandId,
-    catalogCardTypeId,
+    catalogCardTypeIds,
     catalogCategory,
     catalogFranchise,
     catalogMaxYear,
@@ -2710,13 +2737,19 @@ function App() {
     if (catalogFranchise !== 'all' && !catalogFranchiseOptions.includes(catalogFranchise)) {
       setCatalogFranchise('all')
     }
-  }, [catalogCategory, catalogCategoryOptions, catalogFranchise, catalogFranchiseOptions, catalogSubcategory, catalogSubcategoryOptions])
+    if (catalogCardTypeIds.length > 0 && !CARD_CONDITION_CATEGORIES.has(catalogCategory)) {
+      setCatalogCardTypeIds([])
+    }
+    if (catalogRarityId && catalogSubcategory !== 'Magic: The Gathering') {
+      setCatalogRarityId('')
+    }
+  }, [catalogCategory, catalogCategoryOptions, catalogFranchise, catalogFranchiseOptions, catalogSubcategory, catalogSubcategoryOptions, catalogCardTypeIds, catalogRarityId])
 
   useEffect(() => {
     setCatalogPage(1)
   }, [
-    catalogBrandId, catalogCardTypeId, catalogCategory, catalogFranchise,
-    catalogMaxYear, catalogMinYear, catalogPrintTypeId, catalogSetId,
+    catalogBrandId, catalogCardTypeIds, catalogCategory, catalogFranchise,
+    catalogMaxYear, catalogMinYear, catalogPrintTypeId, catalogRarityId, catalogSetId,
     catalogSortKey, catalogSubcategory, catalogSubjectId, catalogSubsetId,
     catalogTeamId,
   ])
@@ -2725,18 +2758,21 @@ function App() {
     if (currentScreen !== 'catalog_item' || !selectedCatalogItem?.id) {
       setCatalogItemImages([])
       setCatalogDetailSubjects([])
+      setCatalogDetailMtgCardTypeId('')
+      setCatalogDetailRarityId('')
       return
     }
     let cancelled = false
     const load = async () => {
       const itemBrandId = selectedCatalogItem._details?.brand_id
       const isMinifig = selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col')
-      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }] = await Promise.all([
+      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }] = await Promise.all([
         supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
         supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
         isMinifig && itemBrandId
           ? supabase.from('market_variants').select('market_variant_id, name, sort_order').eq('brand_id', itemBrandId).order('sort_order')
           : Promise.resolve({ data: [] }),
+        supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
       ])
       if (imgErr) console.error('item_images load error:', imgErr)
       if (!cancelled) {
@@ -2744,6 +2780,8 @@ function App() {
         setCatalogDetailSubjects((subjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
         setCatalogMarketVariants(variants || [])
         setCatalogItemConditionId('')
+        setCatalogDetailMtgCardTypeId(itemMeta?.mtg_card_type_id || '')
+        setCatalogDetailRarityId(itemMeta?.rarity_id || '')
       }
     }
     load()
@@ -5160,18 +5198,22 @@ function App() {
       rebrickable_fig_id:   d.rebrickable_fig_id    || '',
     })
     setCatalogItemEditError('')
-    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }] = await Promise.all([
+    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }, { data: itemMtgMeta }] = await Promise.all([
       supabase.from('card_types').select('card_type_id, name').order('name'),
       supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
+      supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
     ])
+    const cardTypesList = (cardTypes || []).map(r => ({ id: r.card_type_id, name: r.name }))
     setCatalogItemEditLookups({
       franchises: [], subjects: [], sets: [], subsets: [], teams: [], printTypes: [],
-      cardTypes: (cardTypes || []).map(r => ({ id: r.card_type_id, name: r.name })),
+      cardTypes: cardTypesList,
     })
     setCatalogItemEditTeamIds((itemTeams || []).map(r => r.team_id))
     setCatalogItemEditCardTypeIds((itemCardTypes || []).map(r => r.card_type_id))
+    setCatalogItemEditMtgCardTypeId(itemMtgMeta?.mtg_card_type_id || '')
+    setCatalogItemEditRarityId(itemMtgMeta?.rarity_id || '')
     setCatalogItemEditSubjectIds((itemSubjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
     setCatalogItemEditSubjectSearch('')
     setCatalogItemEditSubjectResults([])
@@ -5201,6 +5243,10 @@ function App() {
         release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
         upc:                  v.upc?.trim()                   || null,
         piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
+        ...(catalogItemIsMtg ? {
+          mtg_card_type_id: catalogItemEditMtgCardTypeId || null,
+          rarity_id:        catalogItemEditRarityId || null,
+        } : {}),
       })
       .eq('item_id', selectedCatalogItem.id)
     if (error) {
@@ -5218,7 +5264,9 @@ function App() {
     }
     await supabase.from('item_card_types').delete().eq('item_id', selectedCatalogItem.id)
     if (catalogItemEditCardTypeIds.length > 0) {
-      await supabase.from('item_card_types').insert(catalogItemEditCardTypeIds.map(ctid => ({ item_id: selectedCatalogItem.id, card_type_id: ctid })))
+      await supabase.from('item_card_types').insert(
+        catalogItemEditCardTypeIds.map(ctid => ({ item_id: selectedCatalogItem.id, card_type_id: ctid }))
+      )
     }
     setCatalogReloadToken(t => t + 1)
     setIsCatalogItemEditMode(false)
@@ -5416,9 +5464,13 @@ function App() {
           upc:                catalogAdminUpc.trim()              || null,
           piece_count:        catalogAdminPieceCount !== '' ? Number(catalogAdminPieceCount) : null,
         } : {
-          print_type_id: catalogAdminPrintTypeId || null,
-          card_number:   catalogAdminCardNumber.trim() || null,
-          print_count:   catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
+          print_type_id:    catalogAdminPrintTypeId || null,
+          card_number:      catalogAdminCardNumber.trim() || null,
+          print_count:      catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
+          ...(catalogAdminIsMtg ? {
+            mtg_card_type_id: catalogAdminMtgCardTypeId || null,
+            rarity_id:        catalogAdminRarityId || null,
+          } : {}),
         }),
       })
       .select('item_id')
@@ -5456,7 +5508,9 @@ function App() {
       await supabase.from('item_teams').insert(catalogAdminTeamIds.map(tid => ({ item_id: createdItem.item_id, team_id: tid })))
     }
     if (createdItem?.item_id && catalogAdminCardTypeIds.length > 0) {
-      await supabase.from('item_card_types').insert(catalogAdminCardTypeIds.map(ctid => ({ item_id: createdItem.item_id, card_type_id: ctid })))
+      await supabase.from('item_card_types').insert(
+        catalogAdminCardTypeIds.map(ctid => ({ item_id: createdItem.item_id, card_type_id: ctid }))
+      )
     }
 
     setCatalogAdminFrontImageFile(null)
@@ -5475,6 +5529,8 @@ function App() {
       setCatalogAdminUpc('')
       setCatalogAdminPieceCount('')
       setCatalogAdminItemDescription('')
+      setCatalogAdminMtgCardTypeId('')
+      setCatalogAdminRarityId('')
     } else {
       setCatalogAdminItemDescription('')
       setCatalogAdminCardNumber('')
@@ -5494,6 +5550,8 @@ function App() {
       setCatalogAdminSubsetId('')
       setCatalogAdminFranchiseId('')
       setCatalogAdminBrandId('')
+      setCatalogAdminMtgCardTypeId('')
+      setCatalogAdminRarityId('')
       setIsCatalogItemModalOpen(false)
     }
     setIsCreatingCatalogItem(false)
@@ -9597,7 +9655,7 @@ function App() {
                       setCatalogSetId('')
                       setCatalogSubsetId('')
                       setCatalogPrintTypeId('')
-                      setCatalogCardTypeId('')
+                      setCatalogCardTypeIds([])
                       setCatalogSubjectId('')
                       setCatalogSubjectSearch('')
                       setCatalogSubjectResults([])
@@ -9779,21 +9837,42 @@ function App() {
                   </>
                 )}
 
-                {/* Card Type — standalone */}
-                {catalogAllCardTypes.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-card-type">Card Type</label>
-                    <select
-                      id="catalog-card-type"
-                      value={catalogCardTypeId}
-                      onChange={(event) => setCatalogCardTypeId(event.target.value)}
-                    >
+                {/* Card Treatment — checkboxes (cards only, filtered by subcategory) */}
+                {CARD_CONDITION_CATEGORIES.has(catalogCategory) && (() => {
+                  const isMtgFilter = catalogSubcategory === 'Magic: The Gathering'
+                  const filterCardTypes = catalogAllCardTypes.filter(c => {
+                    if (c.name === 'Normal') return false
+                    return isMtgFilter ? MTG_CARD_TREATMENT_NAMES.has(c.name) : SPORTS_CARD_TYPE_NAMES.has(c.name)
+                  })
+                  if (!filterCardTypes.length) return null
+                  return (
+                    <div>
+                      <label>Card Treatment</label>
+                      <div className="catalog-admin-team-list catalog-filter-cardtype-grid">
+                        {filterCardTypes.map(c => (
+                          <label key={c.id} className="catalog-admin-team-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={catalogCardTypeIds.includes(c.id)}
+                              onChange={e => setCatalogCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))}
+                            />
+                            <span>{c.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Rarity — dropdown (MTG only) */}
+                {catalogSubcategory === 'Magic: The Gathering' && catalogRarities.length > 0 && (
+                  <div>
+                    <label htmlFor="catalog-rarity">Rarity</label>
+                    <select id="catalog-rarity" value={catalogRarityId} onChange={e => setCatalogRarityId(e.target.value)}>
                       <option value="">All</option>
-                      {catalogAllCardTypes.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
+                      {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                  </>
+                  </div>
                 )}
 
                 {/* Year range */}
@@ -10150,27 +10229,43 @@ function App() {
                             ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'printType', value: '', subjectType: 'player' })}>+ New Print Type</button>}
                           </div>
                           <div>
-                            <label>Card Types <span className="catalog-admin-hint">(none = Normal)</span></label>
-                            {catalogAdminCardTypes.filter(c => c.name !== 'Normal').length > 0 && (
-                              <div className="catalog-admin-team-list">
-                                {catalogAdminCardTypes.filter(c => c.name !== 'Normal').map(c => (
-                                  <label key={c.id} className="catalog-admin-team-checkbox">
-                                    <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
-                                      onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
-                                    <span>{c.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            )}
-                            {catalogAdminInlineCreate.field === 'cardType' ? (
-                              <div className="catalog-admin-inline-create">
-                                <input autoFocus className="catalog-admin-inline-input" placeholder="Card type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                              </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'cardType', value: '', subjectType: 'player' })}>+ New Card Type</button>}
+                            <label>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></label>
+                            {(() => {
+                              const createCardTypes = catalogAdminCardTypes.filter(c => {
+                                if (c.name === 'Normal') return false
+                                return catalogAdminIsMtg ? MTG_CARD_TREATMENT_NAMES.has(c.name) : SPORTS_CARD_TYPE_NAMES.has(c.name)
+                              })
+                              return createCardTypes.length > 0 ? (
+                                <div className="catalog-admin-team-list">
+                                  {createCardTypes.map(c => (
+                                    <label key={c.id} className="catalog-admin-team-checkbox">
+                                      <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
+                                        onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
+                                      <span>{c.name}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              ) : null
+                            })()}
                           </div>
+                          {catalogAdminIsMtg && (
+                            <>
+                              <div>
+                                <label htmlFor="cai-rarity">Rarity</label>
+                                <select id="cai-rarity" value={catalogAdminRarityId} onChange={e => setCatalogAdminRarityId(e.target.value)}>
+                                  <option value="">— Select —</option>
+                                  {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label htmlFor="cai-mtg-type">Card Type</label>
+                                <select id="cai-mtg-type" value={catalogAdminMtgCardTypeId} onChange={e => setCatalogAdminMtgCardTypeId(e.target.value)}>
+                                  <option value="">— Select —</option>
+                                  {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                </select>
+                              </div>
+                            </>
+                          )}
                           <div>
                             <label htmlFor="cai-card-number">Card Number</label>
                             <input id="cai-card-number" type="text" value={catalogAdminCardNumber} onChange={e => setCatalogAdminCardNumber(e.target.value)} placeholder="e.g. 150" />
@@ -10484,22 +10579,42 @@ function App() {
                           <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>{catalogItemEditValues.franchise_id ? 'No teams in this franchise' : 'Select a franchise to see teams'}</p>
                         )}
                       </div>
-                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
-                        <span>Card Types <span className="catalog-admin-hint">(none = Normal)</span></span>
-                        {catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal').length > 0 ? (
-                          <div className="catalog-admin-team-list">
-                            {catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal').map(ct => (
-                              <label key={ct.id} className="catalog-admin-team-checkbox">
-                                <input type="checkbox" checked={catalogItemEditCardTypeIds.includes(ct.id)}
-                                  onChange={e => setCatalogItemEditCardTypeIds(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))} />
-                                <span>{ct.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No special card types defined.</p>
-                        )}
-                      </div>
+                      {CARD_CONDITION_CATEGORIES.has(selectedCatalogItem?.categoryName) && (
+                        <div className="catalog-item-edit-field catalog-item-edit-field--wide">
+                          <span>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></span>
+                          {(() => {
+                            const editCardTypes = catalogItemEditLookups.cardTypes.filter(ct => {
+                              if (ct.name === 'Normal') return false
+                              return catalogItemIsMtg ? MTG_CARD_TREATMENT_NAMES.has(ct.name) : SPORTS_CARD_TYPE_NAMES.has(ct.name)
+                            })
+                            return editCardTypes.length > 0 ? (
+                              <div className="catalog-admin-team-list">
+                                {editCardTypes.map(ct => (
+                                  <label key={ct.id} className="catalog-admin-team-checkbox">
+                                    <input type="checkbox" checked={catalogItemEditCardTypeIds.includes(ct.id)}
+                                      onChange={e => setCatalogItemEditCardTypeIds(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))} />
+                                    <span>{ct.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No card treatments defined.</p>
+                          })()}
+                          {catalogItemIsMtg && (
+                            <>
+                              <span style={{ marginTop: 12, display: 'block', fontWeight: 600, fontSize: '0.88rem', color: 'var(--detail-label)' }}>Rarity</span>
+                              <select value={catalogItemEditRarityId} onChange={e => setCatalogItemEditRarityId(e.target.value)} style={{ marginTop: 4 }}>
+                                <option value="">— Select —</option>
+                                {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                              </select>
+                              <span style={{ marginTop: 10, display: 'block', fontWeight: 600, fontSize: '0.88rem', color: 'var(--detail-label)' }}>Card Type</span>
+                              <select value={catalogItemEditMtgCardTypeId} onChange={e => setCatalogItemEditMtgCardTypeId(e.target.value)} style={{ marginTop: 4 }}>
+                                <option value="">— Select —</option>
+                                {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                              </select>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="catalog-item-edit-images">
                       <p className="catalog-item-edit-images-label">Images</p>
@@ -11125,7 +11240,7 @@ function App() {
                         const goTo = (filters) => {
                           setCatalogCategory('all'); setCatalogSubcategory(''); setCatalogFranchise('all')
                           setCatalogBrandId(''); setCatalogSetId(''); setCatalogSubsetId('')
-                          setCatalogPrintTypeId(''); setCatalogCardTypeId(''); setCatalogTeamId('')
+                          setCatalogPrintTypeId(''); setCatalogCardTypeIds([]); setCatalogTeamId('')
                           setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogMinYear(''); setCatalogMaxYear('')
                           filters()
                           setCurrentScreen('catalog')
@@ -11143,7 +11258,11 @@ function App() {
                           { label: 'Subject Type',  value: d.subject_type,        onClick: null },
                           { label: 'Species',       value: d.species,             onClick: null },
                           { label: 'Team(s)',       value: d.teams,               onClick: null },
-                          { label: 'Card Type',     value: d.card_types,          onClick: null },
+                          { label: 'Card Treatment', value: d.card_types,           onClick: null },
+                          ...(catalogItemIsMtg ? [
+                            { label: 'Rarity', value: catalogRarities.find(r => r.id === catalogDetailRarityId)?.name ?? 'N/A',                 onClick: null },
+                            { label: 'Type',   value: catalogMtgCardTypes.find(t => t.id === catalogDetailMtgCardTypeId)?.name ?? 'N/A', onClick: null },
+                          ] : []),
                           { label: 'Card Number',   value: d.card_number,         onClick: null },
                           { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
                           ...(d.bricklink_id?.toLowerCase().startsWith('col') ? [
