@@ -3497,7 +3497,7 @@ function App() {
       if (catalogItemIds.length > 0) {
         const { data: catalogRows, error: catalogRowsError } = await supabase
           .from('item_details')
-          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id')
+          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path')
           .in('item_id', catalogItemIds)
 
         if (!catalogRowsError && Array.isArray(catalogRows)) {
@@ -3509,6 +3509,12 @@ function App() {
               const printType   = na(row.print_type)
               const cardNum     = row.card_number && row.card_number !== 'N/A' ? `#${row.card_number}` : ''
               const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
+              const fp          = row.front_image_path
+              const imageUrl    = fp
+                ? fp.startsWith('http')
+                  ? fp
+                  : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || ''
+                : ''
               accumulator[row.item_id] = {
                 id:                row.item_id,
                 name:              nameParts.join(' — ') || row.description || 'Unnamed Item',
@@ -3517,7 +3523,7 @@ function App() {
                 category_id:       row.category_id,
                 subcategory_id:    row.subcategory_id,
                 collectible_set_id: row.collectible_set_id,
-                metadata:          {},
+                metadata:          { image_url: imageUrl },
                 dynamic_fields:    {},
               }
             }
