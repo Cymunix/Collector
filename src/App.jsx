@@ -3523,7 +3523,7 @@ function App() {
                 category_id:       row.category_id,
                 subcategory_id:    row.subcategory_id,
                 collectible_set_id: row.collectible_set_id,
-                metadata:          { image_url: imageUrl },
+                metadata:          { image_url: imageUrl, set: setName },
                 dynamic_fields:    {},
               }
             }
@@ -3800,7 +3800,7 @@ function App() {
     let isCancelled = false
 
     const loadCompletionData = async () => {
-      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult] = await Promise.all([
+      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult, itemCountsResult] = await Promise.all([
         supabase
           .from('collectible_sets')
           .select('collectible_set_id, name')
@@ -3817,7 +3817,16 @@ function App() {
           .not('collectible_set_id', 'is', null)
           .eq('is_active', true)
           .order('created_at', { ascending: true }),
+        supabase
+          .from('items')
+          .select('collectible_set_id')
+          .not('collectible_set_id', 'is', null),
       ])
+
+      const itemCountBySetId = (itemCountsResult.data || []).reduce((acc, r) => {
+        acc[r.collectible_set_id] = (acc[r.collectible_set_id] || 0) + 1
+        return acc
+      }, {})
 
       if (isCancelled) {
         return
@@ -3829,11 +3838,10 @@ function App() {
               id:         r.collectible_set_id,
               set_name:   r.name || '',
               brand_name: '',
-              // keep fields downstream code may read, with safe defaults
               category_name:    '',
               subcategory_name: '',
               franchise_name:   '',
-              total_items:      0,
+              total_items:      itemCountBySetId[r.collectible_set_id] || 0,
               total_estimated_value: 0,
               breakdown: null,
               metadata:  {},
