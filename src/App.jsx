@@ -8268,9 +8268,10 @@ function App() {
           (item.setName || '').trim().toLowerCase() === normalizedSetName &&
           (!normalizedCategoryName || (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName),
       )
-      const totalItems = setEntries.length > 0 ? setEntries.length : Number(setRecord.total_items || 0)
-      const ownedEntries = setEntries.filter(
-        (entry) => entry?.catalog_item_id && ownedCatalogItemIds.has(entry.catalog_item_id),
+      const linkedEntries = setEntries.filter(e => e.catalog_item_id)
+      const totalItems = linkedEntries.length > 0 ? linkedEntries.length : Number(setRecord.total_items || 0)
+      const ownedEntries = linkedEntries.filter(
+        (entry) => ownedCatalogItemIds.has(entry.catalog_item_id),
       )
       const ownedCount = ownedEntries.length > 0 ? ownedEntries.length : fallbackOwnedItems.length
 
@@ -8315,8 +8316,9 @@ function App() {
   const selectedCompletionSetEntries = selectedCompletionSet
     ? (() => {
         const setEntries = collectibleSetEntriesBySetId[selectedCompletionSet.id] || []
-        if (setEntries.length > 0) {
-          return setEntries.map((entry) => {
+        const linkedSetEntries = setEntries.filter(e => e.catalog_item_id)
+        if (linkedSetEntries.length > 0) {
+          return linkedSetEntries.map((entry) => {
             const ownedItem = entry?.catalog_item_id ? ownedItemsByCatalogId[entry.catalog_item_id] : null
             return {
               id: entry.id,
@@ -8332,12 +8334,12 @@ function App() {
         }
 
         const normalizedSetName = (selectedCompletionSet.setName || '').trim().toLowerCase()
-        const normalizedCategoryName = (selectedCompletionSet.categoryName || '').trim().toLowerCase()
+        const normalizedCatName = (selectedCompletionSet.categoryName || '').trim().toLowerCase()
         return collectionItems
           .filter(
             (item) =>
               (item.setName || '').trim().toLowerCase() === normalizedSetName &&
-              (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName,
+              (!normalizedCatName || (item.categoryName || '').trim().toLowerCase() === normalizedCatName),
           )
           .map((item) => ({
             id: `owned-${selectedCompletionSet.id}-${item.id}`,
