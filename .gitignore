@@ -1,3 +1,7 @@
+# Scryfall / import data (large binary data files, not source)
+all-cards-*.json
+unmatched.csv
+
 # Logs
 logs
 *.log

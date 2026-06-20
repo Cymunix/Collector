@@ -1415,7 +1415,17 @@ const getPlanDisplayLabel = (profile) => {
 
 function App() {
   const [posSession, setPosSession] = useState(null)
-  const [currentScreen, setCurrentScreen] = useState('home')
+  const [currentScreen, setCurrentScreen] = useState(() => {
+    // On back/forward navigation the browser restores history.state before React mounts
+    const fromHistory = window.history.state?.screen
+    if (fromHistory) return fromHistory === 'catalog_item' ? 'catalog' : fromHistory
+    try {
+      const saved = sessionStorage.getItem('ch_screen')
+      if (saved === 'catalog_item') return 'catalog'
+      if (saved) return saved
+    } catch (_) {}
+    return 'home'
+  })
   const [isAuthOpen, setIsAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState('signin')
   const [email, setEmail] = useState('')
@@ -1588,6 +1598,9 @@ function App() {
   const [catalogLoadError, setCatalogLoadError] = useState('')
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
   const [catalogPage, setCatalogPage] = useState(1)
+  const [catalogViewMode, setCatalogViewMode] = useState('grid')
+  const [catalogSetNavItems, setCatalogSetNavItems] = useState([])
+  const [catalogSetNavIndex, setCatalogSetNavIndex] = useState(-1)
   const [catalogTotalItemCount, setCatalogTotalItemCount] = useState(0)
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
   const [catalogItemImages, setCatalogItemImages] = useState([])
@@ -1623,6 +1636,8 @@ function App() {
   const [ownedCatalogItemCounts, setOwnedCatalogItemCounts] = useState({})
   const [ownedCatalogItemCerts, setOwnedCatalogItemCerts] = useState({})
   const [ownedCatalogItemPurchases, setOwnedCatalogItemPurchases] = useState({})
+  const [wishlistItemIds, setWishlistItemIds] = useState(new Set())
+  const [catalogListStats, setCatalogListStats] = useState({})
   const [collectionItems, setCollectionItems] = useState([])
   const [collectionInventoryRows, setCollectionInventoryRows] = useState([])
   const [isCollectionLoading, setIsCollectionLoading] = useState(false)
@@ -1639,11 +1654,14 @@ function App() {
   const [collectionCopySalePriceInput, setCollectionCopySalePriceInput] = useState('')
   const [collectionItemDetailActionError, setCollectionItemDetailActionError] = useState('')
   const [collectionItemDetailActionMessage, setCollectionItemDetailActionMessage] = useState('')
+  const [removeConfirmItemId, setRemoveConfirmItemId] = useState('')
   const [isUploadingCollectionCopyImage, setIsUploadingCollectionCopyImage] = useState(false)
   const [isListingCollectionCopyForSale, setIsListingCollectionCopyForSale] = useState(false)
   const [collectibleSets, setCollectibleSets] = useState([])
   const [collectibleSetEntries, setCollectibleSetEntries] = useState([])
   const [selectedCompletionSetId, setSelectedCompletionSetId] = useState('')
+  const [completionSetAllItems, setCompletionSetAllItems] = useState([])
+  const [completionSheetPopup, setCompletionSheetPopup] = useState(null)
   const [trackedCollectionGoals, setTrackedCollectionGoals] = useState([])
   const [goalReloadToken, setGoalReloadToken] = useState(0)
   const [activeCollectionFilter, setActiveCollectionFilter] = useState('all')
@@ -1741,6 +1759,12 @@ function App() {
   const defaultCollectionIdRef = useRef('')
   const isAutoSyncingCompletionGoalsRef = useRef(false)
   const catalogLookupRef = useRef({ subjectMap: {}, setMap: {}, printTypeMap: {} })
+  const completionDetailRef = useRef(null)
+  const catalogEditInitialRef = useRef(false)
+  const catalogLastSubcategoryRef = useRef('')
+  const catalogLastFranchiseRef = useRef('')
+  const catalogLastSetIdRef = useRef('')
+  const catalogLastSubsetIdRef = useRef('')
 
   const tierLabel = profile?.subscription_tier
     ? tierLabels[profile.subscription_tier] ?? 'Unknown Tier'
@@ -2437,6 +2461,28 @@ function App() {
     loadPlans()
   }, [currentScreen])
 
+  useEffect(() => {
+    try { sessionStorage.setItem('ch_screen', currentScreen) } catch (_) {}
+    if (window.history.state?.screen !== currentScreen) {
+      if (window.history.state == null) {
+        // Replace the initial page-load entry so back button leaves the site, not a stateless entry
+        window.history.replaceState({ screen: currentScreen }, '')
+      } else {
+        window.history.pushState({ screen: currentScreen }, '')
+      }
+    }
+  }, [currentScreen])
+
+  useEffect(() => {
+    const onPop = (event) => {
+      const screen = event.state?.screen
+      if (!screen) return
+      setCurrentScreen(screen === 'catalog_item' ? 'catalog' : screen)
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
   // Effect A: stable lookups — categories, subcategories, brands, card types
   useEffect(() => {
     if (currentScreen !== 'catalog') return
@@ -2461,17 +2507,21 @@ function App() {
   // Effect B: franchise cascade from subcategory via franchise_subcategory
   useEffect(() => {
     if (currentScreen !== 'catalog') return
-    const subcategoryId = selectedCatalogSubcategoryRecord?.id
+    const subcategoryId = selectedCatalogSubcategoryRecord?.id || ''
+    const subcategoryChanged = subcategoryId !== catalogLastSubcategoryRef.current
+    catalogLastSubcategoryRef.current = subcategoryId
     if (!subcategoryId) {
       supabase.from('franchises').select('franchise_id, name').order('name')
         .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
       return
     }
-    setCatalogFranchise('all')
-    setCatalogTeamId('')
-    setCatalogSetId('')
-    setCatalogSubsetId('')
-    setCatalogPrintTypeId('')
+    if (subcategoryChanged) {
+      setCatalogFranchise('all')
+      setCatalogTeamId('')
+      setCatalogSetId('')
+      setCatalogSubsetId('')
+      setCatalogPrintTypeId('')
+    }
     supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
       .then(({ data: fsRows }) => {
         const ids = (fsRows || []).map(r => r.franchise_id)
@@ -2484,7 +2534,9 @@ function App() {
   // Effect C: team + set cascade from franchise (set also depends on brand)
   useEffect(() => {
     if (currentScreen !== 'catalog') return
-    const franchiseId = selectedCatalogFranchiseRecord?.id
+    const franchiseId = selectedCatalogFranchiseRecord?.id || ''
+    const franchiseChanged = franchiseId !== catalogLastFranchiseRef.current
+    catalogLastFranchiseRef.current = franchiseId
     if (!franchiseId) {
       setCatalogTeams([])
       setCatalogSets([])
@@ -2492,10 +2544,12 @@ function App() {
       setCatalogPrintTypes([])
       return
     }
-    setCatalogTeamId('')
-    setCatalogSetId('')
-    setCatalogSubsetId('')
-    setCatalogPrintTypeId('')
+    if (franchiseChanged) {
+      setCatalogTeamId('')
+      setCatalogSetId('')
+      setCatalogSubsetId('')
+      setCatalogPrintTypeId('')
+    }
     supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
       .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
     let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
@@ -2506,15 +2560,14 @@ function App() {
   // Effect D: subcollectible set cascade from collectible set
   useEffect(() => {
     if (currentScreen !== 'catalog') return
+    const setChanged = catalogSetId !== catalogLastSetIdRef.current
+    catalogLastSetIdRef.current = catalogSetId
     if (!catalogSetId) {
       setCatalogSubsets([])
-      setCatalogSubsetId('')
-      setCatalogPrintTypes([])
-      setCatalogPrintTypeId('')
+      if (setChanged) { setCatalogSubsetId(''); setCatalogPrintTypes([]); setCatalogPrintTypeId('') }
       return
     }
-    setCatalogSubsetId('')
-    setCatalogPrintTypeId('')
+    if (setChanged) { setCatalogSubsetId(''); setCatalogPrintTypeId('') }
     supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', catalogSetId).order('name')
       .then(({ data }) => setCatalogSubsets((data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))))
   }, [currentScreen, catalogSetId])
@@ -2522,12 +2575,14 @@ function App() {
   // Effect E: print type cascade from subcollectible set
   useEffect(() => {
     if (currentScreen !== 'catalog') return
+    const subsetChanged = catalogSubsetId !== catalogLastSubsetIdRef.current
+    catalogLastSubsetIdRef.current = catalogSubsetId
     if (!catalogSubsetId) {
       setCatalogPrintTypes([])
-      setCatalogPrintTypeId('')
+      if (subsetChanged) setCatalogPrintTypeId('')
       return
     }
-    setCatalogPrintTypeId('')
+    if (subsetChanged) setCatalogPrintTypeId('')
     supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', catalogSubsetId).order('name')
       .then(({ data }) => setCatalogPrintTypes((data || []).map(r => ({ id: r.print_type_id, name: r.name }))))
   }, [currentScreen, catalogSubsetId])
@@ -3086,21 +3141,28 @@ function App() {
   // Edit panel: franchise cascade from subcategory
   useEffect(() => {
     if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
     const subcategoryId = catalogItemEditValues.subcategory_id
     if (!subcategoryId) {
       setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
-      setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
       return
     }
     supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
       .then(({ data: fsRows }) => {
         const ids = (fsRows || []).map(r => r.franchise_id)
-        if (!ids.length) { setCatalogItemEditLookups(v => ({ ...v, franchises: [] })); setCatalogItemEditValues(v => ({ ...v, franchise_id: '' })); return }
+        if (!ids.length) {
+          setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
+          if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
+          return
+        }
         supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
           .then(({ data }) => {
             const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
             setCatalogItemEditLookups(v => ({ ...v, franchises: list }))
-            setCatalogItemEditValues(v => ({ ...v, franchise_id: list.some(f => f.id === v.franchise_id) ? v.franchise_id : '' }))
+            if (!isInitialLoad) {
+              setCatalogItemEditValues(v => ({ ...v, franchise_id: list.some(f => f.id === v.franchise_id) ? v.franchise_id : '' }))
+            }
           })
       })
   }, [isCatalogItemEditMode, catalogItemEditValues.subcategory_id])
@@ -3108,28 +3170,32 @@ function App() {
   // Edit panel: cascade teams from franchise
   useEffect(() => {
     if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
     const franchiseId = catalogItemEditValues.franchise_id
     if (!franchiseId) {
       setCatalogItemEditLookups(v => ({ ...v, teams: [] }))
-      setCatalogItemEditTeamIds([])
+      if (!isInitialLoad) setCatalogItemEditTeamIds([])
       return
     }
     supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
       .then(({ data }) => {
         const newTeams = (data || []).map(r => ({ id: r.team_id, name: r.name }))
         setCatalogItemEditLookups(v => ({ ...v, teams: newTeams }))
-        setCatalogItemEditTeamIds(prev => prev.filter(id => newTeams.some(t => t.id === id)))
+        if (!isInitialLoad) {
+          setCatalogItemEditTeamIds(prev => prev.filter(id => newTeams.some(t => t.id === id)))
+        }
       })
   }, [isCatalogItemEditMode, catalogItemEditValues.franchise_id])
 
   // Edit panel: cascade collectible sets from franchise + brand
   useEffect(() => {
     if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
     const franchiseId = catalogItemEditValues.franchise_id
     const brandId = catalogItemEditValues.brand_id
     if (!franchiseId && !brandId) {
       setCatalogItemEditLookups(v => ({ ...v, sets: [] }))
-      setCatalogItemEditValues(v => ({ ...v, collectible_set_id: '' }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, collectible_set_id: '' }))
       return
     }
     let query = supabase.from('collectible_sets').select('collectible_set_id, name').order('name')
@@ -3138,43 +3204,58 @@ function App() {
     query.then(({ data }) => {
       const newSets = (data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))
       setCatalogItemEditLookups(v => ({ ...v, sets: newSets }))
-      setCatalogItemEditValues(v => ({ ...v, collectible_set_id: newSets.some(s => s.id === v.collectible_set_id) ? v.collectible_set_id : '' }))
+      if (!isInitialLoad) {
+        setCatalogItemEditValues(v => ({ ...v, collectible_set_id: newSets.some(s => s.id === v.collectible_set_id) ? v.collectible_set_id : '' }))
+      }
     })
   }, [isCatalogItemEditMode, catalogItemEditValues.franchise_id, catalogItemEditValues.brand_id])
 
   // Edit panel: cascade subsets from collectible set
   useEffect(() => {
     if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
     const setId = catalogItemEditValues.collectible_set_id
     if (!setId) {
       setCatalogItemEditLookups(v => ({ ...v, subsets: [] }))
-      setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: '' }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: '' }))
       return
     }
     supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', setId).order('name')
       .then(({ data }) => {
         const newSubsets = (data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))
         setCatalogItemEditLookups(v => ({ ...v, subsets: newSubsets }))
-        setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: newSubsets.some(s => s.id === v.subcollectble_set_id) ? v.subcollectble_set_id : '' }))
+        if (!isInitialLoad) {
+          setCatalogItemEditValues(v => ({ ...v, subcollectble_set_id: newSubsets.some(s => s.id === v.subcollectble_set_id) ? v.subcollectble_set_id : '' }))
+        }
       })
   }, [isCatalogItemEditMode, catalogItemEditValues.collectible_set_id])
 
   // Edit panel: cascade print types from subset
   useEffect(() => {
     if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
     const subsetId = catalogItemEditValues.subcollectble_set_id
     if (!subsetId) {
       setCatalogItemEditLookups(v => ({ ...v, printTypes: [] }))
-      setCatalogItemEditValues(v => ({ ...v, print_type_id: '' }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, print_type_id: '' }))
       return
     }
     supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', subsetId).order('name')
       .then(({ data }) => {
         const newTypes = (data || []).map(r => ({ id: r.print_type_id, name: r.name }))
         setCatalogItemEditLookups(v => ({ ...v, printTypes: newTypes }))
-        setCatalogItemEditValues(v => ({ ...v, print_type_id: newTypes.some(t => t.id === v.print_type_id) ? v.print_type_id : '' }))
+        if (!isInitialLoad) {
+          setCatalogItemEditValues(v => ({ ...v, print_type_id: newTypes.some(t => t.id === v.print_type_id) ? v.print_type_id : '' }))
+        }
       })
   }, [isCatalogItemEditMode, catalogItemEditValues.subcollectble_set_id])
+
+  // Clear the initial-load guard after a tick so cascade effects all capture it before it's cleared
+  useEffect(() => {
+    if (!isCatalogItemEditMode) { catalogEditInitialRef.current = false; return }
+    const timer = setTimeout(() => { catalogEditInitialRef.current = false }, 0)
+    return () => clearTimeout(timer)
+  }, [isCatalogItemEditMode])
 
   useEffect(() => {
     const loadExistingPeopleAndMinifigs = async () => {
@@ -3318,6 +3399,7 @@ function App() {
       setOwnedCatalogItemCounts({})
       setOwnedCatalogItemCerts({})
       setOwnedCatalogItemPurchases({})
+      setWishlistItemIds(new Set())
       return
     }
 
@@ -3402,7 +3484,37 @@ function App() {
     return () => {
       isCancelled = true
     }
+  }, [currentUser?.id, collectionReloadToken])
+
+  useEffect(() => {
+    if (!currentUser?.id) return
+    let cancelled = false
+    supabase
+      .from('wishlist_items')
+      .select('catalog_item_id')
+      .eq('user_id', currentUser.id)
+      .then(({ data }) => {
+        if (cancelled) return
+        setWishlistItemIds(new Set((data || []).map((r) => r.catalog_item_id)))
+      })
+    return () => { cancelled = true }
   }, [currentUser?.id])
+
+  useEffect(() => {
+    if (catalogViewMode !== 'list' || catalogItems.length === 0) {
+      setCatalogListStats({})
+      return
+    }
+    let cancelled = false
+    const ids = catalogItems.map((i) => i.id)
+    supabase.rpc('get_item_market_stats', { item_ids: ids }).then(({ data }) => {
+      if (cancelled || !Array.isArray(data)) return
+      const map = {}
+      data.forEach((row) => { map[row.catalog_item_id] = row })
+      setCatalogListStats(map)
+    })
+    return () => { cancelled = true }
+  }, [catalogItems, catalogViewMode])
 
   useEffect(() => {
     if (currentScreen !== 'collection' && currentScreen !== 'collection_item') {
@@ -4674,6 +4786,38 @@ function App() {
     )
     setCurrentScreen('catalog_item')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+
+    // Load set navigation context if the item belongs to a set
+    const setId = item.collectible_set_id || item._details?.collectible_set_id || null
+    if (setId) {
+      setCatalogSetNavItems([])
+      setCatalogSetNavIndex(-1)
+      supabase
+        .from('item_details')
+        .select('item_id, subject, collectible_set, print_type, card_number, front_image_path, category_id, subcategory_id, franchise_id, brand_id, collectible_set_id, description, release_year')
+        .eq('collectible_set_id', setId)
+        .order('card_number', { ascending: true, nullsFirst: false })
+        .then(({ data }) => {
+          if (!data || data.length < 2) return
+          const navItems = data.map(r => {
+            const na = (v) => (v && v !== 'N/A' ? v : '')
+            const fp = r.front_image_path
+            const imageUrl = fp ? (fp.startsWith('http') ? fp : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || '') : ''
+            return {
+              id: r.item_id,
+              name: [na(r.subject), na(r.print_type), r.card_number && r.card_number !== 'N/A' ? `#${r.card_number}` : ''].filter(Boolean).join(' — ') || na(r.subject) || 'Unknown',
+              imageUrl,
+              raw: r,
+            }
+          })
+          const idx = navItems.findIndex(n => n.id === item.id)
+          setCatalogSetNavItems(navItems)
+          setCatalogSetNavIndex(idx)
+        })
+    } else {
+      setCatalogSetNavItems([])
+      setCatalogSetNavIndex(-1)
+    }
   }
 
   const resetAddToCollectionForm = () => {
@@ -4839,6 +4983,7 @@ function App() {
       })
     }
 
+    setCollectionReloadToken((t) => t + 1)
     return true
   }
 
@@ -5231,6 +5376,7 @@ function App() {
     setCatalogItemEditSubjectIds((itemSubjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
     setCatalogItemEditSubjectSearch('')
     setCatalogItemEditSubjectResults([])
+    catalogEditInitialRef.current = true
     setIsCatalogItemEditMode(true)
   }
 
@@ -7820,6 +7966,26 @@ function App() {
     setCollectionReloadToken((currentToken) => currentToken + 1)
   }
 
+  const handleRemoveCollectionItem = async (item, mode) => {
+    if (!currentUser?.id) return
+    setRemoveConfirmItemId('')
+    if (mode === 'all') {
+      await supabase.from('owned_copies').delete().eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
+    } else {
+      const { data: copies } = await supabase
+        .from('owned_copies')
+        .select('id')
+        .eq('user_id', currentUser.id)
+        .eq('catalog_item_id', item.id)
+        .order('created_at', { ascending: true })
+        .limit(1)
+      if (copies?.[0]?.id) {
+        await supabase.from('owned_copies').delete().eq('id', copies[0].id)
+      }
+    }
+    setCollectionReloadToken((t) => t + 1)
+  }
+
   const handleDeleteActiveCollection = async () => {
     if (!currentUser?.id || activeCollectionFilter === 'all') {
       return
@@ -8315,14 +8481,35 @@ function App() {
   const selectedCompletionSet = startedSetCards.find((setCard) => setCard.id === selectedCompletionSetId) || null
   const selectedCompletionSetEntries = selectedCompletionSet
     ? (() => {
+        // Best path: catalog items fetched for this set (gives full list + images)
+        if (completionSetAllItems.length > 0) {
+          return completionSetAllItems.map((catalogItem) => {
+            const ownedItem = ownedItemsByCatalogId[catalogItem.item_id] || null
+            return {
+              id: catalogItem.item_id,
+              itemName: catalogItem.name,
+              imageUrl: catalogItem.imageUrl,
+              raw: catalogItem.raw,
+              isOwned: Boolean(ownedItem),
+              quantity: Number(ownedItem?.totalQuantity || 0),
+              marketValue: Number(ownedItem?.currentMarketValue || 0),
+              estimatedPrice: 0,
+              rarity: '',
+              itemKey: catalogItem.item_id,
+            }
+          })
+        }
+
+        // Fallback: linked subcollectible_set entries
         const setEntries = collectibleSetEntriesBySetId[selectedCompletionSet.id] || []
         const linkedSetEntries = setEntries.filter(e => e.catalog_item_id)
         if (linkedSetEntries.length > 0) {
           return linkedSetEntries.map((entry) => {
-            const ownedItem = entry?.catalog_item_id ? ownedItemsByCatalogId[entry.catalog_item_id] : null
+            const ownedItem = ownedItemsByCatalogId[entry.catalog_item_id] || null
             return {
               id: entry.id,
               itemName: entry.item_name || ownedItem?.name || entry.item_key || 'Unknown item',
+              imageUrl: ownedItem?.imageUrl || '',
               itemKey: entry.item_key || '',
               rarity: entry.rarity || '',
               isOwned: Boolean(ownedItem),
@@ -8333,6 +8520,7 @@ function App() {
           })
         }
 
+        // Last resort: owned collection items matching set name
         const normalizedSetName = (selectedCompletionSet.setName || '').trim().toLowerCase()
         const normalizedCatName = (selectedCompletionSet.categoryName || '').trim().toLowerCase()
         return collectionItems
@@ -8344,6 +8532,7 @@ function App() {
           .map((item) => ({
             id: `owned-${selectedCompletionSet.id}-${item.id}`,
             itemName: item.name || 'Owned item',
+            imageUrl: item.imageUrl || '',
             itemKey: item.id,
             rarity: '',
             isOwned: true,
@@ -8428,10 +8617,49 @@ function App() {
     }
 
     const selectedStillExists = startedSetCards.some((setCard) => setCard.id === selectedCompletionSetId)
-    if (!selectedStillExists) {
-      setSelectedCompletionSetId(startedSetCards[0].id)
+    if (!selectedStillExists && selectedCompletionSetId) {
+      setSelectedCompletionSetId('')
     }
   }, [selectedCompletionSetId, startedSetCards])
+
+  useEffect(() => {
+    if (!selectedCompletionSetId) {
+      setCompletionSetAllItems([])
+      return
+    }
+    let cancelled = false
+    supabase
+      .from('item_details')
+      .select('*')
+      .eq('collectible_set_id', selectedCompletionSetId)
+      .order('card_number', { ascending: true, nullsFirst: false })
+      .then(({ data }) => {
+        if (cancelled) return
+        const na = (v) => (v && v !== 'N/A' ? v : '')
+        setCompletionSetAllItems(
+          (data || []).map((r) => {
+            const fp = r.front_image_path
+            const imageUrl = fp
+              ? fp.startsWith('http')
+                ? fp
+                : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || ''
+              : ''
+            const subjectName = na(r.subject)
+            const setName     = na(r.collectible_set)
+            const printType   = na(r.print_type)
+            const cardNum     = r.card_number && r.card_number !== 'N/A' ? `#${r.card_number}` : ''
+            const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
+            return {
+              item_id:  r.item_id,
+              name:     subjectName || nameParts.join(' — ') || r.description || 'Unknown',
+              imageUrl,
+              raw:      r,
+            }
+          }),
+        )
+      })
+    return () => { cancelled = true }
+  }, [selectedCompletionSetId])
 
   useEffect(() => {
     setCollectionOverviewPage(1)
@@ -9086,98 +9314,145 @@ function App() {
                     </div>
                   ) : collectionViewTab === 'completion' ? (
                     <div className="collection-completion-stack">
-                      <article className="catalog-card collection-analytics-card">
-                        <h3>Sets You Started</h3>
-                        <p className="collection-muted">Completion is automatic from your inventory. Click a set to see what you own and what is missing.</p>
-                      </article>
-
-                      <section className="collection-goal-grid" aria-label="Started sets">
-                        {startedSetCards.length === 0 ? (
-                          <article className="catalog-card catalog-loading-panel">
-                            No started sets found yet. Add items to your collection to see set progress.
+                      {!selectedCompletionSetId ? (
+                        <>
+                          <article className="catalog-card collection-analytics-card">
+                            <h3>Sets You Started</h3>
+                            <p className="collection-muted">Completion is automatic from your inventory. Click a set to see what you own and what is missing.</p>
                           </article>
-                        ) : (
-                          startedSetCards.map((setCard) => (
-                            <article
-                              key={`started-set-${setCard.id}`}
-                              className="catalog-card collection-goal-card"
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => setSelectedCompletionSetId(setCard.id)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault()
-                                  setSelectedCompletionSetId(setCard.id)
-                                }
-                              }}
-                            >
-                              <div className="collection-goal-card-head">
-                                <div>
-                                  <h3>{setCard.title}</h3>
-                                  <p>{setCard.categoryName}</p>
-                                </div>
-                                <button type="button" className="catalog-action-pill" onClick={() => setSelectedCompletionSetId(setCard.id)}>
-                                  View Set
-                                </button>
-                              </div>
-                              <div className="collection-goal-progress-row">
-                                <strong>{setCard.ownedCount} / {setCard.totalItems}</strong>
-                                <span>{setCard.completionPercent.toFixed(1)}% Complete</span>
-                              </div>
-                              <div className="collection-allocation-bar-track">
-                                <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(setCard.completionPercent, 100)}%` }} />
-                              </div>
-                              <div className="collection-goal-metrics">
-                                <span>Missing: {setCard.missingCount}</span>
-                                <span>Owned Value: {formatUsd(setCard.ownedValue)}</span>
-                                <span>Estimated Completion Cost: {setCard.estimatedRemainingCost == null ? 'N/A' : formatUsd(setCard.estimatedRemainingCost)}</span>
-                              </div>
-                              {Object.keys(setCard.breakdown || {}).length > 0 ? (
-                                <div className="collection-goal-breakdown">
-                                  {Object.entries(setCard.breakdown).map(([label, value]) => (
-                                    <span key={`goal-breakdown-${setCard.id}-${label}`}>{label}: {value}</span>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </article>
-                          ))
-                        )}
-                      </section>
 
-                      {selectedCompletionSet ? (
-                        <article className="catalog-card collection-analytics-card">
-                          <h3>{selectedCompletionSet.title}</h3>
-                          <p className="collection-muted">
-                            {selectedCompletionSet.ownedCount} owned | {selectedCompletionSet.missingCount} missing | {selectedCompletionSet.completionPercent.toFixed(1)}% complete
-                          </p>
+                          <section className="collection-goal-grid" aria-label="Started sets">
+                            {startedSetCards.length === 0 ? (
+                              <article className="catalog-card catalog-loading-panel">
+                                No started sets found yet. Add items to your collection to see set progress.
+                              </article>
+                            ) : (
+                              startedSetCards.map((setCard) => (
+                                <article
+                                  key={`started-set-${setCard.id}`}
+                                  className="catalog-card collection-goal-card"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setSelectedCompletionSetId(setCard.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault()
+                                      setSelectedCompletionSetId(setCard.id)
+                                    }
+                                  }}
+                                >
+                                  <div className="collection-goal-card-head">
+                                    <div>
+                                      <h3>{setCard.title}</h3>
+                                      <p>{setCard.categoryName}</p>
+                                    </div>
+                                    <button type="button" className="catalog-action-pill" onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedCompletionSetId(setCard.id)
+                                    }}>
+                                      View Set
+                                    </button>
+                                  </div>
+                                  <div className="collection-goal-progress-row">
+                                    <strong>{setCard.ownedCount} / {setCard.totalItems}</strong>
+                                    <span>{setCard.completionPercent.toFixed(1)}% Complete</span>
+                                  </div>
+                                  <div className="collection-allocation-bar-track">
+                                    <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(setCard.completionPercent, 100)}%` }} />
+                                  </div>
+                                  <div className="collection-goal-metrics">
+                                    <span>Missing: {setCard.missingCount}</span>
+                                    <span>Owned Value: {formatUsd(setCard.ownedValue)}</span>
+                                    <span>Estimated Completion Cost: {setCard.estimatedRemainingCost == null ? 'N/A' : formatUsd(setCard.estimatedRemainingCost)}</span>
+                                  </div>
+                                  {Object.keys(setCard.breakdown || {}).length > 0 ? (
+                                    <div className="collection-goal-breakdown">
+                                      {Object.entries(setCard.breakdown).map(([label, value]) => (
+                                        <span key={`goal-breakdown-${setCard.id}-${label}`}>{label}: {value}</span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </article>
+                              ))
+                            )}
+                          </section>
+                        </>
+                      ) : selectedCompletionSet ? (
+                        <div className="completion-set-sheet">
+                          <div className="completion-sheet-header">
+                            <button type="button" className="catalog-action-pill" onClick={() => setSelectedCompletionSetId('')}>
+                              ← All Sets
+                            </button>
+                            <div className="completion-sheet-title">
+                              <h3>{selectedCompletionSet.title}</h3>
+                              <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
+                            </div>
+                            <div className="completion-sheet-pct">{selectedCompletionSet.completionPercent.toFixed(0)}%</div>
+                          </div>
+                          <div className="completion-sheet-progress-track">
+                            <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(selectedCompletionSet.completionPercent, 100)}%` }} />
+                          </div>
                           {selectedCompletionSetEntries.length === 0 ? (
-                            <p className="collection-muted">No set-entry registry rows yet for this set.</p>
+                            <p className="collection-muted completion-sheet-empty">No items tracked for this set yet.</p>
                           ) : (
-                            <div className="collection-metrics-list">
-                              {selectedCompletionSetEntries.map((entry) => (
-                                <div key={`completion-entry-${entry.id}`} className="collection-metric-row">
-                                  <div>
-                                    <strong>{entry.itemName}</strong>
-                                    <p>
-                                      {entry.itemKey || 'No item key'}
-                                      {entry.rarity ? ` | ${entry.rarity}` : ''}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <span>{entry.isOwned ? `Owned x${entry.quantity}` : 'Missing'}</span>
-                                    <p>
-                                      {entry.isOwned
-                                        ? formatUsd(entry.marketValue)
-                                        : entry.estimatedPrice > 0
-                                          ? `Est. ${formatUsd(entry.estimatedPrice)}`
-                                          : 'No estimate'}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
+                            <div className="completion-sheet-grid">
+                              {selectedCompletionSetEntries.map((entry, index) => {
+                                const na = (v) => (v && v !== 'N/A' ? v : '')
+                                const r = entry.raw
+                                const catalogItemObj = r ? {
+                                  id:                 r.item_id,
+                                  name:               entry.itemName,
+                                  description:        r.description || '',
+                                  release_year:       r.release_year || null,
+                                  category_id:        r.category_id,
+                                  subcategory_id:     r.subcategory_id,
+                                  franchise_id:       r.franchise_id,
+                                  collectible_set_id: r.collectible_set_id,
+                                  brand_id:           r.brand_id,
+                                  card_number:        r.card_number !== 'N/A' ? r.card_number : null,
+                                  print_count:        r.print_count,
+                                  metadata:           { image_url: entry.imageUrl, set: na(r.collectible_set) },
+                                  dynamic_fields:     {},
+                                  _subject_name:      na(r.subject),
+                                  _set_name:          na(r.collectible_set),
+                                  _print_type:        na(r.print_type),
+                                  _brand_name:        na(r.brand),
+                                  _franchise_name:    na(r.franchise),
+                                  _details:           r,
+                                  front_image_path:   r.front_image_path || null,
+                                } : null
+                                return (
+                                  <button
+                                    key={`sheet-${entry.id}`}
+                                    type="button"
+                                    className={`completion-sheet-item${entry.isOwned ? ' owned' : ' missing'}`}
+                                    onClick={() => catalogItemObj && setCompletionSheetPopup({ entry, catalogItemObj })}
+                                  >
+                                    <span className="completion-sheet-num">{index + 1}</span>
+                                    <div className="completion-sheet-figure">
+                                      {entry.imageUrl ? (
+                                        <img src={entry.imageUrl} alt={entry.itemName} className="completion-sheet-img" />
+                                      ) : (
+                                        <svg className="completion-sheet-silhouette" viewBox="0 0 40 72" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                          <circle cx="20" cy="9" r="8" />
+                                          <rect x="10" y="19" width="20" height="24" rx="4" />
+                                          <rect x="6" y="19" width="8" height="18" rx="3" />
+                                          <rect x="26" y="19" width="8" height="18" rx="3" />
+                                          <rect x="11" y="43" width="8" height="20" rx="3" />
+                                          <rect x="21" y="43" width="8" height="20" rx="3" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                    <p className="completion-sheet-label">{entry.itemName}</p>
+                                    {entry.isOwned && entry.quantity > 1 && (
+                                      <span className="completion-sheet-qty">×{entry.quantity}</span>
+                                    )}
+                                  </button>
+                                )
+                              })}
                             </div>
                           )}
-                        </article>
+                        </div>
                       ) : null}
                     </div>
                   ) : (
@@ -9292,6 +9567,33 @@ function App() {
                                 >
                                   View Catalog Card
                                 </button>
+
+                                {removeConfirmItemId === item.id ? (
+                                  <div className="collection-item-remove-confirm">
+                                    {item.totalQuantity > 1 ? (
+                                      <>
+                                        <span className="collection-item-remove-label">Remove:</span>
+                                        <button type="button" className="collection-item-remove-choice" onClick={() => handleRemoveCollectionItem(item, 'one')}>1 copy</button>
+                                        <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleRemoveCollectionItem(item, 'all')}>All {item.totalQuantity}</button>
+                                        <button type="button" className="collection-item-remove-cancel" onClick={() => setRemoveConfirmItemId('')}>Cancel</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="collection-item-remove-label">Remove item?</span>
+                                        <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleRemoveCollectionItem(item, 'all')}>Yes</button>
+                                        <button type="button" className="collection-item-remove-cancel" onClick={() => setRemoveConfirmItemId('')}>No</button>
+                                      </>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill collection-item-remove-btn"
+                                    onClick={() => setRemoveConfirmItemId(item.id)}
+                                  >
+                                    Remove
+                                  </button>
+                                )}
                               </div>
                             </article>
                           )
@@ -9929,49 +10231,228 @@ function App() {
                   <div className="catalog-card catalog-loading-panel">No catalog items found.</div>
                 ) : (
                   <div>
-                    <div className="catalog-results-grid">
-                      {paginatedCatalogItems.map((item) => {
-                        const categoryName     = catalogCategoryById[item.category_id] || 'Uncategorized'
-                        const subcategoryName  = catalogSubcategoryById[item.subcategory_id] || 'Uncategorized'
-                        const franchiseName    = item._set_name || 'Unassigned set'
-                        const franchiseBrandName = item._franchise_name || ''
-                        const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
-                        const imageUrl         = item.front_image_path
-                          ? item.front_image_path.startsWith('http')
-                            ? item.front_image_path
-                            : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
-                          : ''
-
-                        return (
-                          <article
-                            key={item.id}
-                            className="catalog-card catalog-item-card"
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => handleOpenCatalogItem(item)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                handleOpenCatalogItem(item)
-                              }
-                            }}
-                          >
-                            {imageUrl ? (
-                              <img className="catalog-item-image" src={imageUrl} alt={item.name || 'Catalog item'} loading="lazy" />
-                            ) : (
-                              <div className="catalog-item-image catalog-item-image-placeholder">No image</div>
-                            )}
-                            <div className="catalog-item-content">
-                              <h3>{item.name || 'Untitled item'}</h3>
-                              <p className="catalog-item-meta">{franchiseName}</p>
-                              {franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null}
-                              {brandName ? <p className="catalog-item-brand">Brand: {brandName}</p> : null}
-                              {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
-                            </div>
-                          </article>
-                        )
-                      })}
+                    <div className="catalog-view-bar">
+                      <span className="catalog-view-count">{catalogTotalItemCount.toLocaleString()} items</span>
+                      <div className="catalog-view-toggle">
+                        <button
+                          type="button"
+                          className={`catalog-view-btn${catalogViewMode === 'grid' ? ' active' : ''}`}
+                          onClick={() => setCatalogViewMode('grid')}
+                          title="Grid view"
+                          aria-label="Grid view"
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
+                            <rect x="1" y="1" width="6" height="6" rx="1.5"/>
+                            <rect x="9" y="1" width="6" height="6" rx="1.5"/>
+                            <rect x="1" y="9" width="6" height="6" rx="1.5"/>
+                            <rect x="9" y="9" width="6" height="6" rx="1.5"/>
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className={`catalog-view-btn${catalogViewMode === 'list' ? ' active' : ''}`}
+                          onClick={() => setCatalogViewMode('list')}
+                          title="List view"
+                          aria-label="List view"
+                        >
+                          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
+                            <rect x="1" y="2" width="14" height="2.5" rx="1.25"/>
+                            <rect x="1" y="6.75" width="14" height="2.5" rx="1.25"/>
+                            <rect x="1" y="11.5" width="14" height="2.5" rx="1.25"/>
+                          </svg>
+                        </button>
+                      </div>
                     </div>
+
+                    {catalogViewMode === 'grid' ? (
+                      <div className="catalog-results-grid">
+                        {paginatedCatalogItems.map((item) => {
+                          const franchiseName    = item._set_name || 'Unassigned set'
+                          const franchiseBrandName = item._franchise_name || ''
+                          const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
+                          const imageUrl         = item.front_image_path
+                            ? item.front_image_path.startsWith('http')
+                              ? item.front_image_path
+                              : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
+                            : ''
+
+                          return (
+                            <article
+                              key={item.id}
+                              className="catalog-card catalog-item-card"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handleOpenCatalogItem(item)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault()
+                                  handleOpenCatalogItem(item)
+                                }
+                              }}
+                            >
+                              {imageUrl ? (
+                                <img className="catalog-item-image" src={imageUrl} alt={item.name || 'Catalog item'} loading="lazy" />
+                              ) : (
+                                <div className="catalog-item-image catalog-item-image-placeholder">No image</div>
+                              )}
+                              <div className="catalog-item-content">
+                                <h3>{item.name || 'Untitled item'}</h3>
+                                <p className="catalog-item-meta">{franchiseName}</p>
+                                {franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null}
+                                {brandName ? <p className="catalog-item-brand">Brand: {brandName}</p> : null}
+                                {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="catalog-list-view">
+                        {paginatedCatalogItems.map((item) => {
+                          const categoryName    = catalogCategoryById[item.category_id] || ''
+                          const subcategoryName = catalogSubcategoryById[item.subcategory_id] || ''
+                          const setName         = item._set_name || ''
+                          const brandName       = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || '' : '')
+                          const ownedCount      = ownedCatalogItemCounts[item.id] || 0
+                          const stats           = catalogListStats[item.id] || null
+                          const isWishlisted    = wishlistItemIds.has(item.id)
+                          const imageUrl        = item.front_image_path
+                            ? item.front_image_path.startsWith('http')
+                              ? item.front_image_path
+                              : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
+                            : ''
+                          const tags = [
+                            item.card_number ? item.card_number : null,
+                            categoryName,
+                            subcategoryName !== categoryName ? subcategoryName : null,
+                            setName,
+                            item.release_year ? String(item.release_year) : null,
+                          ].filter(Boolean)
+
+                          return (
+                            <article
+                              key={item.id}
+                              className="catalog-list-row"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handleOpenCatalogItem(item)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenCatalogItem(item) } }}
+                            >
+                              <div className="catalog-list-thumb">
+                                {imageUrl
+                                  ? <img src={imageUrl} alt={item.name || 'Item'} loading="lazy" />
+                                  : <div className="catalog-list-thumb-placeholder" />}
+                              </div>
+                              <div className="catalog-list-body">
+                                <h3 className="catalog-list-name">{item.name || 'Untitled item'}</h3>
+                                {tags.length > 0 && (
+                                  <div className="catalog-list-tags">
+                                    {tags.map((tag) => (
+                                      <span key={tag} className="catalog-list-tag">{tag}</span>
+                                    ))}
+                                  </div>
+                                )}
+                                {brandName ? <p className="catalog-list-meta">Brand: {brandName}</p> : null}
+                                {ownedCount > 0 && <span className="catalog-list-owned">You own {ownedCount}</span>}
+                              </div>
+                              <div className="catalog-list-purchase">
+                                <p className="catalog-list-purchase-heading">Purchase</p>
+                                <div className="catalog-list-stat-rows">
+                                  <span className="catalog-list-stat-label">Available:</span>
+                                  <span className="catalog-list-stat-value catalog-list-stat-available">
+                                    {stats ? stats.available_count : '—'}
+                                  </span>
+                                  <span className="catalog-list-stat-label">Wanted:</span>
+                                  <span className="catalog-list-stat-value catalog-list-stat-wanted">
+                                    {stats ? stats.wanted_count : '—'}
+                                  </span>
+                                </div>
+                                <div className="catalog-list-buy">
+                                  <span className="catalog-list-buy-label">Buy:</span>
+                                  <a
+                                    className="catalog-list-buy-link"
+                                    href={item.card_number
+                                      ? `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(item.card_number)}`
+                                      : `https://www.bricklink.com/v2/search.page?q=${encodeURIComponent(item._subject_name || item.name || '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    BrickLink
+                                  </a>
+                                  <a
+                                    className="catalog-list-buy-link"
+                                    href={`https://www.brickowl.com/search/catalog?query=${encodeURIComponent(item._subject_name || item.name || '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    Brick Owl
+                                  </a>
+                                  <a
+                                    className="catalog-list-buy-link"
+                                    href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    eBay
+                                  </a>
+                                </div>
+                              </div>
+                              <div className="catalog-list-actions">
+                                <button
+                                  type="button"
+                                  className="catalog-list-action-btn catalog-list-action-collect"
+                                  title="Add to Collection"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedCatalogItem({ ...item, categoryName: catalogCategoryById[item.category_id] || '', subcategoryName: catalogSubcategoryById[item.subcategory_id] || '', setName: item._set_name || '', brandName: item._brand_name || '', imageUrl: item.metadata?.image_url || '' })
+                                    handleOpenAddToCollectionModal()
+                                  }}
+                                >
+                                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+                                    <path d="M3 8h10M8 3v10" strokeLinecap="round"/>
+                                  </svg>
+                                  Collect
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`catalog-list-action-btn catalog-list-action-wishlist${isWishlisted ? ' wishlisted' : ''}`}
+                                  title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    if (!currentUser?.id) { handleOpenCatalogItem(item); return }
+                                    if (isWishlisted) {
+                                      setWishlistItemIds((prev) => { const next = new Set(prev); next.delete(item.id); return next })
+                                      await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
+                                      setCatalogListStats((prev) => {
+                                        const s = prev[item.id]
+                                        if (!s) return prev
+                                        return { ...prev, [item.id]: { ...s, wanted_count: Math.max(0, Number(s.wanted_count) - 1) } }
+                                      })
+                                    } else {
+                                      setWishlistItemIds((prev) => new Set([...prev, item.id]))
+                                      await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: item.id }, { onConflict: 'user_id,catalog_item_id' })
+                                      setCatalogListStats((prev) => {
+                                        const s = prev[item.id]
+                                        if (!s) return prev
+                                        return { ...prev, [item.id]: { ...s, wanted_count: Number(s.wanted_count) + 1 } }
+                                      })
+                                    }
+                                  }}
+                                >
+                                  <svg viewBox="0 0 16 16" fill={isWishlisted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={isWishlisted ? '0' : '1.5'} width="13" height="13">
+                                    <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5a3 3 0 0 1 5.5-1.65A3 3 0 0 1 14.5 5.5c0 4-6.5 8-6.5 8z"/>
+                                  </svg>
+                                  {isWishlisted ? 'Wishlisted' : 'Wishlist'}
+                                </button>
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    )}
                     <div className="catalog-pagination" aria-label="Catalog pagination">
                       <button
                         type="button"
@@ -10412,12 +10893,80 @@ function App() {
               <button
                 type="button"
                 className="catalog-action-pill"
-                onClick={() => {
-                  setCurrentScreen('catalog')
-                }}
+                onClick={() => { setCurrentScreen('catalog') }}
               >
-                Back to Catalog
+                ← Back to Catalog
               </button>
+
+              {catalogSetNavItems.length > 1 && (
+                <div className="catalog-detail-set-nav">
+                  <button
+                    type="button"
+                    className="catalog-detail-set-nav-btn"
+                    disabled={catalogSetNavIndex <= 0}
+                    onClick={() => {
+                      const prev = catalogSetNavItems[catalogSetNavIndex - 1]
+                      if (!prev) return
+                      const r = prev.raw
+                      const na = (v) => (v && v !== 'N/A' ? v : '')
+                      handleOpenCatalogItem({
+                        id: r.item_id,
+                        name: prev.name,
+                        description: r.description || '',
+                        release_year: r.release_year || null,
+                        category_id: r.category_id,
+                        subcategory_id: r.subcategory_id,
+                        franchise_id: r.franchise_id,
+                        brand_id: r.brand_id,
+                        collectible_set_id: r.collectible_set_id,
+                        card_number: r.card_number !== 'N/A' ? r.card_number : null,
+                        metadata: { image_url: prev.imageUrl },
+                        _subject_name: na(r.subject),
+                        _set_name: na(r.collectible_set),
+                        _print_type: na(r.print_type),
+                        _details: r,
+                        front_image_path: r.front_image_path || null,
+                      })
+                    }}
+                  >
+                    ‹ Prev
+                  </button>
+                  <span className="catalog-detail-set-nav-pos">
+                    {catalogSetNavIndex >= 0 ? `${catalogSetNavIndex + 1} / ${catalogSetNavItems.length}` : `— / ${catalogSetNavItems.length}`}
+                  </span>
+                  <button
+                    type="button"
+                    className="catalog-detail-set-nav-btn"
+                    disabled={catalogSetNavIndex < 0 || catalogSetNavIndex >= catalogSetNavItems.length - 1}
+                    onClick={() => {
+                      const next = catalogSetNavItems[catalogSetNavIndex + 1]
+                      if (!next) return
+                      const r = next.raw
+                      const na = (v) => (v && v !== 'N/A' ? v : '')
+                      handleOpenCatalogItem({
+                        id: r.item_id,
+                        name: next.name,
+                        description: r.description || '',
+                        release_year: r.release_year || null,
+                        category_id: r.category_id,
+                        subcategory_id: r.subcategory_id,
+                        franchise_id: r.franchise_id,
+                        brand_id: r.brand_id,
+                        collectible_set_id: r.collectible_set_id,
+                        card_number: r.card_number !== 'N/A' ? r.card_number : null,
+                        metadata: { image_url: next.imageUrl },
+                        _subject_name: na(r.subject),
+                        _set_name: na(r.collectible_set),
+                        _print_type: na(r.print_type),
+                        _details: r,
+                        front_image_path: r.front_image_path || null,
+                      })
+                    }}
+                  >
+                    Next ›
+                  </button>
+                </div>
+              )}
             </div>
 
             {selectedCatalogItem ? (
@@ -12424,6 +12973,67 @@ function App() {
                 </button>
               </>
             )}
+          </section>
+        </div>
+      )}
+
+      {completionSheetPopup && (
+        <div className="auth-overlay" onClick={() => setCompletionSheetPopup(null)}>
+          <section className="cs-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="cs-popup-item">
+              {completionSheetPopup.entry.imageUrl ? (
+                <img src={completionSheetPopup.entry.imageUrl} alt={completionSheetPopup.entry.itemName} className="cs-popup-img" />
+              ) : (
+                <div className="cs-popup-img-placeholder">
+                  <svg viewBox="0 0 40 72" fill="currentColor">
+                    <circle cx="20" cy="9" r="8" />
+                    <rect x="10" y="19" width="20" height="24" rx="4" />
+                    <rect x="6" y="19" width="8" height="18" rx="3" />
+                    <rect x="26" y="19" width="8" height="18" rx="3" />
+                    <rect x="11" y="43" width="8" height="20" rx="3" />
+                    <rect x="21" y="43" width="8" height="20" rx="3" />
+                  </svg>
+                </div>
+              )}
+              <div className="cs-popup-item-info">
+                <strong>{completionSheetPopup.entry.itemName}</strong>
+                <span>{completionSheetPopup.entry.isOwned ? `In your collection ×${completionSheetPopup.entry.quantity}` : 'Not in your collection'}</span>
+              </div>
+            </div>
+            <div className="cs-popup-actions">
+              <button
+                type="button"
+                className="cs-popup-btn cs-popup-btn-collect"
+                onClick={() => {
+                  setSelectedCatalogItem(completionSheetPopup.catalogItemObj)
+                  handleOpenAddToCollectionModal()
+                  setCompletionSheetPopup(null)
+                }}
+              >
+                Add to Collection
+              </button>
+              <button
+                type="button"
+                className="cs-popup-btn cs-popup-btn-wishlist"
+                onClick={() => {
+                  handleOpenCatalogItem(completionSheetPopup.catalogItemObj)
+                  setCompletionSheetPopup(null)
+                }}
+              >
+                Add to Wishlist
+              </button>
+              <button
+                type="button"
+                className="cs-popup-btn cs-popup-btn-catalog"
+                onClick={() => {
+                  handleOpenCatalogItem(completionSheetPopup.catalogItemObj)
+                  setCompletionSheetPopup(null)
+                }}
+              >
+                Go to Catalog Page
+              </button>
+            </div>
+            <button type="button" className="cs-popup-close" onClick={() => setCompletionSheetPopup(null)} aria-label="Close">×</button>
           </section>
         </div>
       )}
