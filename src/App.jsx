@@ -8266,7 +8266,7 @@ function App() {
       const fallbackOwnedItems = collectionItems.filter(
         (item) =>
           (item.setName || '').trim().toLowerCase() === normalizedSetName &&
-          (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName,
+          (!normalizedCategoryName || (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName),
       )
       const totalItems = setEntries.length > 0 ? setEntries.length : Number(setRecord.total_items || 0)
       const ownedEntries = setEntries.filter(
