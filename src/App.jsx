@@ -1890,8 +1890,7 @@ function App() {
           (subcategory) =>
             subcategory.name === catalogSubcategory && subcategory.category_id === selectedCatalogCategoryRecord.id,
         ) || null
-  const catalogFranchiseOptions = catalogFranchiseBrands
-    .map((f) => f.name)
+  const catalogFranchiseOptions = [...new Set(catalogFranchiseBrands.map((f) => f.name))]
     .sort((left, right) => left.localeCompare(right))
   const selectedCatalogFranchiseRecord =
     catalogFranchise === 'all'
@@ -5327,6 +5326,11 @@ function App() {
     }
 
     const newId = newBrandRow.brand_id
+
+    if (catalogAdminRealFranchiseId) {
+      await supabase.from('brand_franchise').insert({ brand_id: newId, franchise_id: catalogAdminRealFranchiseId }).select().maybeSingle()
+    }
+
     const newBrand = { id: newId, name }
     setCatalogAdminBrands((current) => {
       const exists = current.some((b) => b.id === newId)
