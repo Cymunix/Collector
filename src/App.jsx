@@ -1662,6 +1662,10 @@ function App() {
   const [selectedCompletionSetId, setSelectedCompletionSetId] = useState('')
   const [completionSetAllItems, setCompletionSetAllItems] = useState([])
   const [completionSheetPopup, setCompletionSheetPopup] = useState(null)
+  const [completionNavCategory, setCompletionNavCategory] = useState('')
+  const [completionNavSubcategory, setCompletionNavSubcategory] = useState('')
+  const [completionNavFranchise, setCompletionNavFranchise] = useState('')
+  const [completionNavBrand, setCompletionNavBrand] = useState('')
   const [trackedCollectionGoals, setTrackedCollectionGoals] = useState([])
   const [goalReloadToken, setGoalReloadToken] = useState(0)
   const [activeCollectionFilter, setActiveCollectionFilter] = useState('all')
@@ -2723,7 +2727,7 @@ function App() {
         const brandName     = na(raw.brand)
         const cardNum       = raw.card_number && raw.card_number !== 'N/A' ? `#${raw.card_number}` : ''
         const printCount    = raw.print_count ? `/${raw.print_count}` : ''
-        const nameParts     = [subjectName, setName, printType, (cardNum + printCount) || null].filter(Boolean)
+        const nameParts     = [subjectName, printType, (cardNum + printCount) || null].filter(Boolean)
         return {
           id:                 raw.item_id,
           name:               nameParts.join(' — ') || raw.description || 'Unnamed Item',
@@ -3619,7 +3623,7 @@ function App() {
               const setName     = na(row.collectible_set)
               const printType   = na(row.print_type)
               const cardNum     = row.card_number && row.card_number !== 'N/A' ? `#${row.card_number}` : ''
-              const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
+              const nameParts   = [subjectName, printType, cardNum].filter(Boolean)
               const fp          = row.front_image_path
               const imageUrl    = fp
                 ? fp.startsWith('http')
@@ -3911,7 +3915,7 @@ function App() {
     let isCancelled = false
 
     const loadCompletionData = async () => {
-      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult, itemCountsResult] = await Promise.all([
+      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult, itemCountsResult, categoriesResult, subcategoriesResult, brandsResult, franchisesResult] = await Promise.all([
         supabase
           .from('collectible_sets')
           .select('collectible_set_id, name')
@@ -3930,14 +3934,32 @@ function App() {
           .order('created_at', { ascending: true }),
         supabase
           .from('items')
-          .select('collectible_set_id')
+          .select('collectible_set_id, category_id, subcategory_id, franchise_id, brand_id')
           .not('collectible_set_id', 'is', null),
+        supabase.from('categories').select('category_id, name'),
+        supabase.from('subcategories').select('subcategory_id, name'),
+        supabase.from('brands').select('brand_id, name'),
+        supabase.from('franchises').select('franchise_id, name'),
       ])
 
-      const itemCountBySetId = (itemCountsResult.data || []).reduce((acc, r) => {
-        acc[r.collectible_set_id] = (acc[r.collectible_set_id] || 0) + 1
-        return acc
-      }, {})
+      const itemCountBySetId = {}
+      const setMetaById = {}
+      for (const r of (itemCountsResult.data || [])) {
+        itemCountBySetId[r.collectible_set_id] = (itemCountBySetId[r.collectible_set_id] || 0) + 1
+        if (!setMetaById[r.collectible_set_id]) {
+          setMetaById[r.collectible_set_id] = { category_id: r.category_id, subcategory_id: r.subcategory_id, franchise_id: r.franchise_id, brand_id: r.brand_id }
+        } else {
+          const meta = setMetaById[r.collectible_set_id]
+          if (!meta.franchise_id && r.franchise_id) meta.franchise_id = r.franchise_id
+          if (!meta.category_id && r.category_id) meta.category_id = r.category_id
+          if (!meta.subcategory_id && r.subcategory_id) meta.subcategory_id = r.subcategory_id
+          if (!meta.brand_id && r.brand_id) meta.brand_id = r.brand_id
+        }
+      }
+      const categoryById = (categoriesResult.data || []).reduce((acc, r) => { acc[r.category_id] = r.name; return acc }, {})
+      const subcategoryById = (subcategoriesResult.data || []).reduce((acc, r) => { acc[r.subcategory_id] = r.name; return acc }, {})
+      const brandById = (brandsResult.data || []).reduce((acc, r) => { acc[r.brand_id] = r.name; return acc }, {})
+      const franchiseById = (franchisesResult.data || []).reduce((acc, r) => { acc[r.franchise_id] = r.name; return acc }, {})
 
       if (isCancelled) {
         return
@@ -3945,18 +3967,20 @@ function App() {
 
       setCollectibleSets(
         Array.isArray(collectibleSetsResult.data)
-          ? collectibleSetsResult.data.map(r => ({
-              id:         r.collectible_set_id,
-              set_name:   r.name || '',
-              brand_name: '',
-              category_name:    '',
-              subcategory_name: '',
-              franchise_name:   '',
+          ? collectibleSetsResult.data.map(r => {
+              const meta = setMetaById[r.collectible_set_id] || {}
+              return {
+              id:               r.collectible_set_id,
+              set_name:         r.name || '',
+              brand_name:       brandById[meta.brand_id] || '',
+              category_name:    categoryById[meta.category_id] || '',
+              subcategory_name: subcategoryById[meta.subcategory_id] || '',
+              franchise_name:   franchiseById[meta.franchise_id] || '',
               total_items:      itemCountBySetId[r.collectible_set_id] || 0,
               total_estimated_value: 0,
               breakdown: null,
               metadata:  {},
-            }))
+            }})
           : [],
       )
       setCollectibleSetEntries(
@@ -5359,6 +5383,9 @@ function App() {
       print_type_id:        d.print_type_id         || '',
       bricklink_id:         d.bricklink_id          || '',
       rebrickable_fig_id:   d.rebrickable_fig_id    || '',
+      release_year:         d.release_year          ?? '',
+      upc:                  d.upc                   || '',
+      piece_count:          d.piece_count           ?? '',
     })
     setCatalogItemEditError('')
     const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }, { data: itemMtgMeta }] = await Promise.all([
@@ -8465,6 +8492,9 @@ function App() {
         id: setRecord.id,
         title: setRecord.set_name || 'Set',
         categoryName: setRecord.category_name || '',
+        subcategoryName: setRecord.subcategory_name || '',
+        franchiseName: setRecord.franchise_name || '',
+        brandName: setRecord.brand_name || '',
         setName: setRecord.set_name || '',
         ownedCount,
         totalItems,
@@ -8482,6 +8512,35 @@ function App() {
       }
       return (left.title || '').localeCompare(right.title || '')
     })
+  const rollupCards = (cards) => {
+    const owned = cards.reduce((s, c) => s + c.ownedCount, 0)
+    const total = cards.reduce((s, c) => s + c.totalItems, 0)
+    return { ownedCount: owned, totalItems: total, percent: total > 0 ? (owned / total) * 100 : 0, setsStarted: cards.length }
+  }
+  const groupByKey = (arr, fn) => arr.reduce((acc, item) => {
+    const k = fn(item) || 'Other'
+    if (!acc[k]) acc[k] = []
+    acc[k].push(item)
+    return acc
+  }, {})
+  const completionCategoryGroups = groupByKey(startedSetCards, c => c.categoryName)
+  const completionSubcategoryGroups = groupByKey(
+    startedSetCards.filter(c => c.categoryName === completionNavCategory),
+    c => c.subcategoryName,
+  )
+  const completionFranchiseGroups = groupByKey(
+    startedSetCards.filter(c => c.categoryName === completionNavCategory && c.subcategoryName === completionNavSubcategory),
+    c => c.franchiseName,
+  )
+  const completionBrandGroups = groupByKey(
+    startedSetCards.filter(c => c.categoryName === completionNavCategory && c.subcategoryName === completionNavSubcategory && c.franchiseName === completionNavFranchise),
+    c => c.brandName,
+  )
+  const completionBrandSetCards = startedSetCards.filter(
+    c => c.categoryName === completionNavCategory && c.subcategoryName === completionNavSubcategory && c.franchiseName === completionNavFranchise && c.brandName === completionNavBrand,
+  )
+  const completionCategoryContextCards = completionNavCategory ? startedSetCards.filter(c => c.categoryName === completionNavCategory) : []
+  const completionCategoryRollup = rollupCards(completionCategoryContextCards)
   const selectedCompletionSet = startedSetCards.find((setCard) => setCard.id === selectedCompletionSetId) || null
   const selectedCompletionSetEntries = selectedCompletionSet
     ? (() => {
@@ -9050,113 +9109,178 @@ function App() {
               </div>
             ) : (
               <div className="collection-layout">
-                <aside className="catalog-card collection-sidebar" aria-label="Collections and storage">
-                  <div className="collection-sidebar-section">
-                    <p className="collection-sidebar-title">{t('myCollection')}</p>
-                    <button
-                      type="button"
-                      className={`collection-sidebar-link ${activeCollectionFilter === 'all' ? 'active' : ''}`}
-                      onClick={() => setActiveCollectionFilter('all')}
-                    >
-                      All Items
-                    </button>
-                    {customCollections.map((collection) => (
-                      <button
-                        key={collection.id}
-                        type="button"
-                        className={`collection-sidebar-link ${activeCollectionFilter === collection.id ? 'active' : ''}`}
-                        onClick={() => setActiveCollectionFilter(collection.id)}
+                {collectionViewTab === 'completion' ? (
+                  <aside className="catalog-card collection-sidebar" aria-label="Completion filters">
+                    <div className="collection-sidebar-section">
+                      <p className="collection-sidebar-title">Filter</p>
+
+                      <label className="completion-filter-label">Category</label>
+                      <select
+                        value={completionNavCategory}
+                        onChange={(e) => { setCompletionNavCategory(e.target.value); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
                       >
-                        {collection.name}
-                      </button>
-                    ))}
+                        <option value="">All categories</option>
+                        {Object.keys(completionCategoryGroups).sort((a, b) => a.localeCompare(b)).map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
 
-                    <div className="collection-inline-create">
-                      <input
-                        type="text"
-                        value={newCustomCollectionName}
-                        onChange={(event) => setNewCustomCollectionName(event.target.value)}
-                        placeholder="Create Collection"
-                      />
-                      <button type="button" className="catalog-action-pill" onClick={handleCreateCustomCollection} disabled={isCreatingCustomCollection}>
-                        +
-                      </button>
-                    </div>
+                      <label className="completion-filter-label">Subcategory</label>
+                      <select
+                        value={completionNavSubcategory}
+                        disabled={!completionNavCategory}
+                        onChange={(e) => { setCompletionNavSubcategory(e.target.value); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
+                      >
+                        <option value="">All subcategories</option>
+                        {Object.keys(completionSubcategoryGroups).sort((a, b) => a.localeCompare(b)).map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
 
-                    {activeCollectionFilter !== 'all' && (
-                      <div className="collection-inline-actions">
-                        <button type="button" className="catalog-action-pill" onClick={handleRenameActiveCollection}>Rename</button>
-                        <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveCollection}>Delete</button>
-                      </div>
-                    )}
-                  </div>
+                      <label className="completion-filter-label">Franchise</label>
+                      <select
+                        value={completionNavFranchise}
+                        disabled={!completionNavSubcategory}
+                        onChange={(e) => { setCompletionNavFranchise(e.target.value); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
+                      >
+                        <option value="">All franchises</option>
+                        {Object.keys(completionFranchiseGroups).sort((a, b) => a.localeCompare(b)).map(fr => (
+                          <option key={fr} value={fr}>{fr}</option>
+                        ))}
+                      </select>
 
-                  <div className="collection-sidebar-section">
-                    <p className="collection-sidebar-title">Storage</p>
-                    {storageLocations.map((location) => {
-                      const locationPath = storageLocationPathById[location.id] || location.name
-                      const depth = locationPath ? Math.max(0, locationPath.split(' -> ').length - 1) : 0
-                      return (
+                      <label className="completion-filter-label">Brand</label>
+                      <select
+                        value={completionNavBrand}
+                        disabled={!completionNavFranchise}
+                        onChange={(e) => { setCompletionNavBrand(e.target.value); setSelectedCompletionSetId('') }}
+                      >
+                        <option value="">All brands</option>
+                        {Object.keys(completionBrandGroups).sort((a, b) => a.localeCompare(b)).map(brand => (
+                          <option key={brand} value={brand}>{brand}</option>
+                        ))}
+                      </select>
+
+                      {(completionNavCategory || completionNavSubcategory || completionNavFranchise || completionNavBrand) && (
                         <button
-                          key={location.id}
                           type="button"
-                          className={`collection-sidebar-link ${activeStorageFilter === location.id ? 'active' : ''}`}
-                          style={{ paddingLeft: `${12 + depth * 14}px` }}
-                          onClick={() => setActiveStorageFilter((currentValue) => (currentValue === location.id ? '' : location.id))}
+                          className="completion-filter-clear"
+                          onClick={() => { setCompletionNavCategory(''); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
                         >
-                          {location.name}
+                          Clear filters
                         </button>
-                      )
-                    })}
-
-                    <div className="collection-inline-create">
-                      <input
-                        type="text"
-                        value={newStorageLocationName}
-                        onChange={(event) => setNewStorageLocationName(event.target.value)}
-                        placeholder="Create Location"
-                      />
-                      <button type="button" className="catalog-action-pill" onClick={handleCreateStorageLocation} disabled={isCreatingStorageLocation}>
-                        +
+                      )}
+                    </div>
+                  </aside>
+                ) : (
+                  <aside className="catalog-card collection-sidebar" aria-label="Collections and storage">
+                    <div className="collection-sidebar-section">
+                      <p className="collection-sidebar-title">{t('myCollection')}</p>
+                      <button
+                        type="button"
+                        className={`collection-sidebar-link ${activeCollectionFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setActiveCollectionFilter('all')}
+                      >
+                        All Items
                       </button>
+                      {customCollections.map((collection) => (
+                        <button
+                          key={collection.id}
+                          type="button"
+                          className={`collection-sidebar-link ${activeCollectionFilter === collection.id ? 'active' : ''}`}
+                          onClick={() => setActiveCollectionFilter(collection.id)}
+                        >
+                          {collection.name}
+                        </button>
+                      ))}
+
+                      <div className="collection-inline-create">
+                        <input
+                          type="text"
+                          value={newCustomCollectionName}
+                          onChange={(event) => setNewCustomCollectionName(event.target.value)}
+                          placeholder="Create Collection"
+                        />
+                        <button type="button" className="catalog-action-pill" onClick={handleCreateCustomCollection} disabled={isCreatingCustomCollection}>
+                          +
+                        </button>
+                      </div>
+
+                      {activeCollectionFilter !== 'all' && (
+                        <div className="collection-inline-actions">
+                          <button type="button" className="catalog-action-pill" onClick={handleRenameActiveCollection}>Rename</button>
+                          <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveCollection}>Delete</button>
+                        </div>
+                      )}
                     </div>
 
-                    <select
-                      value={newStorageParentLocationId}
-                      onChange={(event) => setNewStorageParentLocationId(event.target.value)}
-                    >
-                      <option value="">Top Level</option>
-                      {storageLocations.map((location) => (
-                        <option key={`storage-parent-${location.id}`} value={location.id}>
-                          {storageLocationPathById[location.id] || location.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="collection-sidebar-section">
+                      <p className="collection-sidebar-title">Storage</p>
+                      {storageLocations.map((location) => {
+                        const locationPath = storageLocationPathById[location.id] || location.name
+                        const depth = locationPath ? Math.max(0, locationPath.split(' -> ').length - 1) : 0
+                        return (
+                          <button
+                            key={location.id}
+                            type="button"
+                            className={`collection-sidebar-link ${activeStorageFilter === location.id ? 'active' : ''}`}
+                            style={{ paddingLeft: `${12 + depth * 14}px` }}
+                            onClick={() => setActiveStorageFilter((currentValue) => (currentValue === location.id ? '' : location.id))}
+                          >
+                            {location.name}
+                          </button>
+                        )
+                      })}
 
-                    {activeStorageFilter && (
-                      <>
-                        <select
-                          value=""
-                          onChange={(event) => handleMoveActiveStorageLocation(event.target.value)}
-                        >
-                          <option value="">Move Location To...</option>
-                          <option value="">Top Level</option>
-                          {storageLocations
-                            .filter((location) => location.id !== activeStorageFilter)
-                            .map((location) => (
-                              <option key={`move-storage-${location.id}`} value={location.id}>
-                                {storageLocationPathById[location.id] || location.name}
-                              </option>
-                            ))}
-                        </select>
-                        <div className="collection-inline-actions">
-                          <button type="button" className="catalog-action-pill" onClick={handleRenameActiveStorageLocation}>Rename</button>
-                          <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveStorageLocation}>Delete</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </aside>
+                      <div className="collection-inline-create">
+                        <input
+                          type="text"
+                          value={newStorageLocationName}
+                          onChange={(event) => setNewStorageLocationName(event.target.value)}
+                          placeholder="Create Location"
+                        />
+                        <button type="button" className="catalog-action-pill" onClick={handleCreateStorageLocation} disabled={isCreatingStorageLocation}>
+                          +
+                        </button>
+                      </div>
+
+                      <select
+                        value={newStorageParentLocationId}
+                        onChange={(event) => setNewStorageParentLocationId(event.target.value)}
+                      >
+                        <option value="">Top Level</option>
+                        {storageLocations.map((location) => (
+                          <option key={`storage-parent-${location.id}`} value={location.id}>
+                            {storageLocationPathById[location.id] || location.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      {activeStorageFilter && (
+                        <>
+                          <select
+                            value=""
+                            onChange={(event) => handleMoveActiveStorageLocation(event.target.value)}
+                          >
+                            <option value="">Move Location To...</option>
+                            <option value="">Top Level</option>
+                            {storageLocations
+                              .filter((location) => location.id !== activeStorageFilter)
+                              .map((location) => (
+                                <option key={`move-storage-${location.id}`} value={location.id}>
+                                  {storageLocationPathById[location.id] || location.name}
+                                </option>
+                              ))}
+                          </select>
+                          <div className="collection-inline-actions">
+                            <button type="button" className="catalog-action-pill" onClick={handleRenameActiveStorageLocation}>Rename</button>
+                            <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveStorageLocation}>Delete</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </aside>
+                )}
 
                 <div className="collection-main-pane">
                   <div className="collection-topbar">
@@ -9317,21 +9441,149 @@ function App() {
                       </article>
                     </div>
                   ) : collectionViewTab === 'completion' ? (
-                    <div className="collection-completion-stack">
-                      {!selectedCompletionSetId ? (
-                        <>
-                          <article className="catalog-card collection-analytics-card">
-                            <h3>Sets You Started</h3>
-                            <p className="collection-muted">Completion is automatic from your inventory. Click a set to see what you own and what is missing.</p>
-                          </article>
+                    <div className="completion-main">
+                        {/* Breadcrumb */}
+                        {(completionNavCategory || completionNavSubcategory || completionNavFranchise || completionNavBrand || selectedCompletionSetId) && (
+                          <nav className="completion-breadcrumb" aria-label="Completion breadcrumb">
+                            <button type="button" className="completion-crumb" onClick={() => { setCompletionNavCategory(''); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>All categories</button>
+                            {completionNavCategory && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <button type="button" className={`completion-crumb${!completionNavSubcategory && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavCategory}</button>
+                              </>
+                            )}
+                            {completionNavSubcategory && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <button type="button" className={`completion-crumb${!completionNavFranchise && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavSubcategory}</button>
+                              </>
+                            )}
+                            {completionNavFranchise && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <button type="button" className={`completion-crumb${!completionNavBrand && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavFranchise}</button>
+                              </>
+                            )}
+                            {completionNavBrand && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <button type="button" className={`completion-crumb${!selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => setSelectedCompletionSetId('')}>{completionNavBrand}</button>
+                              </>
+                            )}
+                            {selectedCompletionSetId && selectedCompletionSet && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <span className="completion-crumb completion-crumb-current">{selectedCompletionSet.title}</span>
+                              </>
+                            )}
+                          </nav>
+                        )}
 
-                          <section className="collection-goal-grid" aria-label="Started sets">
-                            {startedSetCards.length === 0 ? (
-                              <article className="catalog-card catalog-loading-panel">
-                                No started sets found yet. Add items to your collection to see set progress.
-                              </article>
-                            ) : (
-                              startedSetCards.map((setCard) => (
+                        {/* Category context header — shown whenever a category is active and not in set detail */}
+                        {completionNavCategory && !selectedCompletionSetId && (
+                          <article className="catalog-card completion-context-header">
+                            <div className="completion-context-header-body">
+                              <h3 className="completion-context-name">{completionNavCategory}</h3>
+                              <div className="completion-context-meta">
+                                <span>{Object.keys(completionSubcategoryGroups).length} subcategor{Object.keys(completionSubcategoryGroups).length === 1 ? 'y' : 'ies'}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{completionCategoryRollup.setsStarted} set{completionCategoryRollup.setsStarted === 1 ? '' : 's'} started</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{completionCategoryRollup.percent.toFixed(1)}% avg complete</span>
+                              </div>
+                            </div>
+                            <div className="collection-allocation-bar-track completion-context-bar">
+                              <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(completionCategoryRollup.percent, 100)}%` }} />
+                            </div>
+                          </article>
+                        )}
+
+                        {/* Content area — one of five states */}
+                        {selectedCompletionSetId ? (
+                          selectedCompletionSet ? (
+                            <div className="completion-set-sheet">
+                              <div className="completion-sheet-header">
+                                <button type="button" className="catalog-action-pill" onClick={() => setSelectedCompletionSetId('')}>
+                                  ← {completionNavBrand || 'All Sets'}
+                                </button>
+                                <div className="completion-sheet-title">
+                                  <h3>{selectedCompletionSet.title}</h3>
+                                  <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
+                                </div>
+                                <div className="completion-sheet-pct">{selectedCompletionSet.completionPercent.toFixed(0)}%</div>
+                              </div>
+                              <div className="completion-sheet-progress-track">
+                                <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(selectedCompletionSet.completionPercent, 100)}%` }} />
+                              </div>
+                              {selectedCompletionSetEntries.length === 0 ? (
+                                <p className="collection-muted completion-sheet-empty">No items tracked for this set yet.</p>
+                              ) : (
+                                <div className="completion-sheet-grid">
+                                  {selectedCompletionSetEntries.map((entry, index) => {
+                                    const na = (v) => (v && v !== 'N/A' ? v : '')
+                                    const r = entry.raw
+                                    const catalogItemObj = r ? {
+                                      id:                 r.item_id,
+                                      name:               entry.itemName,
+                                      description:        r.description || '',
+                                      release_year:       r.release_year || null,
+                                      category_id:        r.category_id,
+                                      subcategory_id:     r.subcategory_id,
+                                      franchise_id:       r.franchise_id,
+                                      collectible_set_id: r.collectible_set_id,
+                                      brand_id:           r.brand_id,
+                                      card_number:        r.card_number !== 'N/A' ? r.card_number : null,
+                                      print_count:        r.print_count,
+                                      metadata:           { image_url: entry.imageUrl, set: na(r.collectible_set) },
+                                      dynamic_fields:     {},
+                                      _subject_name:      na(r.subject),
+                                      _set_name:          na(r.collectible_set),
+                                      _print_type:        na(r.print_type),
+                                      _brand_name:        na(r.brand),
+                                      _franchise_name:    na(r.franchise),
+                                      _details:           r,
+                                      front_image_path:   r.front_image_path || null,
+                                    } : null
+                                    return (
+                                      <button
+                                        key={`sheet-${entry.id}`}
+                                        type="button"
+                                        className={`completion-sheet-item${entry.isOwned ? ' owned' : ' missing'}`}
+                                        onClick={() => catalogItemObj && setCompletionSheetPopup({ entry, catalogItemObj })}
+                                      >
+                                        <span className="completion-sheet-num">{index + 1}</span>
+                                        <div className="completion-sheet-figure">
+                                          {entry.imageUrl ? (
+                                            <img src={entry.imageUrl} alt={entry.itemName} className="completion-sheet-img" />
+                                          ) : (
+                                            <svg className="completion-sheet-silhouette" viewBox="0 0 40 72" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                              <circle cx="20" cy="9" r="8" />
+                                              <rect x="10" y="19" width="20" height="24" rx="4" />
+                                              <rect x="6" y="19" width="8" height="18" rx="3" />
+                                              <rect x="26" y="19" width="8" height="18" rx="3" />
+                                              <rect x="11" y="43" width="8" height="20" rx="3" />
+                                              <rect x="21" y="43" width="8" height="20" rx="3" />
+                                            </svg>
+                                          )}
+                                        </div>
+                                        <p className="completion-sheet-label">{entry.itemName}</p>
+                                        {entry.isOwned && entry.quantity > 1 && (
+                                          <span className="completion-sheet-qty">×{entry.quantity}</span>
+                                        )}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ) : null
+                        ) : completionNavBrand ? (
+                          /* Set list — brand is selected */
+                          completionBrandSetCards.length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">No sets started for this brand yet.</article>
+                          ) : (
+                            <section className="collection-goal-grid" aria-label="Sets">
+                              {completionBrandSetCards.map((setCard) => (
                                 <article
                                   key={`started-set-${setCard.id}`}
                                   className="catalog-card collection-goal-card"
@@ -9377,87 +9629,144 @@ function App() {
                                     </div>
                                   ) : null}
                                 </article>
-                              ))
-                            )}
-                          </section>
-                        </>
-                      ) : selectedCompletionSet ? (
-                        <div className="completion-set-sheet">
-                          <div className="completion-sheet-header">
-                            <button type="button" className="catalog-action-pill" onClick={() => setSelectedCompletionSetId('')}>
-                              ← All Sets
-                            </button>
-                            <div className="completion-sheet-title">
-                              <h3>{selectedCompletionSet.title}</h3>
-                              <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
-                            </div>
-                            <div className="completion-sheet-pct">{selectedCompletionSet.completionPercent.toFixed(0)}%</div>
-                          </div>
-                          <div className="completion-sheet-progress-track">
-                            <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(selectedCompletionSet.completionPercent, 100)}%` }} />
-                          </div>
-                          {selectedCompletionSetEntries.length === 0 ? (
-                            <p className="collection-muted completion-sheet-empty">No items tracked for this set yet.</p>
+                              ))}
+                            </section>
+                          )
+                        ) : completionNavFranchise ? (
+                          /* Brand blocks */
+                          Object.keys(completionBrandGroups).length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">No sets started for this franchise yet.</article>
                           ) : (
-                            <div className="completion-sheet-grid">
-                              {selectedCompletionSetEntries.map((entry, index) => {
-                                const na = (v) => (v && v !== 'N/A' ? v : '')
-                                const r = entry.raw
-                                const catalogItemObj = r ? {
-                                  id:                 r.item_id,
-                                  name:               entry.itemName,
-                                  description:        r.description || '',
-                                  release_year:       r.release_year || null,
-                                  category_id:        r.category_id,
-                                  subcategory_id:     r.subcategory_id,
-                                  franchise_id:       r.franchise_id,
-                                  collectible_set_id: r.collectible_set_id,
-                                  brand_id:           r.brand_id,
-                                  card_number:        r.card_number !== 'N/A' ? r.card_number : null,
-                                  print_count:        r.print_count,
-                                  metadata:           { image_url: entry.imageUrl, set: na(r.collectible_set) },
-                                  dynamic_fields:     {},
-                                  _subject_name:      na(r.subject),
-                                  _set_name:          na(r.collectible_set),
-                                  _print_type:        na(r.print_type),
-                                  _brand_name:        na(r.brand),
-                                  _franchise_name:    na(r.franchise),
-                                  _details:           r,
-                                  front_image_path:   r.front_image_path || null,
-                                } : null
+                            <section className="completion-block-grid">
+                              {Object.entries(completionBrandGroups).sort(([a], [b]) => a.localeCompare(b)).map(([brandName, cards]) => {
+                                const r = rollupCards(cards)
                                 return (
-                                  <button
-                                    key={`sheet-${entry.id}`}
-                                    type="button"
-                                    className={`completion-sheet-item${entry.isOwned ? ' owned' : ' missing'}`}
-                                    onClick={() => catalogItemObj && setCompletionSheetPopup({ entry, catalogItemObj })}
+                                  <article
+                                    key={brandName}
+                                    className="catalog-card completion-nav-block"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setCompletionNavBrand(brandName)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavBrand(brandName) } }}
                                   >
-                                    <span className="completion-sheet-num">{index + 1}</span>
-                                    <div className="completion-sheet-figure">
-                                      {entry.imageUrl ? (
-                                        <img src={entry.imageUrl} alt={entry.itemName} className="completion-sheet-img" />
-                                      ) : (
-                                        <svg className="completion-sheet-silhouette" viewBox="0 0 40 72" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                                          <circle cx="20" cy="9" r="8" />
-                                          <rect x="10" y="19" width="20" height="24" rx="4" />
-                                          <rect x="6" y="19" width="8" height="18" rx="3" />
-                                          <rect x="26" y="19" width="8" height="18" rx="3" />
-                                          <rect x="11" y="43" width="8" height="20" rx="3" />
-                                          <rect x="21" y="43" width="8" height="20" rx="3" />
-                                        </svg>
-                                      )}
+                                    <div className="completion-nav-block-head">
+                                      <strong>{brandName}</strong>
+                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
                                     </div>
-                                    <p className="completion-sheet-label">{entry.itemName}</p>
-                                    {entry.isOwned && entry.quantity > 1 && (
-                                      <span className="completion-sheet-qty">×{entry.quantity}</span>
-                                    )}
-                                  </button>
+                                    <div className="collection-allocation-bar-track">
+                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
+                                    </div>
+                                    <div className="completion-nav-block-meta">
+                                      <span>{r.ownedCount} / {r.totalItems}</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                    </div>
+                                  </article>
                                 )
                               })}
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
+                            </section>
+                          )
+                        ) : completionNavSubcategory ? (
+                          /* Franchise blocks */
+                          Object.keys(completionFranchiseGroups).length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">No sets started in this subcategory yet.</article>
+                          ) : (
+                            <section className="completion-block-grid">
+                              {Object.entries(completionFranchiseGroups).sort(([a], [b]) => a.localeCompare(b)).map(([franchiseName, cards]) => {
+                                const r = rollupCards(cards)
+                                return (
+                                  <article
+                                    key={franchiseName}
+                                    className="catalog-card completion-nav-block"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setCompletionNavFranchise(franchiseName)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavFranchise(franchiseName) } }}
+                                  >
+                                    <div className="completion-nav-block-head">
+                                      <strong>{franchiseName}</strong>
+                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
+                                    </div>
+                                    <div className="collection-allocation-bar-track">
+                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
+                                    </div>
+                                    <div className="completion-nav-block-meta">
+                                      <span>{r.ownedCount} / {r.totalItems}</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                    </div>
+                                  </article>
+                                )
+                              })}
+                            </section>
+                          )
+                        ) : completionNavCategory ? (
+                          /* Subcategory blocks */
+                          Object.keys(completionSubcategoryGroups).length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">No sets started in this category yet.</article>
+                          ) : (
+                            <section className="completion-block-grid">
+                              {Object.entries(completionSubcategoryGroups).sort(([a], [b]) => a.localeCompare(b)).map(([subcatName, cards]) => {
+                                const r = rollupCards(cards)
+                                return (
+                                  <article
+                                    key={subcatName}
+                                    className="catalog-card completion-nav-block"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setCompletionNavSubcategory(subcatName)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavSubcategory(subcatName) } }}
+                                  >
+                                    <div className="completion-nav-block-head">
+                                      <strong>{subcatName}</strong>
+                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
+                                    </div>
+                                    <div className="collection-allocation-bar-track">
+                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
+                                    </div>
+                                    <div className="completion-nav-block-meta">
+                                      <span>{r.ownedCount} / {r.totalItems}</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                    </div>
+                                  </article>
+                                )
+                              })}
+                            </section>
+                          )
+                        ) : (
+                          /* Category blocks — default view */
+                          startedSetCards.length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">
+                              No started sets found yet. Add items to your collection to see set progress.
+                            </article>
+                          ) : (
+                            <section className="completion-block-grid">
+                              {Object.entries(completionCategoryGroups).sort(([a], [b]) => a.localeCompare(b)).map(([catName, cards]) => {
+                                const r = rollupCards(cards)
+                                return (
+                                  <article
+                                    key={catName}
+                                    className="catalog-card completion-nav-block"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => { setCompletionNavCategory(catName); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand('') }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavCategory(catName); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand('') } }}
+                                  >
+                                    <div className="completion-nav-block-head">
+                                      <strong>{catName}</strong>
+                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
+                                    </div>
+                                    <div className="collection-allocation-bar-track">
+                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
+                                    </div>
+                                    <div className="completion-nav-block-meta">
+                                      <span>{r.ownedCount} / {r.totalItems}</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                    </div>
+                                  </article>
+                                )
+                              })}
+                            </section>
+                          )
+                        )}
                     </div>
                   ) : (
                     <>
@@ -11110,24 +11419,27 @@ function App() {
                         <span>Print Count</span>
                         <input type="number" min="1" value={catalogItemEditValues.print_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, print_count: e.target.value }))} />
                       </label>
-                      {selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col') && (<>
+                      <label className="catalog-item-edit-field">
+                        <span>Release Year</span>
+                        <input type="number" min="1932" max="2100" value={catalogItemEditValues.release_year ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, release_year: e.target.value }))} placeholder="e.g. 2023" />
+                      </label>
+                      {selectedCatalogItem?.categoryName === 'Building Blocks' && (<>
                         <label className="catalog-item-edit-field">
                           <span>BrickLink ID</span>
-                          <input type="text" value={catalogItemEditValues.bricklink_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, bricklink_id: e.target.value }))} placeholder="e.g. col473" />
+                          <input type="text" value={catalogItemEditValues.bricklink_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, bricklink_id: e.target.value }))} placeholder="e.g. col473 or 75192" />
                         </label>
                         <label className="catalog-item-edit-field">
                           <span>Rebrickable ID</span>
                           <input type="text" value={catalogItemEditValues.rebrickable_fig_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, rebrickable_fig_id: e.target.value }))} placeholder="e.g. fig-001234" />
                         </label>
-                        {catalogMarketVariants.length > 0 && (
-                          <label className="catalog-item-edit-field">
-                            <span>Condition <span title="Damaged = missing accessories or visible damage" style={{ cursor: 'help' }}>ⓘ</span></span>
-                            <select value={catalogItemConditionId} onChange={e => setCatalogItemConditionId(e.target.value)}>
-                              <option value="">— Select condition —</option>
-                              {catalogMarketVariants.map(v => <option key={v.market_variant_id} value={v.market_variant_id}>{v.name}</option>)}
-                            </select>
-                          </label>
-                        )}
+                        <label className="catalog-item-edit-field">
+                          <span>UPC</span>
+                          <input type="text" value={catalogItemEditValues.upc || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, upc: e.target.value }))} placeholder="Barcode" />
+                        </label>
+                        <label className="catalog-item-edit-field">
+                          <span>Piece Count</span>
+                          <input type="number" min="1" value={catalogItemEditValues.piece_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, piece_count: e.target.value }))} />
+                        </label>
                       </>)}
                       <label className="catalog-item-edit-field catalog-item-edit-field--wide">
                         <span>Description</span>
