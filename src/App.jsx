@@ -1619,6 +1619,14 @@ function App() {
   const [isSavingCatalogItem, setIsSavingCatalogItem] = useState(false)
   const [catalogItemEditError, setCatalogItemEditError] = useState('')
   const [catalogItemImagesReloadToken, setCatalogItemImagesReloadToken] = useState(0)
+  const [bulkImportMode, setBulkImportMode] = useState(false)
+  const [bulkImportRows, setBulkImportRows] = useState([])
+  const [bulkImportIdx, setBulkImportIdx] = useState(0)
+  const [bulkImportSubjectSearch, setBulkImportSubjectSearch] = useState('')
+  const [bulkImportSubjectResults, setBulkImportSubjectResults] = useState([])
+  const [bulkImportIsSaving, setBulkImportIsSaving] = useState(false)
+  const [bulkImportSaveError, setBulkImportSaveError] = useState('')
+  const [bulkImportSaveProgress, setBulkImportSaveProgress] = useState(0)
   const [isUploadingCatalogItemImage, setIsUploadingCatalogItemImage] = useState(false)
   const [catalogDetailIsGraded, setCatalogDetailIsGraded] = useState(false)
   const [catalogDetailGradingCompany, setCatalogDetailGradingCompany] = useState('')
@@ -2488,7 +2496,7 @@ function App() {
 
   // Effect A: stable lookups — categories, subcategories, brands, card types
   useEffect(() => {
-    if (currentScreen !== 'catalog') return
+    if (currentScreen !== 'catalog' && currentScreen !== 'collection' && currentScreen !== 'collection_item') return
     Promise.all([
       supabase.from('categories').select('category_id, name').order('name'),
       supabase.from('subcategories').select('subcategory_id, name, category_id').order('name'),
@@ -3141,6 +3149,21 @@ function App() {
     return () => clearTimeout(timer)
   }, [isCatalogItemEditMode, catalogItemEditSubjectSearch, catalogItemEditSubjectIds])
 
+  useEffect(() => {
+    if (!bulkImportMode || !bulkImportRows.length) return
+    const q = bulkImportSubjectSearch.trim()
+    if (q.length < 2) { setBulkImportSubjectResults([]); return }
+    const timer = setTimeout(() => {
+      supabase.from('subjects').select('subject_id, subject_name, subject_type').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        .then(({ data }) => {
+          const cur = bulkImportRows[bulkImportIdx]
+          const skip = cur?.subjectObj?.id
+          setBulkImportSubjectResults((data || []).filter(r => r.subject_id !== skip).map(r => ({ id: r.subject_id, name: r.subject_name, type: r.subject_type })))
+        })
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [bulkImportMode, bulkImportSubjectSearch, bulkImportIdx, bulkImportRows])
+
   // Edit panel: franchise cascade from subcategory
   useEffect(() => {
     if (!isCatalogItemEditMode) return
@@ -3638,6 +3661,7 @@ function App() {
                 category_id:       row.category_id,
                 subcategory_id:    row.subcategory_id,
                 collectible_set_id: row.collectible_set_id,
+                rarity_id:         row.rarity_id || null,
                 metadata:          { image_url: imageUrl, set: setName },
                 dynamic_fields:    {},
               }
@@ -5434,9 +5458,9 @@ function App() {
         release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
         upc:                  v.upc?.trim()                   || null,
         piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
+        rarity_id:        catalogItemEditRarityId || null,
         ...(catalogItemIsMtg ? {
           mtg_card_type_id: catalogItemEditMtgCardTypeId || null,
-          rarity_id:        catalogItemEditRarityId || null,
         } : {}),
       })
       .eq('item_id', selectedCatalogItem.id)
@@ -5575,6 +5599,9 @@ function App() {
     } else if (field === 'brand') {
       const { data, error } = await supabase.from('brands').insert({ name }).select('brand_id').single()
       if (error) { fail(error.message); return }
+      if (catalogAdminRealFranchiseId) {
+        await supabase.from('brand_franchise').insert({ brand_id: data.brand_id, franchise_id: catalogAdminRealFranchiseId })
+      }
       const item = { id: data.brand_id, name }
       setCatalogAdminBrands(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
       setCatalogAdminBrandId(data.brand_id)
@@ -5621,6 +5648,207 @@ function App() {
     reset()
   }
 
+  // ── Bulk Import helpers ──────────────────────────────────────────────────
+  const parseBulkImportCsv = (text) => {
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n')
+    if (lines.length < 2) return []
+    const parseRow = (line) => {
+      const fields = []
+      let cur = '', inQ = false
+      for (const ch of line) {
+        if (ch === '"') { inQ = !inQ }
+        else if (ch === ',' && !inQ) { fields.push(cur.trim()); cur = '' }
+        else cur += ch
+      }
+      fields.push(cur.trim())
+      return fields
+    }
+    const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_'))
+    const col = (names) => { for (const n of names) { const i = headers.indexOf(n); if (i >= 0) return i } return -1 }
+    const iSubject  = col(['subject_name','name','character','subject','minifig_name','fig_name'])
+    const iCard     = col(['card_number','number','card_num','num'])
+    const iBl       = col(['bricklink_id','bricklink','bl_id','catalog_code'])
+    const iRb       = col(['rebrickable_fig_id','rebrickable_id','rebrickable','rb_id','fig_num'])
+    const iPieces   = col(['piece_count','pieces','parts','num_parts'])
+    const iDesc     = col(['description','desc','notes'])
+    const iUpc      = col(['upc','barcode'])
+    const iYear     = col(['release_year','year'])
+    const iCardNum  = col(['card_number','number'])
+    const iImgUrl   = col(['image_url','img_url','image','photo_url','photo'])
+    const iRarity   = col(['rarity','rarity_name'])
+    return lines.slice(1).filter(l => l.trim()).map((line, idx) => {
+      const f = parseRow(line)
+      const g = (i) => (i >= 0 ? (f[i] || '') : '')
+      return {
+        _id: idx,
+        status: 'pending',
+        subject_name: g(iSubject),
+        subjectObj: null,
+        card_number: g(iCard !== iCardNum ? iCard : iCard),
+        bricklink_id: g(iBl),
+        rebrickable_fig_id: g(iRb),
+        piece_count: g(iPieces),
+        description: g(iDesc),
+        upc: g(iUpc),
+        release_year: g(iYear),
+        subcollectble_set_id: '',
+        print_type_id: '',
+        card_type_ids: [],
+        rarity_id: '',
+        rarity_name: g(iRarity),
+        image_url: g(iImgUrl),
+        image_file: null,
+        image_preview: '',
+        errorMsg: '',
+      }
+    })
+  }
+
+  const updateBulkRow = (idx, updates) =>
+    setBulkImportRows(rows => rows.map((r, i) => i === idx ? { ...r, ...updates } : r))
+
+  const bulkImportApprove = () => {
+    const cur = bulkImportRows[bulkImportIdx]
+    if (!cur?.subjectObj && !cur?.subject_name?.trim()) {
+      updateBulkRow(bulkImportIdx, { errorMsg: 'A subject is required before approving.' })
+      return
+    }
+    updateBulkRow(bulkImportIdx, { status: 'approved', errorMsg: '' })
+    const next = bulkImportRows.findIndex((r, i) => i > bulkImportIdx && r.status === 'pending')
+    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }
+  }
+
+  const bulkImportSkip = () => {
+    updateBulkRow(bulkImportIdx, { status: 'skipped' })
+    const next = bulkImportRows.findIndex((r, i) => i > bulkImportIdx && r.status === 'pending')
+    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }
+  }
+
+  const handleBulkImportFile = (file) => {
+    if (!file) return
+    const defaultSubsetId = catalogAdminSubsetId
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      let rows = parseBulkImportCsv(e.target.result).map(r => ({
+        ...r,
+        subcollectble_set_id: defaultSubsetId || '',
+      }))
+      // Auto-match subjects by name
+      const names = [...new Set(rows.map(r => r.subject_name).filter(Boolean))]
+      if (names.length > 0) {
+        const { data: matched } = await supabase
+          .from('subjects')
+          .select('subject_id, subject_name, subject_type')
+          .or(names.map(n => `subject_name.ilike.${n}`).join(','))
+        if (matched?.length) {
+          const byName = new Map(matched.map(s => [s.subject_name.toLowerCase(), { id: s.subject_id, name: s.subject_name, type: s.subject_type }]))
+          rows = rows.map(r => {
+            const hit = r.subject_name ? byName.get(r.subject_name.toLowerCase()) : null
+            return hit ? { ...r, subjectObj: hit } : r
+          })
+        }
+      }
+      // Auto-match rarities by name against loaded catalogRarities
+      if (catalogRarities.length > 0) {
+        const rarityByName = new Map(catalogRarities.map(r => [r.name.toLowerCase(), r.id]))
+        rows = rows.map(r => {
+          if (!r.rarity_name) return r
+          const matched = rarityByName.get(r.rarity_name.toLowerCase())
+          return matched ? { ...r, rarity_id: matched } : r
+        })
+      }
+      setBulkImportRows(rows)
+      setBulkImportIdx(0)
+      setBulkImportSubjectSearch('')
+      setBulkImportSubjectResults([])
+      setBulkImportSaveError('')
+      setBulkImportSaveProgress(0)
+    }
+    reader.readAsText(file)
+  }
+
+  const getBulkSubjectType = () => {
+    const catName  = (selectedCatalogAdminCategoryName || '').toLowerCase()
+    const subName  = (catalogAdminSubcategories.find(s => s.id === catalogAdminSubcategoryId)?.name || '').toLowerCase()
+    if (subName.includes('sport') || catName.includes('sport')) return 'player'
+    if (catName.includes('comic') || subName.includes('comic')) return 'comic'
+    return 'character'
+  }
+
+  const handleBulkImportSave = async () => {
+    const toSave = bulkImportRows.map((r, i) => ({ ...r, _origIdx: i })).filter(r => r.status === 'approved')
+    if (!toSave.length) return
+    setBulkImportIsSaving(true)
+    setBulkImportSaveError('')
+    setBulkImportSaveProgress(0)
+    let saved = 0
+    for (const row of toSave) {
+      const { data: created, error } = await supabase.from('items').insert({
+        category_id:          catalogAdminCategoryId        || null,
+        subcategory_id:       catalogAdminSubcategoryId      || null,
+        franchise_id:         catalogAdminRealFranchiseId    || null,
+        brand_id:             catalogAdminBrandId            || null,
+        collectible_set_id:   catalogAdminFranchiseId        || null,
+        subcollectble_set_id: row.subcollectble_set_id       || null,
+        print_type_id:        row.print_type_id              || null,
+        bricklink_id:         row.bricklink_id?.trim()       || null,
+        rebrickable_fig_id:   row.rebrickable_fig_id?.trim() || null,
+        piece_count:          row.piece_count !== '' ? Number(row.piece_count) : null,
+        upc:                  row.upc?.trim()                || null,
+        description:          row.description?.trim()        || null,
+        card_number:          row.card_number?.trim()        || null,
+        release_year:         row.release_year !== '' ? Number(row.release_year) : null,
+        rarity_id:            row.rarity_id                  || null,
+      }).select('item_id').single()
+      if (error) {
+        updateBulkRow(row._origIdx, { status: 'error', errorMsg: error.message })
+        continue
+      }
+      if (!row.subjectObj?.id && !row.subject_name?.trim()) {
+        updateBulkRow(row._origIdx, { status: 'error', errorMsg: 'No subject — cannot save.' })
+        continue
+      }
+      let subjectId = row.subjectObj?.id || null
+      if (!subjectId && row.subject_name?.trim()) {
+        const { data: newSub } = await supabase
+          .from('subjects')
+          .insert({ subject_name: row.subject_name.trim(), subject_type: getBulkSubjectType() })
+          .select('subject_id')
+          .single()
+        subjectId = newSub?.subject_id || null
+        if (subjectId && catalogAdminRealFranchiseId) {
+          await supabase.from('subject_franchise').upsert(
+            { subject_id: subjectId, franchise_id: catalogAdminRealFranchiseId },
+            { onConflict: 'subject_id,franchise_id' }
+          )
+        }
+      }
+      if (subjectId) {
+        await supabase.from('items').update({ subject_id: subjectId }).eq('item_id', created.item_id)
+        await supabase.from('item_subjects').insert({ item_id: created.item_id, subject_id: subjectId })
+      }
+      if (row.card_type_ids?.length > 0) {
+        await supabase.from('item_card_types').insert(row.card_type_ids.map(ctid => ({ item_id: created.item_id, card_type_id: ctid })))
+      }
+      if (row.image_file) {
+        const ext = row.image_file.name.split('.').pop()
+        const path = `items/${created.item_id}/${Date.now()}_0.${ext}`
+        const { error: upErr } = await supabase.storage.from('item-images').upload(path, row.image_file)
+        if (!upErr) await supabase.from('item_images').insert({ item_id: created.item_id, image_path: path, position: 0 })
+      } else if (row.image_url?.trim()) {
+        const u = row.image_url.trim()
+        const isImageUrl = /\.(jpe?g|png|webp|gif|avif|svg)(\?.*)?$/i.test(u)
+        if (isImageUrl) {
+          await supabase.from('item_images').insert({ item_id: created.item_id, image_path: u, position: 0 })
+        }
+      }
+      updateBulkRow(row._origIdx, { status: 'saved' })
+      saved++
+      setBulkImportSaveProgress(saved)
+    }
+    setBulkImportIsSaving(false)
+  }
+
   const handleCreateCatalogItemInApp = async (mode) => {
 
     if (!isPlatformAdmin) {
@@ -5658,9 +5886,9 @@ function App() {
           print_type_id:    catalogAdminPrintTypeId || null,
           card_number:      catalogAdminCardNumber.trim() || null,
           print_count:      catalogAdminPrintCount !== '' ? Number(catalogAdminPrintCount) : null,
+          rarity_id:        catalogAdminRarityId || null,
           ...(catalogAdminIsMtg ? {
             mtg_card_type_id: catalogAdminMtgCardTypeId || null,
-            rarity_id:        catalogAdminRarityId || null,
           } : {}),
         }),
       })
@@ -5693,6 +5921,7 @@ function App() {
     }
 
     if (createdItem?.item_id && catalogAdminSubjectIds.length > 0) {
+      await supabase.from('items').update({ subject_id: catalogAdminSubjectIds[0].id }).eq('item_id', createdItem.item_id)
       await supabase.from('item_subjects').insert(catalogAdminSubjectIds.map(s => ({ item_id: createdItem.item_id, subject_id: s.id })))
     }
     if (createdItem?.item_id && catalogAdminTeamIds.length > 0) {
@@ -10039,6 +10268,12 @@ function App() {
                         </aside>
 
                         <div className="owned-copy-detail-stack">
+                          {selectedCollectionItemDetails.rarity_id && (
+                            <section className="owned-copy-hero-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
+                              <p className="owned-copy-eyebrow" style={{ margin: 0 }}>Rarity</p>
+                              <strong style={{ fontSize: '1rem' }}>{catalogRarities.find(r => r.id === selectedCollectionItemDetails.rarity_id)?.name ?? 'Unknown'}</strong>
+                            </section>
+                          )}
                           <section className="owned-copy-hero-card">
                             <div>
                               <p className="owned-copy-eyebrow">Condition</p>
@@ -10813,6 +11048,297 @@ function App() {
                     &#10005;
                   </button>
                   <h3>{t('adminCreateItem')}</h3>
+                  <div className="bulk-import-tabs">
+                    <button type="button" className={`bulk-import-tab${!bulkImportMode ? ' bulk-import-tab-active' : ''}`} onClick={() => setBulkImportMode(false)}>Single Item</button>
+                    <button type="button" className={`bulk-import-tab${bulkImportMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(true); setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>Bulk Import</button>
+                  </div>
+                  {bulkImportMode ? (
+                    <div className="bulk-import-container">
+                      {bulkImportRows.length === 0 ? (
+                        /* Step 1: pick set + upload CSV */
+                        <div className="bulk-import-step1">
+                          <p className="catalog-admin-section-title">1. Select the Collectible Set</p>
+                          <div className="catalog-admin-two-col">
+                            <div>
+                              <label>Category</label>
+                              <select value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId('') }}>
+                                <option value="">Select category…</option>
+                                {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Subcategory</label>
+                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
+                                <option value="">Select subcategory…</option>
+                                {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Franchise</label>
+                              <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
+                                <option value="">None</option>
+                                {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Brand</label>
+                              <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
+                                <option value="">None</option>
+                                {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Collectible Set</label>
+                              <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
+                                <option value="">None</option>
+                                {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            </div>
+                            {catalogAdminSubsets.length > 0 && (
+                              <div>
+                                <label>Subset <span className="catalog-admin-hint">(default for all rows)</span></label>
+                                <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
+                                  <option value="">None</option>
+                                  {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV</p>
+                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, bricklink_id, rebrickable_fig_id, piece_count, card_number, description, upc, release_year</code></p>
+                          <label className="bulk-import-upload-area">
+                            <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={e => handleBulkImportFile(e.target.files?.[0])} />
+                            <span className="bulk-import-upload-icon">&#8679;</span>
+                            <span>Click to choose CSV file</span>
+                          </label>
+                        </div>
+                      ) : (
+                        /* Step 2: review queue */
+                        (() => {
+                          const cur = bulkImportRows[bulkImportIdx] || {}
+                          const approvedCount = bulkImportRows.filter(r => r.status === 'approved').length
+                          const savedCount    = bulkImportRows.filter(r => r.status === 'saved').length
+                          const skippedCount  = bulkImportRows.filter(r => r.status === 'skipped').length
+                          const errorCount    = bulkImportRows.filter(r => r.status === 'error').length
+                          const allDone       = bulkImportRows.every(r => r.status !== 'pending')
+                          return (
+                            <div className="bulk-import-review">
+                              <div className="bulk-import-topbar">
+                                <span className="bulk-import-stats">
+                                  {bulkImportRows.length} rows &nbsp;·&nbsp;
+                                  <span className="bulk-stat-approved">{approvedCount} approved</span> &nbsp;·&nbsp;
+                                  <span className="bulk-stat-skipped">{skippedCount} skipped</span>
+                                  {errorCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-error">{errorCount} errors</span></>}
+                                  {savedCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-saved">{savedCount} saved</span></>}
+                                </span>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                  {bulkImportSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkImportSaveError}</span>}
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill catalog-admin-submit-finish"
+                                    disabled={approvedCount === 0 || bulkImportIsSaving}
+                                    onClick={handleBulkImportSave}
+                                  >
+                                    {bulkImportIsSaving ? `Saving… ${bulkImportSaveProgress}/${approvedCount}` : `Save ${approvedCount} Approved`}
+                                  </button>
+                                  <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportRows([]); setBulkImportIdx(0) }}>Start Over</button>
+                                </div>
+                              </div>
+                              <div className="bulk-import-split">
+                                <div className="bulk-import-list">
+                                  {bulkImportRows.map((row, i) => (
+                                    <button
+                                      key={row._id}
+                                      type="button"
+                                      className={`bulk-import-list-row${i === bulkImportIdx ? ' bulk-import-list-row-active' : ''} bulk-import-list-row-${row.status}`}
+                                      onClick={() => { setBulkImportIdx(i); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}
+                                    >
+                                      <span className="bulk-import-row-icon">
+                                        {row.status === 'pending'  ? '○' :
+                                         row.status === 'approved' ? '✓' :
+                                         row.status === 'skipped'  ? '–' :
+                                         row.status === 'saved'    ? '✅' : '✗'}
+                                      </span>
+                                      <span className="bulk-import-row-label">{row.subjectObj?.name || row.subject_name || `Row ${i + 1}`}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="bulk-import-editor">
+                                  {allDone && !bulkImportIsSaving ? (
+                                    <p className="catalog-admin-hint" style={{ padding: 16 }}>All rows reviewed. Save approved items above.</p>
+                                  ) : (
+                                    <>
+                                      <p className="bulk-import-editor-rowlabel">Row {bulkImportIdx + 1} of {bulkImportRows.length}</p>
+                                      <div className="bulk-import-editor-fields">
+                                        <div className="bulk-import-editor-field">
+                                          <label>Subject</label>
+                                          {cur.subjectObj ? (
+                                            <div className="catalog-admin-subject-tags">
+                                              <span className="catalog-admin-subject-tag">
+                                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{cur.subjectObj.name}</span>
+                                                <span className="catalog-admin-hint"> · {cur.subjectObj.type}</span>
+                                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: null }); setBulkImportSubjectSearch(cur.subject_name || '') }}>✕</button>
+                                              </span>
+                                            </div>
+                                          ) : cur.subject_name && !bulkImportSubjectSearch ? (
+                                            <div className="catalog-admin-subject-tags">
+                                              <span className="catalog-admin-subject-tag bulk-import-subject-new">
+                                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{cur.subject_name}</span>
+                                                <span className="catalog-admin-hint"> · will create</span>
+                                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkRow(bulkImportIdx, { subject_name: '' }); setBulkImportSubjectSearch('') }}>✕</button>
+                                              </span>
+                                              <button type="button" className="bulk-import-subject-search-link" onClick={() => setBulkImportSubjectSearch(cur.subject_name)}>Search existing instead</button>
+                                            </div>
+                                          ) : (
+                                            <div className="catalog-admin-subject-search-wrap">
+                                              <input
+                                                className="catalog-admin-inline-input"
+                                                style={{ width: '100%' }}
+                                                placeholder="Search subjects…"
+                                                value={bulkImportSubjectSearch}
+                                                onChange={e => setBulkImportSubjectSearch(e.target.value)}
+                                                autoComplete="off"
+                                              />
+                                              {bulkImportSubjectResults.length > 0 && (
+                                                <div className="catalog-admin-subject-results">
+                                                  {bulkImportSubjectResults.map(s => (
+                                                    <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: s, subject_name: s.name }); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>
+                                                      <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                                      <span className="catalog-admin-hint"> · {s.type}</span>
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Subset</label>
+                                          <select value={cur.subcollectble_set_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subcollectble_set_id: e.target.value })}>
+                                            <option value="">None</option>
+                                            {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                          </select>
+                                        </div>
+                                        {catalogAdminPrintTypes.length > 0 && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Print Type</label>
+                                            <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
+                                              <option value="">None</option>
+                                              {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                            </select>
+                                          </div>
+                                        )}
+                                        {catalogRarities.length > 0 && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Rarity</label>
+                                            <select value={cur.rarity_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rarity_id: e.target.value })}>
+                                              <option value="">None</option>
+                                              {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                            </select>
+                                          </div>
+                                        )}
+                                        <div className="bulk-import-editor-field">
+                                          <label>BrickLink ID</label>
+                                          <input type="text" value={cur.bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { bricklink_id: e.target.value })} placeholder="e.g. col473" />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Rebrickable ID</label>
+                                          <input type="text" value={cur.rebrickable_fig_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rebrickable_fig_id: e.target.value })} placeholder="e.g. fig-001234" />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Piece Count</label>
+                                          <input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Card Number</label>
+                                          <input type="text" value={cur.card_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { card_number: e.target.value })} />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Release Year</label>
+                                          <input type="number" min="1932" max="2100" value={cur.release_year || ''} onChange={e => updateBulkRow(bulkImportIdx, { release_year: e.target.value })} />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>UPC</label>
+                                          <input type="text" value={cur.upc || ''} onChange={e => updateBulkRow(bulkImportIdx, { upc: e.target.value })} />
+                                        </div>
+                                        {catalogAllCardTypes.filter(ct => ct.name !== 'Normal').length > 0 && (
+                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                            <label>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></label>
+                                            <div className="catalog-admin-team-list">
+                                              {catalogAllCardTypes.filter(ct => ct.name !== 'Normal').map(ct => (
+                                                <label key={ct.id} className="catalog-admin-team-checkbox">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={(cur.card_type_ids || []).includes(ct.id)}
+                                                    onChange={e => updateBulkRow(bulkImportIdx, { card_type_ids: e.target.checked ? [...(cur.card_type_ids || []), ct.id] : (cur.card_type_ids || []).filter(id => id !== ct.id) })}
+                                                  />
+                                                  <span>{ct.name}</span>
+                                                </label>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                          <label>Description</label>
+                                          <textarea rows={2} value={cur.description || ''} onChange={e => updateBulkRow(bulkImportIdx, { description: e.target.value })} />
+                                        </div>
+                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide bulk-import-image-field">
+                                          <label>Photo</label>
+                                          <div className="bulk-import-image-row">
+                                            {(cur.image_preview || cur.image_url) && (
+                                              <img
+                                                src={cur.image_preview || cur.image_url}
+                                                alt="preview"
+                                                className="bulk-import-image-thumb"
+                                                onError={e => { e.target.style.display = 'none' }}
+                                              />
+                                            )}
+                                            <div className="bulk-import-image-controls">
+                                              <input
+                                                type="text"
+                                                placeholder="Image URL (from CSV or paste)"
+                                                value={cur.image_url || ''}
+                                                onChange={e => updateBulkRow(bulkImportIdx, { image_url: e.target.value, image_file: null, image_preview: '' })}
+                                              />
+                                              <span className="bulk-import-image-or">or</span>
+                                              <label className="bulk-import-image-upload-btn">
+                                                Upload file
+                                                <input
+                                                  type="file"
+                                                  accept="image/*"
+                                                  style={{ display: 'none' }}
+                                                  onChange={e => {
+                                                    const f = e.target.files?.[0]
+                                                    if (!f) return
+                                                    const preview = URL.createObjectURL(f)
+                                                    updateBulkRow(bulkImportIdx, { image_file: f, image_preview: preview, image_url: '' })
+                                                  }}
+                                                />
+                                              </label>
+                                              {(cur.image_file || cur.image_url) && (
+                                                <button type="button" className="bulk-import-image-clear" onClick={() => updateBulkRow(bulkImportIdx, { image_file: null, image_preview: '', image_url: '' })}>✕</button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {cur.errorMsg && <p className="catalog-admin-error" style={{ marginTop: 8 }}>{cur.errorMsg}</p>}
+                                      <div className="bulk-import-actions">
+                                        <button type="button" className="catalog-admin-inline-cancel" onClick={bulkImportSkip} disabled={cur.status === 'saved'}>Skip</button>
+                                        <button type="button" className="catalog-action-pill catalog-admin-submit-finish" onClick={bulkImportApprove} disabled={cur.status === 'saved'}>
+                                          {cur.status === 'approved' ? 'Approved ✓' : cur.status === 'saved' ? 'Saved ✅' : 'Approve'}
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })()
+                      )}
+                    </div>
+                  ) : (
                   <form className="catalog-admin-form" onSubmit={e => e.preventDefault()}>
 
                     <p className="catalog-admin-section-title">Classification</p>
@@ -11058,23 +11584,23 @@ function App() {
                               ) : null
                             })()}
                           </div>
+                          {catalogRarities.length > 0 && (
+                            <div>
+                              <label htmlFor="cai-rarity">Rarity</label>
+                              <select id="cai-rarity" value={catalogAdminRarityId} onChange={e => setCatalogAdminRarityId(e.target.value)}>
+                                <option value="">— Select —</option>
+                                {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                              </select>
+                            </div>
+                          )}
                           {catalogAdminIsMtg && (
-                            <>
-                              <div>
-                                <label htmlFor="cai-rarity">Rarity</label>
-                                <select id="cai-rarity" value={catalogAdminRarityId} onChange={e => setCatalogAdminRarityId(e.target.value)}>
-                                  <option value="">— Select —</option>
-                                  {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                                </select>
-                              </div>
-                              <div>
-                                <label htmlFor="cai-mtg-type">Card Type</label>
-                                <select id="cai-mtg-type" value={catalogAdminMtgCardTypeId} onChange={e => setCatalogAdminMtgCardTypeId(e.target.value)}>
-                                  <option value="">— Select —</option>
-                                  {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                </select>
-                              </div>
-                            </>
+                            <div>
+                              <label htmlFor="cai-mtg-type">Card Type</label>
+                              <select id="cai-mtg-type" value={catalogAdminMtgCardTypeId} onChange={e => setCatalogAdminMtgCardTypeId(e.target.value)}>
+                                <option value="">— Select —</option>
+                                {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                              </select>
+                            </div>
                           )}
                           <div>
                             <label htmlFor="cai-card-number">Card Number</label>
@@ -11129,6 +11655,7 @@ function App() {
                       </button>
                     </div>
                   </form>
+                  )}
                 </section>
               </div>
             )}
@@ -11423,6 +11950,15 @@ function App() {
                         <span>Release Year</span>
                         <input type="number" min="1932" max="2100" value={catalogItemEditValues.release_year ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, release_year: e.target.value }))} placeholder="e.g. 2023" />
                       </label>
+                      {catalogRarities.length > 0 && (
+                        <label className="catalog-item-edit-field">
+                          <span>Rarity</span>
+                          <select value={catalogItemEditRarityId} onChange={e => setCatalogItemEditRarityId(e.target.value)}>
+                            <option value="">— None —</option>
+                            {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                        </label>
+                      )}
                       {selectedCatalogItem?.categoryName === 'Building Blocks' && (<>
                         <label className="catalog-item-edit-field">
                           <span>BrickLink ID</span>
@@ -11482,11 +12018,6 @@ function App() {
                           })()}
                           {catalogItemIsMtg && (
                             <>
-                              <span style={{ marginTop: 12, display: 'block', fontWeight: 600, fontSize: '0.88rem', color: 'var(--detail-label)' }}>Rarity</span>
-                              <select value={catalogItemEditRarityId} onChange={e => setCatalogItemEditRarityId(e.target.value)} style={{ marginTop: 4 }}>
-                                <option value="">— Select —</option>
-                                {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                              </select>
                               <span style={{ marginTop: 10, display: 'block', fontWeight: 600, fontSize: '0.88rem', color: 'var(--detail-label)' }}>Card Type</span>
                               <select value={catalogItemEditMtgCardTypeId} onChange={e => setCatalogItemEditMtgCardTypeId(e.target.value)} style={{ marginTop: 4 }}>
                                 <option value="">— Select —</option>
@@ -12140,9 +12671,11 @@ function App() {
                           { label: 'Species',       value: d.species,             onClick: null },
                           { label: 'Team(s)',       value: d.teams,               onClick: null },
                           { label: 'Card Treatment', value: d.card_types,           onClick: null },
+                          ...(catalogDetailRarityId ? [
+                            { label: 'Rarity', value: catalogRarities.find(r => r.id === catalogDetailRarityId)?.name ?? 'N/A', onClick: null },
+                          ] : []),
                           ...(catalogItemIsMtg ? [
-                            { label: 'Rarity', value: catalogRarities.find(r => r.id === catalogDetailRarityId)?.name ?? 'N/A',                 onClick: null },
-                            { label: 'Type',   value: catalogMtgCardTypes.find(t => t.id === catalogDetailMtgCardTypeId)?.name ?? 'N/A', onClick: null },
+                            { label: 'Type', value: catalogMtgCardTypes.find(t => t.id === catalogDetailMtgCardTypeId)?.name ?? 'N/A', onClick: null },
                           ] : []),
                           { label: 'Card Number',   value: d.card_number,         onClick: null },
                           { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
