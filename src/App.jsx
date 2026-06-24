@@ -1627,6 +1627,19 @@ function App() {
   const [bulkImportIsSaving, setBulkImportIsSaving] = useState(false)
   const [bulkImportSaveError, setBulkImportSaveError] = useState('')
   const [bulkImportSaveProgress, setBulkImportSaveProgress] = useState(0)
+  const [bulkPhotoMode, setBulkPhotoMode] = useState(false)
+  const [bulkPhotoPosition, setBulkPhotoPosition] = useState(0)
+  const [bulkPhotoRows, setBulkPhotoRows] = useState([])
+  const [bulkPhotoIdx, setBulkPhotoIdx] = useState(0)
+  const [bulkPhotoIsSaving, setBulkPhotoIsSaving] = useState(false)
+  const [bulkPhotoSaveError, setBulkPhotoSaveError] = useState('')
+  const [bulkPhotoSaveProgress, setBulkPhotoSaveProgress] = useState(0)
+  const [bulkPhotoPhase, setBulkPhotoPhase] = useState(null)
+  const [bulkPhotoAnalyzing, setBulkPhotoAnalyzing] = useState(false)
+  const [bulkPhotoAnalyzeProgress, setBulkPhotoAnalyzeProgress] = useState({ done: 0, total: 0 })
+  const [bulkPhotoSubsetItems, setBulkPhotoSubsetItems] = useState([])
+  const [bulkPhotoManualSearch, setBulkPhotoManualSearch] = useState('')
+  const [bulkPhotoManualResults, setBulkPhotoManualResults] = useState([])
   const [isUploadingCatalogItemImage, setIsUploadingCatalogItemImage] = useState(false)
   const [catalogDetailIsGraded, setCatalogDetailIsGraded] = useState(false)
   const [catalogDetailGradingCompany, setCatalogDetailGradingCompany] = useState('')
@@ -1645,7 +1658,15 @@ function App() {
   const [ownedCatalogItemCerts, setOwnedCatalogItemCerts] = useState({})
   const [ownedCatalogItemPurchases, setOwnedCatalogItemPurchases] = useState({})
   const [wishlistItemIds, setWishlistItemIds] = useState(new Set())
+  const [wishlistItems, setWishlistItems] = useState([])
+  const [isWishlistLoading, setIsWishlistLoading] = useState(false)
+  const [wishlistLoadError, setWishlistLoadError] = useState('')
+  const [wishlistSearchQuery, setWishlistSearchQuery] = useState('')
+  const [wishlistPage, setWishlistPage] = useState(1)
+  const [wishlistReloadToken, setWishlistReloadToken] = useState(0)
+  const [wishlistRemoveConfirmId, setWishlistRemoveConfirmId] = useState('')
   const [catalogListStats, setCatalogListStats] = useState({})
+  const [catalogDetailStats, setCatalogDetailStats] = useState(null)
   const [collectionItems, setCollectionItems] = useState([])
   const [collectionInventoryRows, setCollectionInventoryRows] = useState([])
   const [isCollectionLoading, setIsCollectionLoading] = useState(false)
@@ -2830,19 +2851,22 @@ function App() {
       setCatalogDetailSubjects([])
       setCatalogDetailMtgCardTypeId('')
       setCatalogDetailRarityId('')
+      setCatalogDetailStats(null)
       return
     }
     let cancelled = false
     const load = async () => {
       const itemBrandId = selectedCatalogItem._details?.brand_id
       const isMinifig = selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col')
-      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }] = await Promise.all([
+      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }, { data: marketData }, { data: ownerCountData }] = await Promise.all([
         supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
         supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
         isMinifig && itemBrandId
           ? supabase.from('market_variants').select('market_variant_id, name, sort_order').eq('brand_id', itemBrandId).order('sort_order')
           : Promise.resolve({ data: [] }),
         supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
+        supabase.rpc('get_item_market_stats', { item_ids: [selectedCatalogItem.id] }),
+        supabase.rpc('get_item_owner_count', { item_id: selectedCatalogItem.id }),
       ])
       if (imgErr) console.error('item_images load error:', imgErr)
       if (!cancelled) {
@@ -2852,6 +2876,8 @@ function App() {
         setCatalogItemConditionId('')
         setCatalogDetailMtgCardTypeId(itemMeta?.mtg_card_type_id || '')
         setCatalogDetailRarityId(itemMeta?.rarity_id || '')
+        const stats = Array.isArray(marketData) && marketData.length > 0 ? marketData[0] : null
+        setCatalogDetailStats(stats ? { ...stats, community_owned: ownerCountData ?? null } : { community_owned: ownerCountData ?? null })
       }
     }
     load()
@@ -3168,6 +3194,25 @@ function App() {
     return () => clearTimeout(timer)
   }, [bulkImportMode, bulkImportSubjectSearch, bulkImportIdx, bulkImportRows])
 
+  useEffect(() => {
+    if (!bulkPhotoMode || !bulkPhotoRows.length) return
+    const q = bulkPhotoManualSearch.trim()
+    if (q.length < 2) { setBulkPhotoManualResults([]); return }
+    const timer = setTimeout(async () => {
+      let query = supabase.from('item_details')
+        .select('item_id, card_number, subject')
+        .ilike('subject', `%${q}%`)
+        .order('subject')
+        .limit(10)
+      if (catalogAdminFranchiseId) query = query.eq('collectible_set_id', catalogAdminFranchiseId)
+      if (catalogAdminSubsetId) query = query.eq('subcollectble_set_id', catalogAdminSubsetId)
+      const { data, error } = await query
+      if (error) console.error('bulk photo search error:', error)
+      setBulkPhotoManualResults(data || [])
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [bulkPhotoMode, bulkPhotoManualSearch, bulkPhotoRows.length, catalogAdminFranchiseId, catalogAdminSubsetId])
+
   // Edit panel: franchise cascade from subcategory
   useEffect(() => {
     if (!isCatalogItemEditMode) return
@@ -3440,8 +3485,7 @@ function App() {
         .from('owned_copies')
         .select('catalog_item_id, condition, grading_company, grade, cert_number, cert_number_normalized, acquisition_type, purchase_price, box_set_total_price, box_set_item_count, sale_price, metadata, created_at, visibility:sale_status')
         .eq('user_id', currentUser.id)
-        .neq('sale_status', 'sold')
-        .neq('sale_status', 'archived')
+        .or('sale_status.is.null,sale_status.not.in.(sold,archived)')
 
       if (isCancelled) {
         return
@@ -3531,6 +3575,82 @@ function App() {
   }, [currentUser?.id])
 
   useEffect(() => {
+    if (currentScreen !== 'wishlist' || !currentUser?.id) {
+      setWishlistItems([])
+      setWishlistLoadError('')
+      return
+    }
+    let cancelled = false
+    setIsWishlistLoading(true)
+    setWishlistLoadError('')
+    const load = async () => {
+      const { data: wishRows, error: wishErr } = await supabase
+        .from('wishlist_items')
+        .select('catalog_item_id')
+        .eq('user_id', currentUser.id)
+      if (wishErr || !Array.isArray(wishRows)) {
+        if (!cancelled) { setWishlistLoadError(wishErr?.message || 'Could not load wishlist.'); setIsWishlistLoading(false) }
+        return
+      }
+      if (wishRows.length === 0) {
+        if (!cancelled) { setWishlistItems([]); setWishlistItemIds(new Set()); setIsWishlistLoading(false) }
+        return
+      }
+      const itemIds = wishRows.map(r => r.catalog_item_id)
+      const [{ data: detailRows }, categoriesResult, subcategoriesResult] = await Promise.all([
+        supabase.from('item_details').select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path, release_year').in('item_id', itemIds),
+        supabase.from('categories').select('category_id, name'),
+        supabase.from('subcategories').select('subcategory_id, name'),
+      ])
+      const categoryNameById = Object.fromEntries((categoriesResult.data || []).map(r => [r.category_id, r.name]))
+      const subcategoryNameById = Object.fromEntries((subcategoriesResult.data || []).map(r => [r.subcategory_id, r.name]))
+      const detailsById = {}
+      for (const row of (detailRows || [])) {
+        if (!row?.item_id) continue
+        const na = v => (v && v !== 'N/A' ? v : '')
+        const subjectName = na(row.subject)
+        const setName = na(row.collectible_set)
+        const printType = na(row.print_type)
+        const cardNum = row.card_number && row.card_number !== 'N/A' ? `#${row.card_number}` : ''
+        const nameParts = [subjectName, printType, cardNum].filter(Boolean)
+        const fp = row.front_image_path
+        const imageUrl = fp ? (fp.startsWith('http') ? fp : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || '') : ''
+        detailsById[row.item_id] = {
+          id: row.item_id,
+          name: nameParts.join(' — ') || row.description || 'Unnamed Item',
+          imageUrl,
+          setName: setName || '',
+          categoryName: categoryNameById[row.category_id] || '',
+          subcategoryName: subcategoryNameById[row.subcategory_id] || '',
+          releaseYear: row.release_year || null,
+          category_id: row.category_id,
+          subcategory_id: row.subcategory_id,
+          collectible_set_id: row.collectible_set_id,
+          franchise_id: row.franchise_id,
+          brand_id: row.brand_id,
+          _set_name: setName || '',
+          _brand_name: '',
+          metadata: { image_url: imageUrl, set: setName || '' },
+          dynamic_fields: {},
+          description: row.description || '',
+          card_number: row.card_number || '',
+          print_count: row.print_count || null,
+        }
+      }
+      const items = wishRows
+        .map(r => ({ ...detailsById[r.catalog_item_id] }))
+        .filter(i => i.id)
+      if (!cancelled) {
+        setWishlistItems(items)
+        setWishlistItemIds(new Set(items.map(i => i.id)))
+        setIsWishlistLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [currentScreen, currentUser?.id, wishlistReloadToken])
+
+  useEffect(() => {
     if (catalogViewMode !== 'list' || catalogItems.length === 0) {
       setCatalogListStats({})
       return
@@ -3580,8 +3700,7 @@ function App() {
           .from('owned_copies')
         .select('id, catalog_item_id, condition, grading_company, grade, cert_number, cert_number_normalized, acquisition_type, purchase_price, box_set_total_price, box_set_item_count, sale_price, front_image_url, back_image_url, notes, metadata, created_at, visibility:sale_status')
           .eq('user_id', currentUser.id)
-          .neq('sale_status', 'sold')
-          .neq('sale_status', 'archived')
+          .or('sale_status.is.null,sale_status.not.in.(sold,archived)')
           .order('created_at', { ascending: false }),
         supabase
           .from('collections')
@@ -5109,6 +5228,20 @@ function App() {
     setIsUserMenuOpen(false)
   }
 
+  const handleOpenWishlist = (event) => {
+    if (!currentUser) { handleProtectedNavClick(event); return }
+    event.preventDefault()
+    setCurrentScreen('wishlist')
+    setIsUserMenuOpen(false)
+  }
+
+  const handleWishlistRemove = async (itemId) => {
+    await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('catalog_item_id', itemId)
+    setWishlistItems(prev => prev.filter(i => i.id !== itemId))
+    setWishlistItemIds(prev => { const next = new Set(prev); next.delete(itemId); return next })
+    setWishlistRemoveConfirmId('')
+  }
+
   const handleOpenCollectionItemDetails = (item) => {
     if (!item?.id) {
       return
@@ -5856,6 +5989,172 @@ function App() {
       setBulkImportSaveProgress(saved)
     }
     setBulkImportIsSaving(false)
+  }
+
+  const updateBulkPhotoRow = (idx, updates) =>
+    setBulkPhotoRows(rows => rows.map((r, i) => i === idx ? { ...r, ...updates } : r))
+
+  const bulkPhotoAdvancePhase = (updatedRows, fromPhase) => {
+    if (fromPhase === 'new') {
+      const firstUpdate = updatedRows.findIndex(r => r.status === 'pending' && r.hasExistingImage)
+      setBulkPhotoPhase('update')
+      if (firstUpdate >= 0) { setBulkPhotoIdx(firstUpdate); setBulkPhotoManualSearch('') }
+    }
+  }
+
+  const bulkPhotoApprove = () => {
+    const cur = bulkPhotoRows[bulkPhotoIdx]
+    if (!cur?.matchedItem) { updateBulkPhotoRow(bulkPhotoIdx, { errorMsg: 'Assign a card before approving.' }); return }
+    const itemId = cur.matchedItem.item_id
+    const isNewPhase = bulkPhotoPhase === 'new'
+    const phaseFilter = r => isNewPhase ? !r.hasExistingImage : r.hasExistingImage
+    const updatedRows = bulkPhotoRows.map((r, i) => {
+      if (i === bulkPhotoIdx) return { ...r, status: 'approved', errorMsg: '' }
+      if (r.matchedItem?.item_id === itemId && r.status !== 'saved' && r.status !== 'skipped' && r.status !== 'error')
+        return { ...r, status: 'skipped', errorMsg: 'Skipped — another photo approved for this card' }
+      return r
+    })
+    setBulkPhotoRows(updatedRows)
+    const next = updatedRows.findIndex((r, i) =>
+      i > bulkPhotoIdx && r.status === 'pending' && phaseFilter(r) && r.matchedItem?.item_id !== itemId
+    )
+    if (next >= 0) { setBulkPhotoIdx(next); setBulkPhotoManualSearch('') }
+    else if (isNewPhase) bulkPhotoAdvancePhase(updatedRows, 'new')
+  }
+
+  const bulkPhotoSkip = () => {
+    const isNewPhase = bulkPhotoPhase === 'new'
+    const phaseFilter = r => isNewPhase ? !r.hasExistingImage : r.hasExistingImage
+    const updatedRows = bulkPhotoRows.map((r, i) => i === bulkPhotoIdx ? { ...r, status: 'skipped' } : r)
+    setBulkPhotoRows(updatedRows)
+    const next = updatedRows.findIndex((r, i) => i > bulkPhotoIdx && r.status === 'pending' && phaseFilter(r))
+    if (next >= 0) { setBulkPhotoIdx(next); setBulkPhotoManualSearch('') }
+    else if (isNewPhase) bulkPhotoAdvancePhase(updatedRows, 'new')
+  }
+
+  const handleBulkPhotoFolder = async (files) => {
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
+    if (!imageFiles.length || !catalogAdminFranchiseId) return
+    const position = bulkPhotoPosition
+
+    let q = supabase.from('item_details')
+      .select('item_id, card_number, subject, collectible_set_id, subcollectble_set_id')
+      .eq('collectible_set_id', catalogAdminFranchiseId)
+    if (catalogAdminSubsetId) q = q.eq('subcollectble_set_id', catalogAdminSubsetId)
+    const { data: subsetItems } = await q
+    const items = subsetItems || []
+    setBulkPhotoSubsetItems(items)
+
+    const bySubject = new Map()
+    for (const item of items) {
+      if (item.subject) bySubject.set(item.subject.trim().toLowerCase(), item)
+    }
+
+    const rows = imageFiles.map(file => ({
+      _id: Math.random().toString(36).slice(2),
+      file,
+      filename: file.name,
+      preview: URL.createObjectURL(file),
+      matchedItem: null,
+      matchType: null,
+      extractedText: '',
+      description: '',
+      hasExistingImage: false,
+      status: 'pending',
+      errorMsg: '',
+    }))
+    setBulkPhotoRows([...rows])
+    setBulkPhotoIdx(0)
+    setBulkPhotoAnalyzing(true)
+    setBulkPhotoAnalyzeProgress({ done: 0, total: imageFiles.length })
+    setBulkPhotoSaveError('')
+    setBulkPhotoSaveProgress(0)
+    setBulkPhotoPhase(null)
+
+    const { createWorker } = await import('tesseract.js')
+    const worker = await createWorker('eng')
+
+    for (let i = 0; i < imageFiles.length; i++) {
+      let matchedItem = null, matchType = null, extractedText = ''
+      try {
+        const { data } = await worker.recognize(imageFiles[i])
+        extractedText = data.text || ''
+        const textLow = extractedText.toLowerCase()
+        for (const [key, item] of bySubject) {
+          if (key.length >= 3 && textLow.includes(key)) { matchedItem = item; matchType = 'subject_name'; break }
+        }
+      } catch (_) { /* OCR failure */ }
+      rows[i] = { ...rows[i], matchedItem, matchType, extractedText, description: extractedText.trim() }
+      setBulkPhotoRows([...rows])
+      setBulkPhotoAnalyzeProgress({ done: i + 1, total: imageFiles.length })
+    }
+
+    await worker.terminate()
+
+    // Deduplicate — first match wins
+    const seen = new Set()
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].matchedItem) continue
+      const id = rows[i].matchedItem.item_id
+      if (seen.has(id)) rows[i] = { ...rows[i], status: 'skipped', errorMsg: 'Duplicate — another image already matched this card' }
+      else seen.add(id)
+    }
+
+    // Check which matched items already have a position-0 image
+    const matchedIds = rows.filter(r => r.matchedItem && r.status !== 'skipped').map(r => r.matchedItem.item_id)
+    if (matchedIds.length) {
+      const { data: imgs } = await supabase.from('item_images').select('item_id').in('item_id', matchedIds).eq('position', position)
+      const withImg = new Set((imgs || []).map(r => r.item_id))
+      for (let i = 0; i < rows.length; i++) {
+        rows[i] = { ...rows[i], hasExistingImage: rows[i].matchedItem ? withImg.has(rows[i].matchedItem.item_id) : false }
+      }
+    }
+
+    setBulkPhotoRows([...rows])
+    setBulkPhotoAnalyzing(false)
+
+    const hasNew = rows.some(r => r.status === 'pending' && !r.hasExistingImage)
+    const hasUpdate = rows.some(r => r.status === 'pending' && r.hasExistingImage)
+    if (hasNew) {
+      setBulkPhotoPhase('new')
+      setBulkPhotoIdx(rows.findIndex(r => r.status === 'pending' && !r.hasExistingImage))
+    } else if (hasUpdate) {
+      setBulkPhotoPhase('update')
+      setBulkPhotoIdx(rows.findIndex(r => r.status === 'pending' && r.hasExistingImage))
+    } else {
+      setBulkPhotoPhase('review')
+    }
+  }
+
+  const handleBulkPhotoSave = async () => {
+    const toSave = bulkPhotoRows.map((r, i) => ({ ...r, _origIdx: i })).filter(r => r.status === 'approved' && r.matchedItem)
+    if (!toSave.length) return
+    setBulkPhotoIsSaving(true)
+    setBulkPhotoSaveError('')
+    setBulkPhotoSaveProgress(0)
+    let saved = 0
+    const pos = bulkPhotoPosition
+    for (const row of toSave) {
+      const item_id = row.matchedItem.item_id
+      try {
+        await supabase.from('item_images').delete().eq('item_id', item_id).eq('position', pos)
+        const ext = row.file.name.split('.').pop().toLowerCase() || 'jpg'
+        const path = `items/${item_id}/${Date.now()}_${pos}.${ext}`
+        const { error: upErr } = await supabase.storage.from('item-images').upload(path, row.file)
+        if (upErr) { updateBulkPhotoRow(row._origIdx, { status: 'error', errorMsg: upErr.message }); continue }
+        await supabase.from('item_images').insert({ item_id, image_path: path, position: pos })
+        if (row.description?.trim()) {
+          await supabase.from('items').update({ description: row.description.trim() }).eq('item_id', item_id)
+        }
+        updateBulkPhotoRow(row._origIdx, { status: 'saved' })
+        saved++
+        setBulkPhotoSaveProgress(saved)
+      } catch (e) {
+        updateBulkPhotoRow(row._origIdx, { status: 'error', errorMsg: e.message })
+      }
+    }
+    setBulkPhotoIsSaving(false)
+    setBulkPhotoPhase('review')
   }
 
   const handleCreateCatalogItemInApp = async (mode) => {
@@ -8495,6 +8794,19 @@ function App() {
     collectionOverviewPageStart + COLLECTION_OVERVIEW_PAGE_SIZE,
   )
   const selectedCollectionItemDetails = collectionItems.find((item) => item.id === selectedCollectionItemDetailsId) || null
+
+  const normalizedWishlistSearch = wishlistSearchQuery.trim().toLowerCase()
+  const filteredWishlistItems = wishlistItems.filter(item =>
+    !normalizedWishlistSearch ||
+    item.name?.toLowerCase().includes(normalizedWishlistSearch) ||
+    item.setName?.toLowerCase().includes(normalizedWishlistSearch) ||
+    item.categoryName?.toLowerCase().includes(normalizedWishlistSearch)
+  )
+  const wishlistTotalPages = Math.max(1, Math.ceil(filteredWishlistItems.length / COLLECTION_OVERVIEW_PAGE_SIZE))
+  const paginatedWishlistItems = filteredWishlistItems.slice(
+    (wishlistPage - 1) * COLLECTION_OVERVIEW_PAGE_SIZE,
+    wishlistPage * COLLECTION_OVERVIEW_PAGE_SIZE
+  )
   const selectedCollectionItemCopyRows = selectedCollectionItemDetails
     ? collectionInventoryRows
         .filter((row) => row.catalogItemId === selectedCollectionItemDetails.id)
@@ -9268,7 +9580,7 @@ function App() {
         >
           {t('stores')}
         </a>
-        <a href="#" onClick={handleProtectedNavClick}>
+        <a href="#" className={currentScreen === 'wishlist' ? 'active' : ''} onClick={handleOpenWishlist}>
           {t('wishlist')}
         </a>
         <a
@@ -10439,6 +10751,146 @@ function App() {
               </div>
             )}
           </section>
+        ) : currentScreen === 'wishlist' ? (
+          <section className="collection-screen" aria-label="My Wishlist">
+            <div className="catalog-head">
+              <div>
+                <h1>My Wishlist</h1>
+                <p className="subtitle catalog-subtitle">Items you want — add them to your collection when you get them.</p>
+              </div>
+              <div className="catalog-actions">
+                <button type="button" className="catalog-action-pill" onClick={handleOpenCatalog}>
+                  Browse Catalog
+                </button>
+              </div>
+            </div>
+
+            {!currentUser ? (
+              <div className="settings-empty-state">
+                <p className="subtitle">Log in to view your wishlist.</p>
+                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>
+                  Log in
+                </button>
+              </div>
+            ) : (
+              <div className="collection-main-pane">
+                <div className="collection-topbar">
+                  <input
+                    type="search"
+                    className="catalog-search-input"
+                    placeholder="Search wishlist…"
+                    value={wishlistSearchQuery}
+                    onChange={e => { setWishlistSearchQuery(e.target.value); setWishlistPage(1) }}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#667', alignSelf: 'center' }}>
+                    {filteredWishlistItems.length} item{filteredWishlistItems.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {isWishlistLoading ? (
+                    <p style={{ padding: '32px', textAlign: 'center', color: '#667' }}>Loading wishlist…</p>
+                  ) : wishlistLoadError ? (
+                    <p className="auth-error" style={{ margin: '24px 0' }}>{wishlistLoadError}</p>
+                  ) : filteredWishlistItems.length === 0 ? (
+                    <div className="settings-empty-state">
+                      <p className="subtitle">
+                        {wishlistSearchQuery ? 'No items match your search.' : 'Your wishlist is empty. Browse the catalog and heart items you want.'}
+                      </p>
+                      {!wishlistSearchQuery && (
+                        <button type="button" className="auth-submit" onClick={handleOpenCatalog}>
+                          Browse Catalog
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <section className="collection-list" aria-label="Wishlist items">
+                        {paginatedWishlistItems.map(item => (
+                          <article key={`wishlist-item-${item.id}`} className="catalog-card collection-item-row">
+                            {item.imageUrl ? (
+                              <img className="collection-item-image" src={item.imageUrl} alt={item.name} loading="lazy" />
+                            ) : (
+                              <div className="collection-item-image collection-item-image-placeholder">No image</div>
+                            )}
+
+                            <div className="collection-item-body">
+                              <h3>{item.name}</h3>
+                              <p className="collection-item-meta">
+                                {[item.releaseYear, item.setName, item.categoryName].filter(Boolean).join(' | ')}
+                              </p>
+                              {ownedCatalogItemCounts[item.id] > 0 && (
+                                <p className="collection-item-meta" style={{ color: '#1a4ecf', fontWeight: 600 }}>
+                                  You own {ownedCatalogItemCounts[item.id]}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="collection-item-actions">
+                              <button
+                                type="button"
+                                className="catalog-action-pill"
+                                onClick={() => {
+                                  setSelectedCatalogItem(item)
+                                  handleOpenAddToCollectionModal()
+                                }}
+                              >
+                                Collect
+                              </button>
+
+                              <button
+                                type="button"
+                                className="catalog-action-pill"
+                                onClick={() => handleOpenCatalogItem(item)}
+                              >
+                                View Catalog Card
+                              </button>
+
+                              {wishlistRemoveConfirmId === item.id ? (
+                                <div className="collection-item-remove-confirm">
+                                  <span className="collection-item-remove-label">Remove from wishlist?</span>
+                                  <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleWishlistRemove(item.id)}>Yes</button>
+                                  <button type="button" className="collection-item-remove-cancel" onClick={() => setWishlistRemoveConfirmId('')}>No</button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="catalog-action-pill collection-item-remove-btn"
+                                  onClick={() => setWishlistRemoveConfirmId(item.id)}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                      </section>
+
+                      {wishlistTotalPages > 1 && (
+                        <div className="catalog-pagination" aria-label="Wishlist pagination">
+                          <button
+                            type="button"
+                            className="catalog-pagination-btn"
+                            onClick={() => setWishlistPage(p => Math.max(1, p - 1))}
+                            disabled={wishlistPage <= 1}
+                          >
+                            Previous
+                          </button>
+                          <span className="catalog-pagination-page">Page {wishlistPage} / {wishlistTotalPages}</span>
+                          <button
+                            type="button"
+                            className="catalog-pagination-btn"
+                            onClick={() => setWishlistPage(p => Math.min(wishlistTotalPages, p + 1))}
+                            disabled={wishlistPage >= wishlistTotalPages}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+              </div>
+            )}
+          </section>
         ) : currentScreen === 'catalog' ? (
           <section className="catalog-screen" aria-label="Catalog">
             <div className="catalog-head">
@@ -10992,7 +11444,7 @@ function App() {
                                       })
                                     } else {
                                       setWishlistItemIds((prev) => new Set([...prev, item.id]))
-                                      await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: item.id }, { onConflict: 'user_id,catalog_item_id' })
+                                      await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: item.id }, { onConflict: 'user_id,catalog_item_id', ignoreDuplicates: true })
                                       setCatalogListStats((prev) => {
                                         const s = prev[item.id]
                                         if (!s) return prev
@@ -11060,10 +11512,278 @@ function App() {
                   </button>
                   <h3>{t('adminCreateItem')}</h3>
                   <div className="bulk-import-tabs">
-                    <button type="button" className={`bulk-import-tab${!bulkImportMode ? ' bulk-import-tab-active' : ''}`} onClick={() => setBulkImportMode(false)}>Single Item</button>
-                    <button type="button" className={`bulk-import-tab${bulkImportMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(true); setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>Bulk Import</button>
+                    <button type="button" className={`bulk-import-tab${!bulkImportMode && !bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(false); setBulkPhotoMode(false) }}>Single Item</button>
+                    <button type="button" className={`bulk-import-tab${bulkImportMode && !bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(true); setBulkPhotoMode(false); setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>Bulk Import</button>
+                    <button type="button" className={`bulk-import-tab${bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkPhotoMode(true); setBulkImportMode(false); setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Bulk Photos</button>
                   </div>
-                  {bulkImportMode ? (
+                  {bulkPhotoMode ? (
+                    <div className="bulk-import-container">
+                      {bulkPhotoRows.length === 0 ? (
+                        <div className="bulk-import-step1">
+                          <p className="catalog-admin-section-title">1. Select the Collectible Set</p>
+                          <div className="catalog-admin-two-col">
+                            <div>
+                              <label>Category</label>
+                              <select value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId('') }}>
+                                <option value="">Select category…</option>
+                                {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Subcategory</label>
+                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
+                                <option value="">Select subcategory…</option>
+                                {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Franchise</label>
+                              <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
+                                <option value="">None</option>
+                                {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Brand</label>
+                              <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
+                                <option value="">None</option>
+                                {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label>Collectible Set</label>
+                              <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
+                                <option value="">None</option>
+                                {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            </div>
+                            {catalogAdminSubsets.length > 0 && (
+                              <div>
+                                <label>Subset</label>
+                                <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
+                                  <option value="">None</option>
+                                  {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Card Side</p>
+                          <div className="bulk-photo-side-toggle">
+                            <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 0 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(0)}>Front</button>
+                            <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 1 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(1)}>Back</button>
+                          </div>
+                          <p className="catalog-admin-hint" style={{ marginTop: 6, marginBottom: 0 }}>OCR text will be pre-filled into the card's description — edit or clear it during review before approving.</p>
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>3. Upload Folder of Images</p>
+                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Images are OCR-scanned to match subject name. You approve or deny each match before saving.</p>
+                          <label className={`bulk-import-upload-area${!catalogAdminFranchiseId ? ' bulk-import-upload-area--disabled' : ''}`}>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              webkitdirectory=""
+                              style={{ display: 'none' }}
+                              disabled={!catalogAdminFranchiseId}
+                              onChange={e => handleBulkPhotoFolder(e.target.files)}
+                            />
+                            <span className="bulk-import-upload-icon">&#8679;</span>
+                            <span>{catalogAdminFranchiseId ? 'Click to choose folder of images' : 'Select a Collectible Set first'}</span>
+                          </label>
+                        </div>
+                      ) : bulkPhotoAnalyzing ? (
+                        <div className="bulk-photo-analyzing">
+                          <p className="catalog-admin-section-title">Scanning images with OCR…</p>
+                          <div className="bulk-photo-progress-bar">
+                            <div className="bulk-photo-progress-fill" style={{ width: `${bulkPhotoAnalyzeProgress.total ? (bulkPhotoAnalyzeProgress.done / bulkPhotoAnalyzeProgress.total) * 100 : 0}%` }} />
+                          </div>
+                          <p className="catalog-admin-hint">{bulkPhotoAnalyzeProgress.done} / {bulkPhotoAnalyzeProgress.total} images analysed</p>
+                        </div>
+                      ) : bulkPhotoPhase === 'review' ? (() => {
+                        const skipped = bulkPhotoRows.filter(r => r.status === 'skipped')
+                        const errors  = bulkPhotoRows.filter(r => r.status === 'error')
+                        const saved   = bulkPhotoRows.filter(r => r.status === 'saved')
+                        return (
+                          <div className="bulk-photo-skipped-review">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                              <p className="catalog-admin-section-title" style={{ margin: 0 }}>Step 3 of 3 — Review</p>
+                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Start Over</button>
+                            </div>
+                            <p className="catalog-admin-hint" style={{ marginBottom: 12 }}>
+                              {saved.length} saved{errors.length > 0 ? `, ${errors.length} errors` : ''}{skipped.length > 0 ? `, ${skipped.length} skipped` : ''}
+                            </p>
+                            {errors.map(row => (
+                              <div key={row._id} className="bulk-photo-skipped-row">
+                                {row.preview && <img src={row.preview} alt="" className="bulk-photo-skipped-thumb" />}
+                                <div className="bulk-photo-skipped-info">
+                                  <span className="bulk-photo-skipped-filename">{row.filename}</span>
+                                  {row.matchedItem && <span className="catalog-admin-hint"> — {row.matchedItem.subject || ''}</span>}
+                                  <span className="bulk-photo-skipped-reason"> · Error: {row.errorMsg}</span>
+                                </div>
+                              </div>
+                            ))}
+                            {skipped.map(row => (
+                              <div key={row._id} className="bulk-photo-skipped-row">
+                                {row.preview && <img src={row.preview} alt="" className="bulk-photo-skipped-thumb" />}
+                                <div className="bulk-photo-skipped-info">
+                                  <span className="bulk-photo-skipped-filename">{row.filename}</span>
+                                  {row.matchedItem && <span className="catalog-admin-hint"> — {row.matchedItem.subject || ''}</span>}
+                                  {row.errorMsg
+                                    ? <span className="bulk-photo-skipped-reason"> · {row.errorMsg}</span>
+                                    : <span className="catalog-admin-hint"> — no match found</span>}
+                                </div>
+                              </div>
+                            ))}
+                            {skipped.length === 0 && errors.length === 0 && <p className="catalog-admin-hint">All images saved successfully.</p>}
+                          </div>
+                        )
+                      })() : (() => {
+                        const phaseRows = bulkPhotoRows
+                          .map((r, i) => ({ ...r, _origIdx: i }))
+                          .filter(r => bulkPhotoPhase === 'update' ? r.hasExistingImage : !r.hasExistingImage)
+                        const cur = bulkPhotoRows[bulkPhotoIdx] || {}
+                        const approvedCount = bulkPhotoRows.filter(r => r.status === 'approved').length
+                        const phasePendingCount = phaseRows.filter(r => r.status === 'pending').length
+                        const phaseDone = phasePendingCount === 0
+                        return (
+                          <div className="bulk-import-review">
+                            <div className="bulk-photo-phase-header">
+                              {bulkPhotoPhase === 'new'
+                                ? 'Step 1 of 3 — Cards without an existing photo'
+                                : 'Step 2 of 3 — Cards that already have a photo (will be replaced)'}
+                            </div>
+                            <div className="bulk-import-topbar">
+                              <span className="bulk-import-stats">
+                                {phaseRows.length} in this step &nbsp;·&nbsp;
+                                <span className="bulk-stat-approved">{phaseRows.filter(r => r.status === 'approved').length} approved</span> &nbsp;·&nbsp;
+                                <span className="bulk-stat-skipped">{phaseRows.filter(r => r.status === 'skipped').length} skipped</span>
+                                {phasePendingCount > 0 && <>&nbsp;·&nbsp;{phasePendingCount} remaining</>}
+                              </span>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                {bulkPhotoSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkPhotoSaveError}</span>}
+                                {bulkPhotoPhase === 'update' && (
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill catalog-admin-submit-finish"
+                                    disabled={approvedCount === 0 || bulkPhotoIsSaving}
+                                    onClick={handleBulkPhotoSave}
+                                  >
+                                    {bulkPhotoIsSaving ? `Saving… ${bulkPhotoSaveProgress}/${approvedCount}` : `Save ${approvedCount} Approved & Finish`}
+                                  </button>
+                                )}
+                                {bulkPhotoPhase === 'new' && phaseDone && (
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill catalog-admin-submit-finish"
+                                    onClick={() => {
+                                      const firstUpdate = bulkPhotoRows.findIndex(r => r.status === 'pending' && r.hasExistingImage)
+                                      setBulkPhotoPhase('update')
+                                      if (firstUpdate >= 0) { setBulkPhotoIdx(firstUpdate); setBulkPhotoManualSearch('') }
+                                    }}
+                                  >
+                                    Next: Update Existing Photos →
+                                  </button>
+                                )}
+                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Start Over</button>
+                              </div>
+                            </div>
+                            <div className="bulk-import-split">
+                              <div className="bulk-import-list">
+                                {phaseRows.map(row => (
+                                  <button
+                                    key={row._id}
+                                    type="button"
+                                    className={`bulk-import-list-row${row._origIdx === bulkPhotoIdx ? ' bulk-import-list-row-active' : ''} bulk-import-list-row-${row.status}`}
+                                    onClick={() => { setBulkPhotoIdx(row._origIdx); setBulkPhotoManualSearch('') }}
+                                  >
+                                    {row.preview && <img src={row.preview} alt="" className="bulk-photo-list-thumb" />}
+                                    <span className="bulk-import-row-icon">
+                                      {row.status === 'pending'  ? (row.matchedItem ? '?' : '!') :
+                                       row.status === 'approved' ? '✓' :
+                                       row.status === 'skipped'  ? '–' :
+                                       row.status === 'saved'    ? '✅' : '✗'}
+                                    </span>
+                                    <span className="bulk-import-row-label" style={{ fontSize: '0.75rem' }}>
+                                      {row.matchedItem ? row.matchedItem.subject || row.matchedItem.card_number || '?' : row.filename}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="bulk-import-editor">
+                                {phaseDone ? (
+                                  <p className="catalog-admin-hint" style={{ padding: 16 }}>
+                                    {bulkPhotoPhase === 'new'
+                                      ? 'All new-photo cards reviewed. Click "Next: Update Existing Photos →" above.'
+                                      : 'All cards reviewed. Click "Save Approved & Finish" above.'}
+                                  </p>
+                                ) : (
+                                  <>
+                                    <p className="bulk-import-editor-rowlabel">{cur.filename}</p>
+                                    {cur.preview && <img src={cur.preview} alt="card" className="bulk-photo-preview" />}
+                                    <div className="bulk-import-editor-fields" style={{ marginTop: 12 }}>
+                                      <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                        <label>Match</label>
+                                        {cur.matchedItem ? (
+                                          <span className="catalog-admin-subject-tag">
+                                            {cur.matchedItem.card_number && <strong>#{cur.matchedItem.card_number}</strong>}
+                                            {' '}{cur.matchedItem.subject || ''}
+                                            <span className="catalog-admin-hint" style={{ marginLeft: 6 }}>{cur.matchType === 'manual' ? 'manual' : 'name match'}</span>
+                                            <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: null, matchType: null }); setBulkPhotoManualSearch('') }}>✕</button>
+                                          </span>
+                                        ) : (
+                                          <div>
+                                            <p className="catalog-admin-hint" style={{ marginBottom: 6 }}>No match found. Search to assign manually:</p>
+                                            <input
+                                              className="catalog-admin-inline-input"
+                                              style={{ width: '100%', marginBottom: 4 }}
+                                              placeholder="Type a subject name…"
+                                              value={bulkPhotoManualSearch}
+                                              onChange={e => setBulkPhotoManualSearch(e.target.value)}
+                                              autoComplete="off"
+                                            />
+                                            {bulkPhotoManualResults.length > 0 && (
+                                              <div className="catalog-admin-subject-results">
+                                                {bulkPhotoManualResults.map(it => (
+                                                  <button key={it.item_id} type="button" className="catalog-admin-subject-result"
+                                                    onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: it, matchType: 'manual' }); setBulkPhotoManualSearch(''); setBulkPhotoManualResults([]) }}>
+                                                    {it.card_number && <strong style={{ marginRight: 6 }}>#{it.card_number}</strong>}
+                                                    <span style={{ textTransform: 'uppercase' }}>{it.subject || '—'}</span>
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+                                            {bulkPhotoManualSearch.trim().length >= 2 && bulkPhotoManualResults.length === 0 && (
+                                              <p className="catalog-admin-hint" style={{ padding: '4px 0' }}>No items found.</p>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                        <label>Description <span className="catalog-admin-hint">(from OCR — edit or clear before approving)</span></label>
+                                        <textarea
+                                          rows={4}
+                                          className="catalog-admin-inline-input"
+                                          style={{ width: '100%', fontFamily: 'inherit' }}
+                                          value={cur.description || ''}
+                                          onChange={e => updateBulkPhotoRow(bulkPhotoIdx, { description: e.target.value })}
+                                          placeholder={bulkPhotoPosition === 0 ? 'No text detected on front' : 'No text detected on back'}
+                                        />
+                                      </div>
+                                    </div>
+                                    {cur.errorMsg && <p className="catalog-admin-error" style={{ marginTop: 8 }}>{cur.errorMsg}</p>}
+                                    <div className="bulk-import-actions">
+                                      <button type="button" className="catalog-admin-inline-cancel" onClick={bulkPhotoSkip} disabled={cur.status === 'saved'}>Skip</button>
+                                      <button type="button" className="catalog-action-pill catalog-admin-submit-finish" onClick={bulkPhotoApprove} disabled={cur.status === 'saved'}>
+                                        {cur.status === 'approved' ? 'Approved ✓' : cur.status === 'saved' ? 'Saved ✅' : 'Approve'}
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  ) : bulkImportMode ? (
                     <div className="bulk-import-container">
                       {bulkImportRows.length === 0 ? (
                         /* Step 1: pick set + upload CSV */
@@ -11889,7 +12609,23 @@ function App() {
                     >
                       Add to My Collection
                     </button>
-                    <button type="button" className="catalog-detail-btn catalog-detail-btn-wishlist">Add to My Wishlist</button>
+                    <button
+                      type="button"
+                      className="catalog-detail-btn catalog-detail-btn-wishlist"
+                      onClick={async () => {
+                        if (!currentUser?.id || !selectedCatalogItem?.id) return
+                        const itemId = selectedCatalogItem.id
+                        if (wishlistItemIds.has(itemId)) {
+                          setWishlistItemIds(prev => { const next = new Set(prev); next.delete(itemId); return next })
+                          await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('catalog_item_id', itemId)
+                        } else {
+                          setWishlistItemIds(prev => new Set([...prev, itemId]))
+                          await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: itemId }, { onConflict: 'user_id,catalog_item_id', ignoreDuplicates: true })
+                        }
+                      }}
+                    >
+                      {wishlistItemIds.has(selectedCatalogItem?.id) ? 'Wishlisted' : 'Add to My Wishlist'}
+                    </button>
                     <a href="#" className="catalog-detail-owned-link" onClick={(event) => event.preventDefault()}>
                       You own {ownershipCount} of these items
                     </a>
@@ -12543,20 +13279,20 @@ function App() {
                   <h3>Collector Insights</h3>
                   <div className="catalog-detail-community-grid" aria-label="Collector insights">
                     <div className="catalog-detail-community-item">
-                      <strong>Recent Sales (7d)</strong>
-                      <p>{insights.recent_sales || 'N/A'}</p>
+                      <strong>For Sale</strong>
+                      <p>{catalogDetailStats ? catalogDetailStats.available_count : '—'}</p>
                     </div>
                     <div className="catalog-detail-community-item">
-                      <strong>Ownership Stats</strong>
-                      <p>{insights.ownership_stats || 'N/A'}</p>
+                      <strong>Wanted</strong>
+                      <p>{catalogDetailStats ? catalogDetailStats.wanted_count : '—'}</p>
                     </div>
                     <div className="catalog-detail-community-item">
-                      <strong>Watchlist Trend</strong>
-                      <p>{insights.watchlist_trend || 'N/A'}</p>
+                      <strong>You Own</strong>
+                      <p>{ownershipCount > 0 ? ownershipCount : 'None'}</p>
                     </div>
                     <div className="catalog-detail-community-item">
-                      <strong>Recent Activity</strong>
-                      <p>{insights.recent_activity || 'N/A'}</p>
+                      <strong>Owned</strong>
+                      <p>{catalogDetailStats?.community_owned != null ? catalogDetailStats.community_owned : '—'}</p>
                     </div>
                   </div>
                 </section>
