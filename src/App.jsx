@@ -2701,6 +2701,10 @@ function App() {
         itemsQuery = itemsQuery.order('release_year', { ascending: false, nullsFirst: false }).order('subject', { ascending: true })
       } else if (catalogSortKey === 'oldest_year') {
         itemsQuery = itemsQuery.order('release_year', { ascending: true, nullsFirst: false }).order('subject', { ascending: true })
+      } else if (catalogSortKey === 'card_number_asc') {
+        itemsQuery = itemsQuery.order('card_number_int', { ascending: true, nullsFirst: false })
+      } else if (catalogSortKey === 'card_number_desc') {
+        itemsQuery = itemsQuery.order('card_number_int', { ascending: false, nullsFirst: true })
       } else {
         itemsQuery = itemsQuery.order('subject', { ascending: true })
       }
@@ -5458,7 +5462,7 @@ function App() {
         release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
         upc:                  v.upc?.trim()                   || null,
         piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
-        rarity_id:        catalogItemEditRarityId || null,
+        ...(catalogRarities.length > 0 ? { rarity_id: catalogItemEditRarityId || null } : {}),
         ...(catalogItemIsMtg ? {
           mtg_card_type_id: catalogItemEditMtgCardTypeId || null,
         } : {}),
@@ -5471,7 +5475,10 @@ function App() {
     }
     await supabase.from('item_subjects').delete().eq('item_id', selectedCatalogItem.id)
     if (catalogItemEditSubjectIds.length > 0) {
+      await supabase.from('items').update({ subject_id: catalogItemEditSubjectIds[0].id }).eq('item_id', selectedCatalogItem.id)
       await supabase.from('item_subjects').insert(catalogItemEditSubjectIds.map(s => ({ item_id: selectedCatalogItem.id, subject_id: s.id })))
+    } else {
+      await supabase.from('items').update({ subject_id: null }).eq('item_id', selectedCatalogItem.id)
     }
     await supabase.from('item_teams').delete().eq('item_id', selectedCatalogItem.id)
     if (catalogItemEditTeamIds.length > 0) {
@@ -5479,9 +5486,10 @@ function App() {
     }
     await supabase.from('item_card_types').delete().eq('item_id', selectedCatalogItem.id)
     if (catalogItemEditCardTypeIds.length > 0) {
-      await supabase.from('item_card_types').insert(
+      const { error: ctErr } = await supabase.from('item_card_types').insert(
         catalogItemEditCardTypeIds.map(ctid => ({ item_id: selectedCatalogItem.id, card_type_id: ctid }))
       )
+      if (ctErr) console.error('item_card_types insert error:', ctErr)
     }
     setCatalogReloadToken(t => t + 1)
     setIsCatalogItemEditMode(false)
@@ -5828,7 +5836,8 @@ function App() {
         await supabase.from('item_subjects').insert({ item_id: created.item_id, subject_id: subjectId })
       }
       if (row.card_type_ids?.length > 0) {
-        await supabase.from('item_card_types').insert(row.card_type_ids.map(ctid => ({ item_id: created.item_id, card_type_id: ctid })))
+        const { error: ctErr } = await supabase.from('item_card_types').insert(row.card_type_ids.map(ctid => ({ item_id: created.item_id, card_type_id: ctid })))
+        if (ctErr) console.error('item_card_types insert error (bulk):', ctErr)
       }
       if (row.image_file) {
         const ext = row.image_file.name.split('.').pop()
@@ -10449,6 +10458,8 @@ function App() {
                     <option value="newest_year">{t('sortNewestYear')}</option>
                     <option value="oldest_year">Oldest Year</option>
                     <option value="subject_az">Subject A–Z</option>
+                    <option value="card_number_asc">Card # (Low–High)</option>
+                    <option value="card_number_desc">Card # (High–Low)</option>
                   </select>
                 </label>
 
@@ -12000,10 +12011,7 @@ function App() {
                         <div className="catalog-item-edit-field catalog-item-edit-field--wide">
                           <span>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></span>
                           {(() => {
-                            const editCardTypes = catalogItemEditLookups.cardTypes.filter(ct => {
-                              if (ct.name === 'Normal') return false
-                              return catalogItemIsMtg ? MTG_CARD_TREATMENT_NAMES.has(ct.name) : SPORTS_CARD_TYPE_NAMES.has(ct.name)
-                            })
+                            const editCardTypes = catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal')
                             return editCardTypes.length > 0 ? (
                               <div className="catalog-admin-team-list">
                                 {editCardTypes.map(ct => (
