@@ -11631,6 +11631,7 @@ function App() {
                           const franchiseBrandName = item._franchise_name || ''
                           const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
                           const isMusic          = (catalogCategoryById[item.category_id] || '') === 'Music'
+                          const itemCardLabels   = getCategoryLabels(catalogCategoryById[item.category_id] || '')
                           const imageUrl         = item.front_image_path
                             ? item.front_image_path.startsWith('http')
                               ? item.front_image_path
@@ -11662,7 +11663,7 @@ function App() {
                                 {isMusic
                                   ? (catalogSubcategoryById[item.subcategory_id] ? <p className="catalog-item-brand">Format: {catalogSubcategoryById[item.subcategory_id]}</p> : null)
                                   : (franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null)}
-                                {brandName ? <p className="catalog-item-brand">Brand: {brandName}</p> : null}
+                                {brandName ? <p className="catalog-item-brand">{itemCardLabels.brand}: {brandName}</p> : null}
                                 {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
                               </div>
                             </article>
@@ -11720,7 +11721,7 @@ function App() {
                                     ))}
                                   </div>
                                 )}
-                                {brandName ? <p className="catalog-list-meta">Brand: {brandName}</p> : null}
+                                {brandName ? <p className="catalog-list-meta">{getCategoryLabels(categoryName).brand}: {brandName}</p> : null}
                                 {ownedCount > 0 && <span className="catalog-list-owned">You own {ownedCount}</span>}
                               </div>
                               <div className="catalog-list-purchase">
