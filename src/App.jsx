@@ -2339,6 +2339,69 @@ function App() {
         return true
       }
 
+      if (typeParam === 'email_change' && tokenHash) {
+        const { error } = await supabase.auth.verifyOtp({
+          type: 'email_change',
+          token_hash: tokenHash,
+        })
+
+        if (error) {
+          setAuthError(error.message || 'Email confirmation link is invalid or expired.')
+          return true
+        }
+
+        if (!isMounted) {
+          return true
+        }
+
+        clearRecoveryParamsFromUrl()
+        setAuthMessage('Email address confirmed successfully.')
+        return true
+      }
+
+      if (typeParam === 'signup' && tokenHash) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          type: 'signup',
+          token_hash: tokenHash,
+        })
+
+        if (error) {
+          setAuthError(error.message || 'Email confirmation link is invalid or expired.')
+          return true
+        }
+
+        if (!isMounted) {
+          return true
+        }
+
+        setCurrentUser(data?.user || data?.session?.user || null)
+        clearRecoveryParamsFromUrl()
+        setAuthMessage('Email confirmed. You are now signed in.')
+        return true
+      }
+
+      if (code && typeParam && typeParam !== 'recovery') {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+
+        if (error) {
+          setAuthError(error.message || 'Confirmation link is invalid or expired.')
+          return true
+        }
+
+        if (!isMounted) {
+          return true
+        }
+
+        setCurrentUser(data?.session?.user || null)
+        clearRecoveryParamsFromUrl()
+        setAuthMessage(
+          typeParam === 'email_change'
+            ? 'Email address updated successfully.'
+            : 'Email confirmed. You are now signed in.'
+        )
+        return true
+      }
+
       return false
     }
 
@@ -4733,6 +4796,7 @@ function App() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
+          options: { emailRedirectTo: `${window.location.origin}/` },
         })
 
         if (error) {
@@ -7622,7 +7686,9 @@ function App() {
     setIsSavingSettings(true)
     setSettingsError('')
 
-    const { error } = await supabase.auth.resetPasswordForEmail(currentUser.email)
+    const { error } = await supabase.auth.resetPasswordForEmail(currentUser.email, {
+      redirectTo: `${window.location.origin}/`,
+    })
     if (error) {
       setSettingsError(error.message || 'Could not send a password reset email right now.')
       setIsSavingSettings(false)
@@ -12842,7 +12908,11 @@ function App() {
               <>
                 <header className="catalog-detail-title-row">
                   <div className="catalog-detail-title-block">
-                    <h1 className="catalog-detail-title">{selectedCatalogItem._details?.subject || selectedCatalogItem.name || 'N/A'}</h1>
+                    <h1 className="catalog-detail-title">
+                      {selectedCatalogItemCategoryLabels.hideFranchise
+                        ? (selectedCatalogItem._details?.collectible_set || selectedCatalogItem.name || 'N/A')
+                        : (selectedCatalogItem._details?.subject || selectedCatalogItem.name || 'N/A')}
+                    </h1>
                     <div className="catalog-detail-meta-list">
                       {selectedCatalogItem._details?.card_number && (
                         <span className="catalog-detail-meta-item">
@@ -12880,18 +12950,26 @@ function App() {
                           }}>{selectedCatalogItem._details.franchise}</button>
                         </span>
                       )}
-                      {selectedCatalogItem._details?.collectible_set && (
-                        <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.collectibleSet}</span>
-                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
-                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
-                            setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
-                            setCatalogFranchise(selectedCatalogItem._details.franchise || 'all')
-                            setCatalogSetId(selectedCatalogItem._details.collectible_set_id || '')
-                            setCurrentScreen('catalog')
-                          }}>{selectedCatalogItem._details.collectible_set}</button>
-                        </span>
-                      )}
+                      {selectedCatalogItemCategoryLabels.hideFranchise
+                        ? (selectedCatalogItem._details?.subject && (
+                            <span className="catalog-detail-meta-item">
+                              <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.subject}</span>
+                              <span className="catalog-detail-info-value">{selectedCatalogItem._details.subject}</span>
+                            </span>
+                          ))
+                        : (selectedCatalogItem._details?.collectible_set && (
+                            <span className="catalog-detail-meta-item">
+                              <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.collectibleSet}</span>
+                              <button type="button" className="catalog-detail-meta-link" onClick={() => {
+                                setCatalogCategory(selectedCatalogItem._details.category || 'all')
+                                setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
+                                setCatalogFranchise(selectedCatalogItem._details.franchise || 'all')
+                                setCatalogSetId(selectedCatalogItem._details.collectible_set_id || '')
+                                setCurrentScreen('catalog')
+                              }}>{selectedCatalogItem._details.collectible_set}</button>
+                            </span>
+                          ))
+                      }
                     </div>
                   </div>
                   <div className="catalog-detail-actions">
