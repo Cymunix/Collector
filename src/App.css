@@ -706,6 +706,40 @@ h1 {
   padding: 20px 16px;
 }
 
+.completion-subset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.completion-subset-card {
+  text-align: left;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: #f5f8ff;
+  transition: background 0.15s;
+}
+
+.completion-subset-card:hover {
+  background: #e8f0ff;
+}
+
+.completion-subset-card strong {
+  display: block;
+  font-size: 0.95rem;
+  color: #1a3060;
+  margin-bottom: 4px;
+}
+
+.completion-subset-card p {
+  font-size: 0.8rem;
+  color: #667;
+  margin: 0;
+}
+
 .completion-sheet-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

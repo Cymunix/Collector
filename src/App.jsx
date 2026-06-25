@@ -84,6 +84,29 @@ const CATALOG_SUBCATEGORY_OPTIONS = {
   'Video Games': ['PlayStation', 'Xbox', 'Nintendo', 'PC', 'Retro'],
 }
 const CARD_CONDITION_CATEGORIES = new Set(['Trading Cards', 'Sports Cards'])
+
+const CATEGORY_LABEL_OVERRIDES = {
+  Music: {
+    subcategory: 'Format',
+    franchise: 'Franchise',
+    brand: 'Record Label',
+    collectibleSet: 'Album',
+    subset: 'Variant',
+    subject: 'Artist(s)',
+    hideFranchise: true,
+  },
+}
+const DEFAULT_CATEGORY_LABELS = {
+  subcategory: 'Subcategory',
+  franchise: 'Franchise',
+  brand: 'Brand',
+  collectibleSet: 'Collectible Set',
+  subset: 'Subset',
+  subject: 'Subject(s)',
+}
+function getCategoryLabels(categoryName) {
+  return CATEGORY_LABEL_OVERRIDES[categoryName] || DEFAULT_CATEGORY_LABELS
+}
 const MTG_CARD_TREATMENT_NAMES  = new Set(['Foil', 'Etched', 'Borderless', 'Extended Art', 'Showcase', 'Retro', 'Textless'])
 const SPORTS_CARD_TYPE_NAMES    = new Set(['Foil', 'Patch', 'Rookie', 'Signature'])
 
@@ -1589,6 +1612,11 @@ function App() {
   const [catalogSubjectSearch, setCatalogSubjectSearch] = useState('')
   const [catalogSubjectResults, setCatalogSubjectResults] = useState([])
   const [catalogSubjectSearching, setCatalogSubjectSearching] = useState(false)
+  const [catalogAlbumSearch, setCatalogAlbumSearch] = useState('')
+  const [catalogAlbumResults, setCatalogAlbumResults] = useState([])
+  const [catalogAlbumSearching, setCatalogAlbumSearching] = useState(false)
+  const [musicFranchiseId, setMusicFranchiseId] = useState('')
+  const [musicBrandIds, setMusicBrandIds] = useState(new Set())
   const [catalogAllCardTypes, setCatalogAllCardTypes] = useState([])
   const [catalogTeams, setCatalogTeams] = useState([])
   const [catalogSets, setCatalogSets] = useState([])
@@ -1665,6 +1693,8 @@ function App() {
   const [wishlistPage, setWishlistPage] = useState(1)
   const [wishlistReloadToken, setWishlistReloadToken] = useState(0)
   const [wishlistRemoveConfirmId, setWishlistRemoveConfirmId] = useState('')
+  const [wishlistViewTab, setWishlistViewTab] = useState('overview')
+  const [wishlistCategoryFilter, setWishlistCategoryFilter] = useState('all')
   const [catalogListStats, setCatalogListStats] = useState({})
   const [catalogDetailStats, setCatalogDetailStats] = useState(null)
   const [collectionItems, setCollectionItems] = useState([])
@@ -1689,6 +1719,7 @@ function App() {
   const [collectibleSets, setCollectibleSets] = useState([])
   const [collectibleSetEntries, setCollectibleSetEntries] = useState([])
   const [selectedCompletionSetId, setSelectedCompletionSetId] = useState('')
+  const [completionNavSubset, setCompletionNavSubset] = useState('')
   const [completionSetAllItems, setCompletionSetAllItems] = useState([])
   const [completionSheetPopup, setCompletionSheetPopup] = useState(null)
   const [completionNavCategory, setCompletionNavCategory] = useState('')
@@ -1934,6 +1965,12 @@ function App() {
   const paginatedCatalogItems = catalogItems
   const selectedCatalogItemMetadata =
     selectedCatalogItem?.metadata && typeof selectedCatalogItem.metadata === 'object' ? selectedCatalogItem.metadata : {}
+  const selectedCatalogItemCategoryLabels = getCategoryLabels(
+    selectedCatalogItem?._details?.category ||
+    catalogCategories.find(c => c.id === selectedCatalogItem?.category_id)?.name ||
+    ''
+  )
+  const catalogSidebarLabels = getCategoryLabels(catalogCategory === 'all' ? '' : catalogCategory)
   const formatUsd = (value) => {
     const amount = Number(value)
     if (!Number.isFinite(amount)) {
@@ -2619,21 +2656,68 @@ function App() {
       .then(({ data }) => setCatalogPrintTypes((data || []).map(r => ({ id: r.print_type_id, name: r.name }))))
   }, [currentScreen, catalogSubsetId])
 
-  // Effect F: subject typeahead search
+  // Effect F: subject typeahead search (category-scoped when a category is selected)
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const q = catalogSubjectSearch.trim()
     if (catalogSubjectId || q.length < 2) { setCatalogSubjectResults([]); return }
     setCatalogSubjectSearching(true)
+    const categoryId = selectedCatalogCategoryRecord?.id || null
+    const timer = setTimeout(async () => {
+      if (categoryId) {
+        // Two-step: get subject IDs in this category, then search by name
+        const { data: itemRows } = await supabase
+          .from('items').select('subject_id').eq('category_id', categoryId)
+          .not('subject_id', 'is', null).limit(2000)
+        const subjectIds = [...new Set((itemRows || []).map(r => r.subject_id))]
+        if (!subjectIds.length) { setCatalogSubjectResults([]); setCatalogSubjectSearching(false); return }
+        const { data } = await supabase.from('subjects').select('subject_id, subject_name')
+          .in('subject_id', subjectIds).ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
+      } else {
+        const { data } = await supabase.from('subjects').select('subject_id, subject_name')
+          .ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+        setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
+      }
+      setCatalogSubjectSearching(false)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [currentScreen, catalogSubjectSearch, catalogSubjectId, selectedCatalogCategoryRecord])
+
+  // Fetch Music franchise ID once so album typeahead can filter directly by franchise_id
+  useEffect(() => {
+    if (currentScreen !== 'catalog' || musicFranchiseId) return
+    supabase.from('franchises').select('franchise_id').eq('name', 'Music').limit(1)
+      .then(({ data }) => {
+        const id = data?.[0]?.franchise_id
+        if (!id) return
+        setMusicFranchiseId(id)
+        supabase.from('brand_franchise').select('brand_id').eq('franchise_id', id)
+          .then(({ data: bf }) => setMusicBrandIds(new Set((bf || []).map(r => r.brand_id))))
+      })
+  }, [currentScreen, musicFranchiseId])
+
+  // Effect G: album typeahead search (Music category only)
+  useEffect(() => {
+    if (currentScreen !== 'catalog' || catalogCategory !== 'Music') { setCatalogAlbumResults([]); return }
+    const q = catalogAlbumSearch.trim()
+    if (catalogSetId || q.length < 1) { setCatalogAlbumResults([]); return }
+    if (!musicFranchiseId) return
+    setCatalogAlbumSearching(true)
     const timer = setTimeout(() => {
-      supabase.from('subjects').select('subject_id, subject_name').ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
+      supabase.from('collectible_sets')
+        .select('collectible_set_id, name')
+        .eq('franchise_id', musicFranchiseId)
+        .ilike('name', `%${q}%`)
+        .order('name')
+        .limit(15)
         .then(({ data }) => {
-          setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
-          setCatalogSubjectSearching(false)
+          setCatalogAlbumResults((data || []).map(r => ({ id: r.collectible_set_id, name: r.name })))
+          setCatalogAlbumSearching(false)
         })
     }, 250)
     return () => clearTimeout(timer)
-  }, [currentScreen, catalogSubjectSearch, catalogSubjectId])
+  }, [currentScreen, catalogCategory, catalogAlbumSearch, catalogSetId, musicFranchiseId])
 
   useEffect(() => {
     const loadCatalogItems = async () => {
@@ -3091,7 +3175,10 @@ function App() {
   }, [currentScreen, isPlatformAdmin])
 
   useEffect(() => {
-    if (!isPlatformAdmin || !catalogAdminSubcategoryId) {
+    if (!isPlatformAdmin) { setCatalogAdminRealFranchises([]); setCatalogAdminRealFranchiseId(prev => prev ? '' : prev); return }
+    // Music: franchise is auto-resolved by category — subcategory doesn't gate it
+    if (selectedCatalogAdminCategoryName === 'Music') { setCatalogAdminRealFranchises([]); return }
+    if (!catalogAdminSubcategoryId) {
       setCatalogAdminRealFranchises([])
       setCatalogAdminRealFranchiseId(prev => prev ? '' : prev)
       return
@@ -3107,7 +3194,14 @@ function App() {
             setCatalogAdminRealFranchiseId(prev => list.some(f => f.id === prev) ? prev : '')
           })
       })
-  }, [catalogAdminSubcategoryId, isPlatformAdmin])
+  }, [catalogAdminSubcategoryId, isPlatformAdmin, selectedCatalogAdminCategoryName])
+
+  // Auto-resolve Music franchise when category is Music
+  useEffect(() => {
+    if (!isPlatformAdmin || selectedCatalogAdminCategoryName !== 'Music') return
+    supabase.from('franchises').select('franchise_id').eq('name', 'Music').limit(1)
+      .then(({ data }) => { if (data?.[0]?.franchise_id) setCatalogAdminRealFranchiseId(data[0].franchise_id) })
+  }, [selectedCatalogAdminCategoryName, isPlatformAdmin])
 
   useEffect(() => {
     if (!isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminSubjects([]); return }
@@ -3597,13 +3691,15 @@ function App() {
         return
       }
       const itemIds = wishRows.map(r => r.catalog_item_id)
-      const [{ data: detailRows }, categoriesResult, subcategoriesResult] = await Promise.all([
+      const [{ data: detailRows }, categoriesResult, subcategoriesResult, { data: priceRows }] = await Promise.all([
         supabase.from('item_details').select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path, release_year').in('item_id', itemIds),
         supabase.from('categories').select('category_id, name'),
         supabase.from('subcategories').select('subcategory_id, name'),
+        supabase.from('items').select('item_id, market_price').in('item_id', itemIds),
       ])
       const categoryNameById = Object.fromEntries((categoriesResult.data || []).map(r => [r.category_id, r.name]))
       const subcategoryNameById = Object.fromEntries((subcategoriesResult.data || []).map(r => [r.subcategory_id, r.name]))
+      const marketPriceById = Object.fromEntries((priceRows || []).map(r => [r.item_id, r.market_price ?? null]))
       const detailsById = {}
       for (const row of (detailRows || [])) {
         if (!row?.item_id) continue
@@ -3635,6 +3731,7 @@ function App() {
           description: row.description || '',
           card_number: row.card_number || '',
           print_count: row.print_count || null,
+          market_price: marketPriceById[row.item_id] ?? null,
         }
       }
       const items = wishRows
@@ -5913,6 +6010,7 @@ function App() {
     const subName  = (catalogAdminSubcategories.find(s => s.id === catalogAdminSubcategoryId)?.name || '').toLowerCase()
     if (subName.includes('sport') || catName.includes('sport')) return 'player'
     if (catName.includes('comic') || subName.includes('comic')) return 'comic'
+    if (catName.includes('music')) return 'artist'
     return 'character'
   }
 
@@ -8796,12 +8894,26 @@ function App() {
   const selectedCollectionItemDetails = collectionItems.find((item) => item.id === selectedCollectionItemDetailsId) || null
 
   const normalizedWishlistSearch = wishlistSearchQuery.trim().toLowerCase()
-  const filteredWishlistItems = wishlistItems.filter(item =>
-    !normalizedWishlistSearch ||
-    item.name?.toLowerCase().includes(normalizedWishlistSearch) ||
-    item.setName?.toLowerCase().includes(normalizedWishlistSearch) ||
-    item.categoryName?.toLowerCase().includes(normalizedWishlistSearch)
-  )
+  const wishlistCategories = (() => {
+    const seen = new Map()
+    for (const item of wishlistItems) {
+      if (item.category_id && !seen.has(item.category_id)) seen.set(item.category_id, item.categoryName || item.category_id)
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+  const filteredWishlistItems = wishlistItems.filter(item => {
+    if (wishlistCategoryFilter !== 'all' && item.category_id !== wishlistCategoryFilter) return false
+    if (normalizedWishlistSearch && !item.name?.toLowerCase().includes(normalizedWishlistSearch) && !item.setName?.toLowerCase().includes(normalizedWishlistSearch) && !item.categoryName?.toLowerCase().includes(normalizedWishlistSearch)) return false
+    return true
+  })
+  const wishlistSummary = {
+    totalItems: wishlistItems.length,
+    uniqueCategories: new Set(wishlistItems.map(i => i.category_id).filter(Boolean)).size,
+    uniqueSets: new Set(wishlistItems.map(i => i.setName).filter(Boolean)).size,
+    estimatedTotal: filteredWishlistItems.reduce((sum, i) => sum + (Number(i.market_price) || 0), 0),
+    pricedCount: filteredWishlistItems.filter(i => i.market_price != null && Number(i.market_price) > 0).length,
+    filteredCount: filteredWishlistItems.length,
+  }
   const wishlistTotalPages = Math.max(1, Math.ceil(filteredWishlistItems.length / COLLECTION_OVERVIEW_PAGE_SIZE))
   const paginatedWishlistItems = filteredWishlistItems.slice(
     (wishlistPage - 1) * COLLECTION_OVERVIEW_PAGE_SIZE,
@@ -9092,11 +9204,23 @@ function App() {
   const completionCategoryContextCards = completionNavCategory ? startedSetCards.filter(c => c.categoryName === completionNavCategory) : []
   const completionCategoryRollup = rollupCards(completionCategoryContextCards)
   const selectedCompletionSet = startedSetCards.find((setCard) => setCard.id === selectedCompletionSetId) || null
+  const completionSetSubsets = (() => {
+    const seen = new Map()
+    for (const item of completionSetAllItems) {
+      const id = item.raw?.subcollectble_set_id
+      if (id && !seen.has(id)) seen.set(id, item.raw?.subcollectible_set || 'Unknown Subset')
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  })()
+  const completionSetItemsForDisplay = completionNavSubset && completionNavSubset !== '__all__'
+    ? completionSetAllItems.filter(i => i.raw?.subcollectble_set_id === completionNavSubset)
+    : completionSetAllItems
+
   const selectedCompletionSetEntries = selectedCompletionSet
     ? (() => {
         // Best path: catalog items fetched for this set (gives full list + images)
         if (completionSetAllItems.length > 0) {
-          return completionSetAllItems.map((catalogItem) => {
+          return completionSetItemsForDisplay.map((catalogItem) => {
             const ownedItem = ownedItemsByCatalogId[catalogItem.item_id] || null
             return {
               id: catalogItem.item_id,
@@ -9238,8 +9362,10 @@ function App() {
   useEffect(() => {
     if (!selectedCompletionSetId) {
       setCompletionSetAllItems([])
+      setCompletionNavSubset('')
       return
     }
+    setCompletionNavSubset('')
     let cancelled = false
     supabase
       .from('item_details')
@@ -10023,7 +10149,21 @@ function App() {
                             {selectedCompletionSetId && selectedCompletionSet && (
                               <>
                                 <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <span className="completion-crumb completion-crumb-current">{selectedCompletionSet.title}</span>
+                                <button
+                                  type="button"
+                                  className={`completion-crumb${!completionNavSubset ? ' completion-crumb-current' : ''}`}
+                                  onClick={() => setCompletionNavSubset('')}
+                                >
+                                  {selectedCompletionSet.title}
+                                </button>
+                              </>
+                            )}
+                            {completionNavSubset && (
+                              <>
+                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
+                                <span className="completion-crumb completion-crumb-current">
+                                  {completionSetSubsets.find(s => s.id === completionNavSubset)?.name || 'Subset'}
+                                </span>
                               </>
                             )}
                           </nav>
@@ -10053,11 +10193,11 @@ function App() {
                           selectedCompletionSet ? (
                             <div className="completion-set-sheet">
                               <div className="completion-sheet-header">
-                                <button type="button" className="catalog-action-pill" onClick={() => setSelectedCompletionSetId('')}>
+                                <button type="button" className="catalog-action-pill" onClick={() => { setCompletionNavSubset(''); setSelectedCompletionSetId('') }}>
                                   ← {completionNavBrand || 'All Sets'}
                                 </button>
                                 <div className="completion-sheet-title">
-                                  <h3>{selectedCompletionSet.title}</h3>
+                                  <h3>{selectedCompletionSet.title}{completionNavSubset ? ` — ${completionSetSubsets.find(s => s.id === completionNavSubset)?.name}` : ''}</h3>
                                   <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
                                 </div>
                                 <div className="completion-sheet-pct">{selectedCompletionSet.completionPercent.toFixed(0)}%</div>
@@ -10065,7 +10205,39 @@ function App() {
                               <div className="completion-sheet-progress-track">
                                 <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(selectedCompletionSet.completionPercent, 100)}%` }} />
                               </div>
-                              {selectedCompletionSetEntries.length === 0 ? (
+
+                              {/* Subset picker — shown when set has subsets and none selected */}
+                              {completionSetSubsets.length > 0 && !completionNavSubset ? (
+                                <div className="completion-subset-grid">
+                                  <button
+                                    type="button"
+                                    className="catalog-card completion-subset-card"
+                                    onClick={() => setCompletionNavSubset('__all__')}
+                                  >
+                                    <strong>All Subsets</strong>
+                                    <p>{selectedCompletionSet.totalItems} cards · {selectedCompletionSet.completionPercent.toFixed(0)}% complete</p>
+                                  </button>
+                                  {completionSetSubsets.map(subset => {
+                                    const subItems = completionSetAllItems.filter(i => i.raw?.subcollectble_set_id === subset.id)
+                                    const subOwned = subItems.filter(i => Boolean(ownedItemsByCatalogId[i.item_id])).length
+                                    const subPct = subItems.length > 0 ? (subOwned / subItems.length) * 100 : 0
+                                    return (
+                                      <button
+                                        key={subset.id}
+                                        type="button"
+                                        className="catalog-card completion-subset-card"
+                                        onClick={() => setCompletionNavSubset(subset.id)}
+                                      >
+                                        <strong>{subset.name}</strong>
+                                        <p>{subOwned} / {subItems.length} · {subPct.toFixed(0)}% complete</p>
+                                        <div className="completion-sheet-progress-track" style={{ marginTop: 8 }}>
+                                          <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(subPct, 100)}%` }} />
+                                        </div>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              ) : selectedCompletionSetEntries.length === 0 ? (
                                 <p className="collection-muted completion-sheet-empty">No items tracked for this set yet.</p>
                               ) : (
                                 <div className="completion-sheet-grid">
@@ -10773,37 +10945,88 @@ function App() {
                 </button>
               </div>
             ) : (
-              <div className="collection-main-pane">
-                <div className="collection-topbar">
-                  <input
-                    type="search"
-                    className="catalog-search-input"
-                    placeholder="Search wishlist…"
-                    value={wishlistSearchQuery}
-                    onChange={e => { setWishlistSearchQuery(e.target.value); setWishlistPage(1) }}
-                  />
-                  <span style={{ fontSize: '0.85rem', color: '#667', alignSelf: 'center' }}>
-                    {filteredWishlistItems.length} item{filteredWishlistItems.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
+              <div className="collection-layout">
+                <aside className="catalog-card collection-sidebar" aria-label="Wishlist filters">
+                  <div className="collection-sidebar-section">
+                    <p className="collection-sidebar-title">My Wishlist</p>
+                    <button
+                      type="button"
+                      className={`collection-sidebar-link ${wishlistCategoryFilter === 'all' ? 'active' : ''}`}
+                      onClick={() => { setWishlistCategoryFilter('all'); setWishlistPage(1) }}
+                    >
+                      All Items
+                    </button>
+                    {wishlistCategories.map(cat => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        className={`collection-sidebar-link ${wishlistCategoryFilter === cat.id ? 'active' : ''}`}
+                        onClick={() => { setWishlistCategoryFilter(cat.id); setWishlistPage(1) }}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </aside>
 
-                {isWishlistLoading ? (
-                    <p style={{ padding: '32px', textAlign: 'center', color: '#667' }}>Loading wishlist…</p>
-                  ) : wishlistLoadError ? (
-                    <p className="auth-error" style={{ margin: '24px 0' }}>{wishlistLoadError}</p>
-                  ) : filteredWishlistItems.length === 0 ? (
-                    <div className="settings-empty-state">
-                      <p className="subtitle">
-                        {wishlistSearchQuery ? 'No items match your search.' : 'Your wishlist is empty. Browse the catalog and heart items you want.'}
-                      </p>
-                      {!wishlistSearchQuery && (
-                        <button type="button" className="auth-submit" onClick={handleOpenCatalog}>
-                          Browse Catalog
-                        </button>
-                      )}
+                <div className="collection-main-pane">
+                  <div className="collection-topbar">
+                    <input
+                      type="search"
+                      placeholder="Search wishlist…"
+                      value={wishlistSearchQuery}
+                      onChange={e => { setWishlistSearchQuery(e.target.value); setWishlistPage(1) }}
+                    />
+                    <div className="collection-tab-row" role="tablist" aria-label="Wishlist views">
+                      <button
+                        type="button"
+                        className={`collection-tab-button ${wishlistViewTab === 'overview' ? 'active' : ''}`}
+                        onClick={() => setWishlistViewTab('overview')}
+                      >
+                        Overview
+                      </button>
                     </div>
+                  </div>
+
+                  {isWishlistLoading ? (
+                    <div className="catalog-card catalog-loading-panel">Loading your wishlist...</div>
+                  ) : wishlistLoadError ? (
+                    <div className="catalog-card catalog-loading-panel">{wishlistLoadError}</div>
+                  ) : wishlistItems.length === 0 ? (
+                    <div className="settings-empty-state">
+                      <p className="subtitle">Your wishlist is empty. Browse the catalog and add items you want.</p>
+                      <button type="button" className="auth-submit" onClick={handleOpenCatalog}>
+                        Browse Catalog
+                      </button>
+                    </div>
+                  ) : filteredWishlistItems.length === 0 ? (
+                    <div className="catalog-card catalog-loading-panel">No items match your filters.</div>
                   ) : (
                     <>
+                      <section className="collection-summary-grid" aria-label="Wishlist summary">
+                        <article className="catalog-card collection-summary-card">
+                          <p className="collection-summary-label">Total Wishlisted</p>
+                          <strong>{wishlistSummary.totalItems}</strong>
+                        </article>
+                        <article className="catalog-card collection-summary-card">
+                          <p className="collection-summary-label">Categories</p>
+                          <strong>{wishlistSummary.uniqueCategories}</strong>
+                        </article>
+                        <article className="catalog-card collection-summary-card">
+                          <p className="collection-summary-label">Unique Sets</p>
+                          <strong>{wishlistSummary.uniqueSets}</strong>
+                        </article>
+                        <article className="catalog-card collection-summary-card">
+                          <p className="collection-summary-label">Est. Price to Complete</p>
+                          <strong>{wishlistSummary.pricedCount > 0 ? formatUsd(wishlistSummary.estimatedTotal) : '—'}</strong>
+                          {wishlistSummary.pricedCount > 0 && wishlistSummary.pricedCount < wishlistSummary.filteredCount && (
+                            <p style={{ fontSize: '0.72rem', color: '#667', marginTop: 2 }}>
+                              {wishlistSummary.pricedCount} of {wishlistSummary.filteredCount} priced
+                            </p>
+                          )}
+                        </article>
+                      </section>
+
                       <section className="collection-list" aria-label="Wishlist items">
                         {paginatedWishlistItems.map(item => (
                           <article key={`wishlist-item-${item.id}`} className="catalog-card collection-item-row">
@@ -10818,6 +11041,9 @@ function App() {
                               <p className="collection-item-meta">
                                 {[item.releaseYear, item.setName, item.categoryName].filter(Boolean).join(' | ')}
                               </p>
+                              <div className="collection-item-stats">
+                                <span>Est. Price: {item.market_price != null && Number(item.market_price) > 0 ? formatUsd(item.market_price) : '—'}</span>
+                              </div>
                               {ownedCatalogItemCounts[item.id] > 0 && (
                                 <p className="collection-item-meta" style={{ color: '#1a4ecf', fontWeight: 600 }}>
                                   You own {ownedCatalogItemCounts[item.id]}
@@ -10888,6 +11114,7 @@ function App() {
                       )}
                     </>
                   )}
+                </div>
               </div>
             )}
           </section>
@@ -10988,6 +11215,8 @@ function App() {
                       setCatalogSubjectId('')
                       setCatalogSubjectSearch('')
                       setCatalogSubjectResults([])
+                      setCatalogAlbumSearch('')
+                      setCatalogAlbumResults([])
                       setCatalogMinYear('')
                       setCatalogMaxYear('')
                     }}
@@ -10996,13 +11225,13 @@ function App() {
                   </button>
                 </div>
 
-                {/* Subject — typeahead search across all subjects */}
-                <label>Subject</label>
+                {/* Subject — typeahead search (category-scoped when a category is selected) */}
+                <label>{catalogSidebarLabels.subject}</label>
                 <div className="catalog-admin-subject-search-wrap">
                   <input
                     type="text"
                     value={catalogSubjectSearch}
-                    placeholder={catalogSubjectSearching ? 'Searching…' : 'Search subjects…'}
+                    placeholder={catalogSubjectSearching ? 'Searching…' : `Search ${catalogSidebarLabels.subject.toLowerCase()}…`}
                     style={{ width: '100%' }}
                     onChange={(event) => {
                       setCatalogSubjectSearch(event.target.value)
@@ -11049,6 +11278,7 @@ function App() {
                   onChange={(event) => {
                     setCatalogCategory(event.target.value)
                     setCatalogSubcategory('')
+                    if (event.target.value !== 'Music') { setCatalogAlbumSearch(''); setCatalogAlbumResults([]); setCatalogSetId('') }
                   }}
                 >
                   <option value="all">All</option>
@@ -11058,7 +11288,7 @@ function App() {
                 </select>
 
                 {/* Subcategory — cascades from category */}
-                <label htmlFor="catalog-subcategory">{t('subcategoryLabel')}</label>
+                <label htmlFor="catalog-subcategory">{catalogSidebarLabels.subcategory}</label>
                 <select
                   id="catalog-subcategory"
                   value={catalogSubcategory}
@@ -11071,29 +11301,36 @@ function App() {
                   ))}
                 </select>
 
-                {/* Franchise — cascades from subcategory via franchise_subcategory */}
-                <label htmlFor="catalog-franchise">{t('franchiseLabel')}</label>
-                <select
-                  id="catalog-franchise"
-                  value={catalogFranchise}
-                  disabled={!catalogSubcategory}
-                  onChange={(event) => setCatalogFranchise(event.target.value)}
-                >
-                  <option value="all">All</option>
-                  {catalogFranchiseOptions.map((franchise) => (
-                    <option key={franchise} value={franchise}>{franchise}</option>
-                  ))}
-                </select>
+                {/* Franchise — cascades from subcategory; hidden for categories where franchise is fixed (e.g. Music) */}
+                {!catalogSidebarLabels.hideFranchise && (
+                  <>
+                    <label htmlFor="catalog-franchise">{catalogSidebarLabels.franchise}</label>
+                    <select
+                      id="catalog-franchise"
+                      value={catalogFranchise}
+                      disabled={!catalogSubcategory}
+                      onChange={(event) => setCatalogFranchise(event.target.value)}
+                    >
+                      <option value="all">All</option>
+                      {catalogFranchiseOptions.map((franchise) => (
+                        <option key={franchise} value={franchise}>{franchise}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
 
-                {/* Brand — standalone */}
-                <label htmlFor="catalog-brand">Brand</label>
+                {/* Brand — filtered to Music franchise brands when Music is selected */}
+                <label htmlFor="catalog-brand">{catalogSidebarLabels.brand}</label>
                 <select
                   id="catalog-brand"
                   value={catalogBrandId}
                   onChange={(event) => setCatalogBrandId(event.target.value)}
                 >
                   <option value="">All</option>
-                  {catalogBrands.map((b) => (
+                  {(catalogCategory === 'Music' && musicBrandIds.size > 0
+                    ? catalogBrands.filter(b => musicBrandIds.has(b.id))
+                    : catalogBrands
+                  ).map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
@@ -11115,10 +11352,56 @@ function App() {
                   </>
                 )}
 
-                {/* Collectible Set — cascades from franchise + brand */}
-                {catalogSets.length > 0 && (
+                {/* Collectible Set — typeahead for Music, dropdown for others */}
+                {catalogCategory === 'Music' ? (
                   <>
-                    <label htmlFor="catalog-set">Set</label>
+                    <label>{catalogSidebarLabels.collectibleSet}</label>
+                    <div className="catalog-admin-subject-search-wrap">
+                      <input
+                        type="text"
+                        value={catalogSetId ? (catalogAlbumSearch || '') : catalogAlbumSearch}
+                        placeholder={catalogAlbumSearching ? 'Searching…' : 'Search albums…'}
+                        style={{ width: '100%' }}
+                        onChange={(e) => {
+                          setCatalogAlbumSearch(e.target.value)
+                          if (!e.target.value) setCatalogSetId('')
+                        }}
+                      />
+                      {catalogAlbumResults.length > 0 && (
+                        <div className="catalog-admin-subject-results">
+                          {catalogAlbumResults.map((a) => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              className="catalog-admin-subject-result"
+                              onClick={() => {
+                                setCatalogSetId(a.id)
+                                setCatalogAlbumSearch(a.name)
+                                setCatalogAlbumResults([])
+                              }}
+                            >
+                              {a.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {catalogSetId && (
+                        <div className="catalog-admin-subject-selected">
+                          <span style={{ fontSize: '0.82rem' }}>{catalogAlbumSearch}</span>
+                          <button
+                            type="button"
+                            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
+                            onClick={() => { setCatalogSetId(''); setCatalogAlbumSearch(''); setCatalogAlbumResults([]) }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : catalogSets.length > 0 ? (
+                  <>
+                    <label htmlFor="catalog-set">{catalogSidebarLabels.collectibleSet}</label>
                     <select
                       id="catalog-set"
                       value={catalogSetId}
@@ -11130,12 +11413,12 @@ function App() {
                       ))}
                     </select>
                   </>
-                )}
+                ) : null}
 
                 {/* Subcollectible Set — cascades from set */}
                 {catalogSubsets.length > 0 && (
                   <>
-                    <label htmlFor="catalog-subset">Sub-Set</label>
+                    <label htmlFor="catalog-subset">{catalogSidebarLabels.subset}</label>
                     <select
                       id="catalog-subset"
                       value={catalogSubsetId}
@@ -11281,6 +11564,7 @@ function App() {
                           const franchiseName    = item._set_name || 'Unassigned set'
                           const franchiseBrandName = item._franchise_name || ''
                           const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
+                          const isMusic          = (catalogCategoryById[item.category_id] || '') === 'Music'
                           const imageUrl         = item.front_image_path
                             ? item.front_image_path.startsWith('http')
                               ? item.front_image_path
@@ -11307,9 +11591,11 @@ function App() {
                                 <div className="catalog-item-image catalog-item-image-placeholder">No image</div>
                               )}
                               <div className="catalog-item-content">
-                                <h3>{item.name || 'Untitled item'}</h3>
-                                <p className="catalog-item-meta">{franchiseName}</p>
-                                {franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null}
+                                <h3>{isMusic ? franchiseName : (item.name || 'Untitled item')}</h3>
+                                <p className="catalog-item-meta">{isMusic ? (item.name || 'Untitled item') : franchiseName}</p>
+                                {isMusic
+                                  ? (catalogSubcategoryById[item.subcategory_id] ? <p className="catalog-item-brand">Format: {catalogSubcategoryById[item.subcategory_id]}</p> : null)
+                                  : (franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null)}
                                 {brandName ? <p className="catalog-item-brand">Brand: {brandName}</p> : null}
                                 {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
                               </div>
@@ -11324,6 +11610,7 @@ function App() {
                           const subcategoryName = catalogSubcategoryById[item.subcategory_id] || ''
                           const setName         = item._set_name || ''
                           const brandName       = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || '' : '')
+                          const isMusic         = categoryName === 'Music'
                           const ownedCount      = ownedCatalogItemCounts[item.id] || 0
                           const stats           = catalogListStats[item.id] || null
                           const isWishlisted    = wishlistItemIds.has(item.id)
@@ -11332,7 +11619,11 @@ function App() {
                               ? item.front_image_path
                               : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
                             : ''
-                          const tags = [
+                          const tags = isMusic ? [
+                            item.name || null,
+                            subcategoryName,
+                            item.release_year ? String(item.release_year) : null,
+                          ].filter(Boolean) : [
                             item.card_number ? item.card_number : null,
                             categoryName,
                             subcategoryName !== categoryName ? subcategoryName : null,
@@ -11355,7 +11646,7 @@ function App() {
                                   : <div className="catalog-list-thumb-placeholder" />}
                               </div>
                               <div className="catalog-list-body">
-                                <h3 className="catalog-list-name">{item.name || 'Untitled item'}</h3>
+                                <h3 className="catalog-list-name">{isMusic ? (setName || 'Untitled item') : (item.name || 'Untitled item')}</h3>
                                 {tags.length > 0 && (
                                   <div className="catalog-list-tags">
                                     {tags.map((tag) => (
@@ -11529,29 +11820,30 @@ function App() {
                                 {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             </div>
+                            {(() => { const _bl = getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || ''); return (<>
                             <div>
-                              <label>Subcategory</label>
-                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
+                              <label>{_bl.subcategory}</label>
+                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); if (!_bl.hideFranchise) setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
                                 <option value="">Select subcategory…</option>
                                 {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                               </select>
                             </div>
-                            <div>
-                              <label>Franchise</label>
+                            {!_bl.hideFranchise && (<div>
+                              <label>{_bl.franchise}</label>
                               <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
                                 <option value="">None</option>
                                 {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                               </select>
-                            </div>
+                            </div>)}
                             <div>
-                              <label>Brand</label>
+                              <label>{_bl.brand}</label>
                               <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
                                 <option value="">None</option>
                                 {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                               </select>
                             </div>
                             <div>
-                              <label>Collectible Set</label>
+                              <label>{_bl.collectibleSet}</label>
                               <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
                                 <option value="">None</option>
                                 {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -11559,13 +11851,14 @@ function App() {
                             </div>
                             {catalogAdminSubsets.length > 0 && (
                               <div>
-                                <label>Subset</label>
+                                <label>{_bl.subset}</label>
                                 <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
                                   <option value="">None</option>
                                   {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                               </div>
                             )}
+                            </>) })()}
                           </div>
                           <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Card Side</p>
                           <div className="bulk-photo-side-toggle">
@@ -11797,29 +12090,30 @@ function App() {
                                 {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             </div>
+                            {(() => { const _bi = getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || ''); return (<>
                             <div>
-                              <label>Subcategory</label>
-                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
+                              <label>{_bi.subcategory}</label>
+                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); if (!_bi.hideFranchise) setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
                                 <option value="">Select subcategory…</option>
                                 {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                               </select>
                             </div>
-                            <div>
-                              <label>Franchise</label>
+                            {!_bi.hideFranchise && (<div>
+                              <label>{_bi.franchise}</label>
                               <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
                                 <option value="">None</option>
                                 {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                               </select>
-                            </div>
+                            </div>)}
                             <div>
-                              <label>Brand</label>
+                              <label>{_bi.brand}</label>
                               <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
                                 <option value="">None</option>
                                 {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                               </select>
                             </div>
                             <div>
-                              <label>Collectible Set</label>
+                              <label>{_bi.collectibleSet}</label>
                               <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
                                 <option value="">None</option>
                                 {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -11827,13 +12121,14 @@ function App() {
                             </div>
                             {catalogAdminSubsets.length > 0 && (
                               <div>
-                                <label>Subset <span className="catalog-admin-hint">(default for all rows)</span></label>
+                                <label>{_bi.subset} <span className="catalog-admin-hint">(default for all rows)</span></label>
                                 <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
                                   <option value="">None</option>
                                   {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                               </div>
                             )}
+                            </>) })()}
                           </div>
                           <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV</p>
                           <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, bricklink_id, rebrickable_fig_id, piece_count, card_number, description, upc, release_year</code></p>
@@ -12090,7 +12385,7 @@ function App() {
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'category', value: '', subjectType: 'player' })}>+ New Category</button>}
                       </div>
                       <div>
-                        <label htmlFor="cai-subcategory">Subcategory</label>
+                        <label htmlFor="cai-subcategory">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subcategory}</label>
                         <select id="cai-subcategory" value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminCategoryId}>
                           <option value="">Select subcategory…</option>
                           {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -12104,8 +12399,9 @@ function App() {
                           </div>
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subcategory', value: '', subjectType: 'player' })}>+ New Subcategory</button>)}
                       </div>
+                      {!getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').hideFranchise && (
                       <div>
-                        <label htmlFor="cai-franchise">Franchise</label>
+                        <label htmlFor="cai-franchise">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').franchise}</label>
                         <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminSubjectIds([]); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
                           <option value="">None</option>
                           {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -12119,8 +12415,9 @@ function App() {
                           </div>
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'franchise', value: '', subjectType: 'player' })}>+ New Franchise</button>}
                       </div>
+                      )}
                       <div>
-                        <label htmlFor="cai-brand">Brand</label>
+                        <label htmlFor="cai-brand">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').brand}</label>
                         <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminRealFranchiseId}>
                           <option value="">None</option>
                           {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -12135,7 +12432,7 @@ function App() {
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'brand', value: '', subjectType: 'player' })}>+ New Brand</button>}
                       </div>
                       <div>
-                        <label htmlFor="cai-set">Collectible Set</label>
+                        <label htmlFor="cai-set">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').collectibleSet}</label>
                         <select id="cai-set" value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminBrandId}>
                           <option value="">None</option>
                           {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -12150,7 +12447,7 @@ function App() {
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'set', value: '', subjectType: 'player' })}>+ New Set</button>}
                       </div>
                       <div>
-                        <label htmlFor="cai-subset">Subset {!catalogAdminFranchiseId && <span className="catalog-admin-hint">(select a set first)</span>}</label>
+                        <label htmlFor="cai-subset">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subset} {!catalogAdminFranchiseId && <span className="catalog-admin-hint">(select a set first)</span>}</label>
                         <select id="cai-subset" value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
                           <option value="">None</option>
                           {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -12166,10 +12463,10 @@ function App() {
                       </div>
                     </div>
 
-                    <p className="catalog-admin-section-title">Subject</p>
+                    <p className="catalog-admin-section-title">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subject}</p>
                     <div className="catalog-admin-two-col">
                       <div>
-                        <label>Subject(s)</label>
+                        <label>{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subject}</label>
                         {catalogAdminSubjectIds.length > 0 && (
                           <div className="catalog-admin-subject-tags">
                             {catalogAdminSubjectIds.map(s => (
@@ -12209,6 +12506,7 @@ function App() {
                               <option value="player">Player</option>
                               <option value="character">Character</option>
                               <option value="comic">Comic</option>
+                              <option value="artist">Artist</option>
                             </select>
                             {catalogAdminInlineCreate.subjectType === 'character' && (
                               <select value={catalogAdminInlineCreate.speciesId} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, speciesId: e.target.value }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
@@ -12560,7 +12858,7 @@ function App() {
                     <div className="catalog-detail-meta-list">
                       {selectedCatalogItem._details?.subcategory && (
                         <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">Theme</span>
+                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.subcategory}</span>
                           <button type="button" className="catalog-detail-meta-link" onClick={() => {
                             setCatalogCategory(selectedCatalogItem._details.category || 'all')
                             setCatalogSubcategory(selectedCatalogItem._details.subcategory)
@@ -12570,9 +12868,9 @@ function App() {
                           }}>{selectedCatalogItem._details.subcategory}</button>
                         </span>
                       )}
-                      {selectedCatalogItem._details?.franchise && (
+                      {selectedCatalogItem._details?.franchise && !selectedCatalogItemCategoryLabels.hideFranchise && (
                         <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">Franchise</span>
+                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.franchise}</span>
                           <button type="button" className="catalog-detail-meta-link" onClick={() => {
                             setCatalogCategory(selectedCatalogItem._details.category || 'all')
                             setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
@@ -12584,7 +12882,7 @@ function App() {
                       )}
                       {selectedCatalogItem._details?.collectible_set && (
                         <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">Sub Theme</span>
+                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.collectibleSet}</span>
                           <button type="button" className="catalog-detail-meta-link" onClick={() => {
                             setCatalogCategory(selectedCatalogItem._details.category || 'all')
                             setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
@@ -12640,15 +12938,18 @@ function App() {
                     </div>
                     {catalogItemEditError && <p className="catalog-admin-form-error">{catalogItemEditError}</p>}
                     <div className="catalog-item-edit-grid">
-                      {[
-                        ['Category',       'category_id',          catalogCategories,               false],
-                        ['Subcategory',     'subcategory_id',       catalogSubcategories,            false],
-                        ['Franchise',       'franchise_id',         catalogItemEditLookups.franchises, false],
-                        ['Brand',           'brand_id',             catalogBrands,                    false],
-                        ['Collectible Set', 'collectible_set_id',   catalogItemEditLookups.sets,      false],
-                        ['Subset',          'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
-                        ['Print Type',      'print_type_id',        catalogItemEditLookups.printTypes, false],
-                      ].map(([label, field, options, upper]) => (
+                      {(() => {
+                        const editCatLabels = getCategoryLabels(catalogCategories.find(c => c.id === catalogItemEditValues.category_id)?.name || '')
+                        return [
+                          ['Category',                    'category_id',          catalogCategories,                false],
+                          [editCatLabels.subcategory,     'subcategory_id',       catalogSubcategories,             false],
+                          [editCatLabels.franchise,       'franchise_id',         catalogItemEditLookups.franchises, false],
+                          [editCatLabels.brand,           'brand_id',             catalogBrands,                    false],
+                          [editCatLabels.collectibleSet,  'collectible_set_id',   catalogItemEditLookups.sets,      false],
+                          [editCatLabels.subset,          'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
+                          ['Print Type',                  'print_type_id',        catalogItemEditLookups.printTypes, false],
+                        ]
+                      })().map(([label, field, options, upper]) => (
                         <label key={field} className="catalog-item-edit-field">
                           <span>{label}</span>
                           <select value={catalogItemEditValues[field] || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, [field]: e.target.value }))} style={upper ? { textTransform: 'uppercase' } : {}}>
