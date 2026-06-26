@@ -1601,6 +1601,7 @@ function App() {
   const [catalogSubcategories, setCatalogSubcategories] = useState([])
   const [catalogFranchises, setCatalogFranchises] = useState([])
   const [catalogFranchiseBrands, setCatalogFranchiseBrands] = useState([])
+  const [catalogFranchiseLinkedBrands, setCatalogFranchiseLinkedBrands] = useState([])
   const [catalogBrands, setCatalogBrands] = useState([])
   const [catalogBrandId, setCatalogBrandId] = useState('')
   const [catalogTeamId, setCatalogTeamId] = useState('')
@@ -2677,6 +2678,7 @@ function App() {
       setCatalogSets([])
       setCatalogSubsets([])
       setCatalogPrintTypes([])
+      setCatalogFranchiseLinkedBrands([])
       return
     }
     if (franchiseChanged) {
@@ -2684,13 +2686,19 @@ function App() {
       setCatalogSetId('')
       setCatalogSubsetId('')
       setCatalogPrintTypeId('')
+      setCatalogBrandId('')
     }
     supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
       .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
+    supabase.from('brand_franchise').select('brand_id').eq('franchise_id', franchiseId)
+      .then(({ data }) => {
+        const ids = new Set((data || []).map(r => r.brand_id))
+        setCatalogFranchiseLinkedBrands(catalogBrands.filter(b => ids.has(b.id)))
+      })
     let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
     if (catalogBrandId) setQ = setQ.eq('brand_id', catalogBrandId)
     setQ.then(({ data }) => setCatalogSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
-  }, [currentScreen, selectedCatalogFranchiseRecord, catalogBrandId])
+  }, [currentScreen, selectedCatalogFranchiseRecord, catalogBrandId, catalogBrands])
 
   // Effect D: subcollectible set cascade from collectible set
   useEffect(() => {
@@ -11467,9 +11475,11 @@ function App() {
                   onChange={(event) => setCatalogBrandId(event.target.value)}
                 >
                   <option value="">All</option>
-                  {(catalogCategory === 'Music' && musicBrandIds.size > 0
-                    ? catalogBrands.filter(b => musicBrandIds.has(b.id))
-                    : catalogBrands
+                  {(catalogFranchiseLinkedBrands.length > 0
+                    ? catalogFranchiseLinkedBrands
+                    : catalogCategory === 'Music' && musicBrandIds.size > 0
+                      ? catalogBrands.filter(b => musicBrandIds.has(b.id))
+                      : catalogBrands
                   ).map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
