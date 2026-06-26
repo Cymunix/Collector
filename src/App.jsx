@@ -12251,8 +12251,24 @@ function App() {
                                   {errorCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-error">{errorCount} errors</span></>}
                                   {savedCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-saved">{savedCount} saved</span></>}
                                 </span>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                                   {bulkImportSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkImportSaveError}</span>}
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill"
+                                    disabled={bulkImportIsSaving}
+                                    onClick={() => setBulkImportRows(rows => rows.map(r => r.status === 'pending' ? { ...r, status: 'approved' } : r))}
+                                  >
+                                    Approve All
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="catalog-action-pill"
+                                    disabled={bulkImportIsSaving}
+                                    onClick={() => setBulkImportRows(rows => rows.map(r => ({ ...r, description: '' })))}
+                                  >
+                                    Clear All Descriptions
+                                  </button>
                                   <button
                                     type="button"
                                     className="catalog-action-pill catalog-admin-submit-finish"
