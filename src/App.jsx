@@ -1655,6 +1655,8 @@ function App() {
   const [bulkImportIsSaving, setBulkImportIsSaving] = useState(false)
   const [bulkImportSaveError, setBulkImportSaveError] = useState('')
   const [bulkImportSaveProgress, setBulkImportSaveProgress] = useState(0)
+  const [bulkImportNewPrintTypeName, setBulkImportNewPrintTypeName] = useState('')
+  const [bulkImportCreatingPrintType, setBulkImportCreatingPrintType] = useState(false)
   const [bulkPhotoMode, setBulkPhotoMode] = useState(false)
   const [bulkPhotoPosition, setBulkPhotoPosition] = useState(0)
   const [bulkPhotoRows, setBulkPhotoRows] = useState([])
@@ -5977,7 +5979,8 @@ function App() {
     const iYear     = col(['release_year','year'])
     const iCardNum  = col(['card_number','number'])
     const iImgUrl   = col(['image_url','img_url','image','photo_url','photo'])
-    const iRarity   = col(['rarity','rarity_name'])
+    const iRarity      = col(['rarity','rarity_name'])
+    const iTreatments  = col(['card_treatments','card_treatment','treatments','treatment'])
     return lines.slice(1).filter(l => l.trim()).map((line, idx) => {
       const f = parseRow(line)
       const g = (i) => (i >= 0 ? (f[i] || '') : '')
@@ -5996,6 +5999,7 @@ function App() {
         subcollectble_set_id: '',
         print_type_id: '',
         card_type_ids: [],
+        card_treatment_names: g(iTreatments),
         rarity_id: '',
         rarity_name: g(iRarity),
         image_url: g(iImgUrl),
@@ -6059,6 +6063,16 @@ function App() {
           return matched ? { ...r, rarity_id: matched } : r
         })
       }
+      // Auto-match card treatments by name against loaded catalogAllCardTypes
+      if (catalogAllCardTypes.length > 0) {
+        const treatmentByName = new Map(catalogAllCardTypes.map(ct => [ct.name.toLowerCase(), ct.id]))
+        rows = rows.map(r => {
+          if (!r.card_treatment_names) return r
+          const ids = r.card_treatment_names.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+            .map(n => treatmentByName.get(n)).filter(Boolean)
+          return ids.length ? { ...r, card_type_ids: [...new Set([...(r.card_type_ids || []), ...ids])] } : r
+        })
+      }
       setBulkImportRows(rows)
       setBulkImportIdx(0)
       setBulkImportSubjectSearch('')
@@ -6076,6 +6090,19 @@ function App() {
     if (catName.includes('comic') || subName.includes('comic')) return 'comic'
     if (catName.includes('music')) return 'artist'
     return 'character'
+  }
+
+  const handleBulkCreatePrintType = async () => {
+    const name = bulkImportNewPrintTypeName.trim()
+    if (!name) return
+    const subsetId = bulkImportRows[bulkImportIdx]?.subcollectble_set_id || catalogAdminSubsetId || null
+    const { data, error } = await supabase.from('print_types').insert({ name, subcollectble_set_id: subsetId }).select('print_type_id').single()
+    if (error) return
+    const newItem = { id: data.print_type_id, name }
+    setCatalogAdminPrintTypes(prev => [...prev, newItem].sort((a, b) => a.name.localeCompare(b.name)))
+    updateBulkRow(bulkImportIdx, { print_type_id: data.print_type_id })
+    setBulkImportNewPrintTypeName('')
+    setBulkImportCreatingPrintType(false)
   }
 
   const handleBulkImportSave = async () => {
@@ -12312,15 +12339,30 @@ function App() {
                                             {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                           </select>
                                         </div>
-                                        {catalogAdminPrintTypes.length > 0 && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Print Type</label>
-                                            <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
-                                              <option value="">None</option>
-                                              {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                            </select>
-                                          </div>
-                                        )}
+                                        <div className="bulk-import-editor-field">
+                                          <label>Print Type</label>
+                                          <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
+                                            <option value="">None</option>
+                                            {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                          </select>
+                                          {bulkImportCreatingPrintType ? (
+                                            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                                              <input
+                                                type="text"
+                                                className="catalog-admin-inline-input"
+                                                placeholder="Print type name…"
+                                                value={bulkImportNewPrintTypeName}
+                                                onChange={e => setBulkImportNewPrintTypeName(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleBulkCreatePrintType() } }}
+                                                autoFocus
+                                              />
+                                              <button type="button" className="catalog-admin-inline-save" onClick={handleBulkCreatePrintType}>Add</button>
+                                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportCreatingPrintType(false); setBulkImportNewPrintTypeName('') }}>✕</button>
+                                            </div>
+                                          ) : (
+                                            <button type="button" className="catalog-admin-create-inline-link" style={{ marginTop: 2 }} onClick={() => setBulkImportCreatingPrintType(true)}>＋ New print type</button>
+                                          )}
+                                        </div>
                                         {catalogRarities.length > 0 && (
                                           <div className="bulk-import-editor-field">
                                             <label>Rarity</label>
