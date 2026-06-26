@@ -2828,7 +2828,9 @@ function App() {
       if (catalogSubsetId) {
         itemsQuery = itemsQuery.eq('subcollectble_set_id', catalogSubsetId)
       }
-      if (catalogPrintTypeId) {
+      if (catalogPrintTypeId === '__none__') {
+        itemsQuery = itemsQuery.is('print_type_id', null)
+      } else if (catalogPrintTypeId) {
         itemsQuery = itemsQuery.eq('print_type_id', catalogPrintTypeId)
       }
       // M2M: subject — expand to all IDs with same name to handle duplicate subject rows
@@ -11600,6 +11602,7 @@ function App() {
                       onChange={(event) => setCatalogPrintTypeId(event.target.value)}
                     >
                       <option value="">All</option>
+                      <option value="__none__">No print type</option>
                       {catalogPrintTypes.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
