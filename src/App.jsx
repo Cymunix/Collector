@@ -2908,8 +2908,7 @@ function App() {
         const franchiseName = na(raw.franchise)
         const brandName     = na(raw.brand)
         const cardNum       = raw.card_number && raw.card_number !== 'N/A' ? `#${raw.card_number}` : ''
-        const printCount    = raw.print_count ? `/${raw.print_count}` : ''
-        const nameParts     = [subjectName, printType, (cardNum + printCount) || null].filter(Boolean)
+        const nameParts     = [subjectName, printType, cardNum || null].filter(Boolean)
         return {
           id:                 raw.item_id,
           name:               nameParts.join(' — ') || raw.description || 'Unnamed Item',
