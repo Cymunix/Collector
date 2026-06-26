@@ -6211,6 +6211,18 @@ function App() {
     else if (isNewPhase) bulkPhotoAdvancePhase(updatedRows, 'new')
   }
 
+  const bulkPhotoApproveAll = () => {
+    const isNewPhase = bulkPhotoPhase === 'new'
+    const phaseFilter = r => isNewPhase ? !r.hasExistingImage : r.hasExistingImage
+    const seenIds = new Set()
+    setBulkPhotoRows(rows => rows.map(r => {
+      if (!phaseFilter(r) || r.status !== 'pending' || !r.matchedItem) return r
+      if (seenIds.has(r.matchedItem.item_id)) return { ...r, status: 'skipped', errorMsg: 'Skipped — another photo approved for this card' }
+      seenIds.add(r.matchedItem.item_id)
+      return { ...r, status: 'approved', errorMsg: '' }
+    }))
+  }
+
   const bulkPhotoSkip = () => {
     const isNewPhase = bulkPhotoPhase === 'new'
     const phaseFilter = r => isNewPhase ? !r.hasExistingImage : r.hasExistingImage
@@ -12044,8 +12056,24 @@ function App() {
                                 <span className="bulk-stat-skipped">{phaseRows.filter(r => r.status === 'skipped').length} skipped</span>
                                 {phasePendingCount > 0 && <>&nbsp;·&nbsp;{phasePendingCount} remaining</>}
                               </span>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                                 {bulkPhotoSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkPhotoSaveError}</span>}
+                                <button
+                                  type="button"
+                                  className="catalog-action-pill"
+                                  disabled={bulkPhotoIsSaving}
+                                  onClick={bulkPhotoApproveAll}
+                                >
+                                  Approve All
+                                </button>
+                                <button
+                                  type="button"
+                                  className="catalog-action-pill"
+                                  disabled={bulkPhotoIsSaving}
+                                  onClick={() => setBulkPhotoRows(rows => rows.map(r => ({ ...r, description: '' })))}
+                                >
+                                  Clear All Descriptions
+                                </button>
                                 {bulkPhotoPhase === 'update' && (
                                   <button
                                     type="button"
