@@ -2746,12 +2746,14 @@ function App() {
         const subjectIds = [...new Set((itemRows || []).map(r => r.subject_id))]
         if (!subjectIds.length) { setCatalogSubjectResults([]); setCatalogSubjectSearching(false); return }
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
-          .in('subject_id', subjectIds).ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
-        setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
+          .in('subject_id', subjectIds).ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
+        const seen = new Set()
+        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name) ? false : seen.add(r.subject_name)).map(r => ({ id: r.subject_id, name: r.subject_name })))
       } else {
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
-          .ilike('subject_name', `%${q}%`).order('subject_name').limit(10)
-        setCatalogSubjectResults((data || []).map(r => ({ id: r.subject_id, name: r.subject_name })))
+          .ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
+        const seen = new Set()
+        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name) ? false : seen.add(r.subject_name)).map(r => ({ id: r.subject_id, name: r.subject_name })))
       }
       setCatalogSubjectSearching(false)
     }, 250)
@@ -2829,9 +2831,15 @@ function App() {
       if (catalogPrintTypeId) {
         itemsQuery = itemsQuery.eq('print_type_id', catalogPrintTypeId)
       }
-      // M2M: subject — pre-query item_ids from item_subjects
+      // M2M: subject — expand to all IDs with same name to handle duplicate subject rows
       if (catalogSubjectId) {
-        const { data: subjectRows } = await supabase.from('item_subjects').select('item_id').eq('subject_id', catalogSubjectId)
+        const selectedName = catalogSubjectSearch.trim()
+        let allSubjectIds = [catalogSubjectId]
+        if (selectedName) {
+          const { data: nameRows } = await supabase.from('subjects').select('subject_id').eq('subject_name', selectedName)
+          if (nameRows?.length) allSubjectIds = nameRows.map(r => r.subject_id)
+        }
+        const { data: subjectRows } = await supabase.from('item_subjects').select('item_id').in('subject_id', allSubjectIds)
         const subjectItemIds = (subjectRows || []).map(r => r.item_id)
         if (!subjectItemIds.length) {
           setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
