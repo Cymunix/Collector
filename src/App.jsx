@@ -5973,9 +5973,10 @@ function App() {
     const iCard     = col(['card_number','number','card_num','num'])
     const iBl       = col(['bricklink_id','bricklink','bl_id','catalog_code'])
     const iRb       = col(['rebrickable_fig_id','rebrickable_id','rebrickable','rb_id','fig_num'])
-    const iPieces   = col(['piece_count','pieces','parts','num_parts'])
-    const iDesc     = col(['description','desc','notes'])
-    const iUpc      = col(['upc','barcode'])
+    const iPieces      = col(['piece_count','pieces','parts','num_parts'])
+    const iPrintCount  = col(['print_count','print_run'])
+    const iDesc        = col(['description','desc','notes'])
+    const iUpc         = col(['upc','barcode'])
     const iYear     = col(['release_year','year'])
     const iCardNum  = col(['card_number','number'])
     const iImgUrl   = col(['image_url','img_url','image','photo_url','photo'])
@@ -5993,6 +5994,7 @@ function App() {
         bricklink_id: g(iBl),
         rebrickable_fig_id: g(iRb),
         piece_count: g(iPieces),
+        print_count: g(iPrintCount),
         description: g(iDesc),
         upc: g(iUpc),
         release_year: g(iYear),
@@ -6124,6 +6126,7 @@ function App() {
         bricklink_id:         row.bricklink_id?.trim()       || null,
         rebrickable_fig_id:   row.rebrickable_fig_id?.trim() || null,
         piece_count:          row.piece_count !== '' ? Number(row.piece_count) : null,
+        print_count:          row.print_count !== '' ? Number(row.print_count) : null,
         upc:                  row.upc?.trim()                || null,
         description:          row.description?.trim()        || null,
         card_number:          row.card_number?.trim()        || null,
@@ -12253,7 +12256,7 @@ function App() {
                             </>) })()}
                           </div>
                           <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV</p>
-                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, bricklink_id, rebrickable_fig_id, piece_count, card_number, description, upc, release_year</code></p>
+                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, card_number, print_count, piece_count, release_year, description, upc, bricklink_id, rebrickable_fig_id, card_treatments, rarity</code></p>
                           <label className="bulk-import-upload-area">
                             <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={e => handleBulkImportFile(e.target.files?.[0])} />
                             <span className="bulk-import-upload-icon">&#8679;</span>
@@ -12424,10 +12427,17 @@ function App() {
                                           <label>Rebrickable ID</label>
                                           <input type="text" value={cur.rebrickable_fig_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rebrickable_fig_id: e.target.value })} placeholder="e.g. fig-001234" />
                                         </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>Piece Count</label>
-                                          <input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} />
-                                        </div>
+                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) ? (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Print Count</label>
+                                            <input type="number" min="1" value={cur.print_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_count: e.target.value })} />
+                                          </div>
+                                        ) : (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Piece Count</label>
+                                            <input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} />
+                                          </div>
+                                        )}
                                         <div className="bulk-import-editor-field">
                                           <label>Card Number</label>
                                           <input type="text" value={cur.card_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { card_number: e.target.value })} />
