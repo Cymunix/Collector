@@ -1667,6 +1667,9 @@ function App() {
   const [bulkPhotoSaveProgress, setBulkPhotoSaveProgress] = useState(0)
   const [bulkPhotoPhase, setBulkPhotoPhase] = useState(null)
   const [bulkPhotoPrintTypeId, setBulkPhotoPrintTypeId] = useState('')
+  const [profileStats, setProfileStats] = useState(null)
+  const [profileRecentItems, setProfileRecentItems] = useState([])
+  const [profileIsLoading, setProfileIsLoading] = useState(false)
   const [bulkPhotoAnalyzing, setBulkPhotoAnalyzing] = useState(false)
   const [bulkPhotoAnalyzeProgress, setBulkPhotoAnalyzeProgress] = useState({ done: 0, total: 0 })
   const [bulkPhotoSubsetItems, setBulkPhotoSubsetItems] = useState([])
@@ -2794,6 +2797,58 @@ function App() {
     }, 250)
     return () => clearTimeout(timer)
   }, [currentScreen, catalogCategory, catalogAlbumSearch, catalogSetId, musicFranchiseId])
+
+  // Effect H: profile screen — load collection stats and recent items
+  useEffect(() => {
+    if (currentScreen !== 'profile' || !currentUser) return
+    setProfileIsLoading(true)
+    const uid = currentUser.id
+    Promise.all([
+      supabase.from('owned_copies').select('catalog_item_id, purchase_price, created_at', { count: 'exact' }).eq('user_id', uid),
+      supabase.from('owned_copies')
+        .select('catalog_item_id, created_at')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(12),
+    ]).then(async ([allRes, recentRes]) => {
+      const allRows = allRes.data || []
+      const totalItems = allRes.count ?? allRows.length
+      const totalValue = allRows.reduce((s, r) => s + (Number(r.purchase_price) || 0), 0)
+      const uniqueItemIds = [...new Set(allRows.map(r => r.catalog_item_id))]
+
+      // Fetch item_details for recent items
+      const recentIds = (recentRes.data || []).map(r => r.catalog_item_id)
+      let recentDetails = []
+      if (recentIds.length) {
+        const { data: det } = await supabase.from('item_details')
+          .select('item_id, subject, print_type, card_number, front_image_path, collectible_set')
+          .in('item_id', recentIds)
+        const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
+        recentDetails = (recentRes.data || []).map(r => ({
+          ...r,
+          ...detById[r.catalog_item_id],
+          item_id: r.catalog_item_id,
+        }))
+      }
+
+      // Category breakdown
+      let categoryBreakdown = []
+      if (uniqueItemIds.length) {
+        const { data: catRows } = await supabase.from('item_details')
+          .select('item_id, category_id')
+          .in('item_id', uniqueItemIds)
+        const catCount = {}
+        ;(catRows || []).forEach(r => { catCount[r.category_id] = (catCount[r.category_id] || 0) + 1 })
+        categoryBreakdown = Object.entries(catCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6)
+      }
+
+      setProfileStats({ totalItems, totalValue, uniqueItems: uniqueItemIds.length, categoryBreakdown })
+      setProfileRecentItems(recentDetails)
+      setProfileIsLoading(false)
+    })
+  }, [currentScreen, currentUser])
 
   useEffect(() => {
     const loadCatalogItems = async () => {
@@ -6543,6 +6598,11 @@ function App() {
     if (label === 'Settings') {
       setCurrentScreen('settings')
       setSettingsError('')
+      setIsUserMenuOpen(false)
+      return
+    }
+    if (label === 'My Profile') {
+      setCurrentScreen('profile')
       setIsUserMenuOpen(false)
       return
     }
@@ -14002,6 +14062,119 @@ function App() {
               </>
             ) : (
               <div className="catalog-card catalog-loading-panel">Item not found.</div>
+            )}
+          </section>
+        ) : currentScreen === 'profile' ? (
+          <section className="profile-screen" aria-label="My Profile">
+            {!currentUser || !profile ? (
+              <div className="profile-empty-state">
+                <p className="subtitle">Sign in to view your profile.</p>
+                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>Log in</button>
+              </div>
+            ) : (
+              <>
+                {/* Banner + Avatar */}
+                <div className="profile-banner">
+                  <div className="profile-banner-bg" />
+                  <div className="profile-identity">
+                    <div className="profile-avatar-wrap">
+                      {profile.avatar_url
+                        ? <img src={profile.avatar_url} alt="avatar" className="profile-avatar" />
+                        : <div className="profile-avatar profile-avatar--placeholder">{(profile.display_name || currentUser.email || '?')[0].toUpperCase()}</div>
+                      }
+                    </div>
+                    <div className="profile-identity-text">
+                      <h1 className="profile-username">{profile.display_name || currentUser.email?.split('@')[0] || 'Collector'}</h1>
+                      <p className="profile-email">{currentUser.email}</p>
+                      <span className="profile-tier-badge">{profile.subscription_tier ? profile.subscription_tier.replace(/_/g, ' ') : 'Free Collector'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {profileIsLoading ? (
+                  <div className="profile-loading">Loading stats…</div>
+                ) : (
+                  <>
+                    {/* Stats strip */}
+                    <div className="profile-stats-strip">
+                      <div className="profile-stat">
+                        <span className="profile-stat-value">{profileStats?.totalItems?.toLocaleString() ?? '—'}</span>
+                        <span className="profile-stat-label">Total Copies</span>
+                      </div>
+                      <div className="profile-stat">
+                        <span className="profile-stat-value">{profileStats?.uniqueItems?.toLocaleString() ?? '—'}</span>
+                        <span className="profile-stat-label">Unique Items</span>
+                      </div>
+                      <div className="profile-stat">
+                        <span className="profile-stat-value">
+                          {profileStats?.totalValue != null
+                            ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '—'}
+                        </span>
+                        <span className="profile-stat-label">Collection Value</span>
+                      </div>
+                      <div className="profile-stat">
+                        <span className="profile-stat-value">{profileStats?.categoryBreakdown?.length ?? '—'}</span>
+                        <span className="profile-stat-label">Categories</span>
+                      </div>
+                    </div>
+
+                    {/* Category breakdown */}
+                    {profileStats?.categoryBreakdown?.length > 0 && (
+                      <div className="profile-section">
+                        <h2 className="profile-section-title">Collection by Category</h2>
+                        <div className="profile-category-grid">
+                          {profileStats.categoryBreakdown.map(([catId, count]) => {
+                            const catName = catalogCategories.find(c => c.id === catId)?.name || 'Unknown'
+                            const total = profileStats.uniqueItems || 1
+                            const pct = Math.round((count / total) * 100)
+                            return (
+                              <div key={catId} className="profile-category-card">
+                                <div className="profile-category-name">{catName}</div>
+                                <div className="profile-category-bar-wrap">
+                                  <div className="profile-category-bar" style={{ width: `${pct}%` }} />
+                                </div>
+                                <div className="profile-category-count">{count.toLocaleString()} items</div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recently added */}
+                    {profileRecentItems.length > 0 && (
+                      <div className="profile-section">
+                        <h2 className="profile-section-title">Recently Added</h2>
+                        <div className="profile-recent-grid">
+                          {profileRecentItems.map((item, i) => {
+                            const imgUrl = item.front_image_path
+                              ? (item.front_image_path.startsWith('http')
+                                  ? item.front_image_path
+                                  : `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/item-images/${item.front_image_path}`)
+                              : null
+                            const label = [item.subject, item.print_type, item.card_number ? `#${item.card_number}` : null].filter(Boolean).join(' — ') || item.collectible_set || 'Item'
+                            return (
+                              <div key={`${item.item_id}-${i}`} className="profile-recent-card">
+                                <div className="profile-recent-img-wrap">
+                                  {imgUrl
+                                    ? <img src={imgUrl} alt={label} className="profile-recent-img" />
+                                    : <div className="profile-recent-img-placeholder">?</div>
+                                  }
+                                </div>
+                                <p className="profile-recent-label">{label}</p>
+                                {item.created_at && (
+                                  <p className="profile-recent-date">{new Date(item.created_at).toLocaleDateString()}</p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
             )}
           </section>
         ) : currentScreen === 'settings' ? (
