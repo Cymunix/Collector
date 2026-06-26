@@ -1665,6 +1665,7 @@ function App() {
   const [bulkPhotoSaveError, setBulkPhotoSaveError] = useState('')
   const [bulkPhotoSaveProgress, setBulkPhotoSaveProgress] = useState(0)
   const [bulkPhotoPhase, setBulkPhotoPhase] = useState(null)
+  const [bulkPhotoPrintTypeId, setBulkPhotoPrintTypeId] = useState('')
   const [bulkPhotoAnalyzing, setBulkPhotoAnalyzing] = useState(false)
   const [bulkPhotoAnalyzeProgress, setBulkPhotoAnalyzeProgress] = useState({ done: 0, total: 0 })
   const [bulkPhotoSubsetItems, setBulkPhotoSubsetItems] = useState([])
@@ -3364,12 +3365,13 @@ function App() {
         .limit(10)
       if (catalogAdminFranchiseId) query = query.eq('collectible_set_id', catalogAdminFranchiseId)
       if (catalogAdminSubsetId) query = query.eq('subcollectble_set_id', catalogAdminSubsetId)
+      if (bulkPhotoPrintTypeId) query = query.eq('print_type_id', bulkPhotoPrintTypeId)
       const { data, error } = await query
       if (error) console.error('bulk photo search error:', error)
       setBulkPhotoManualResults(data || [])
     }, 250)
     return () => clearTimeout(timer)
-  }, [bulkPhotoMode, bulkPhotoManualSearch, bulkPhotoRows.length, catalogAdminFranchiseId, catalogAdminSubsetId])
+  }, [bulkPhotoMode, bulkPhotoManualSearch, bulkPhotoRows.length, catalogAdminFranchiseId, catalogAdminSubsetId, bulkPhotoPrintTypeId])
 
   // Edit panel: franchise cascade from subcategory
   useEffect(() => {
@@ -6267,9 +6269,10 @@ function App() {
     const position = bulkPhotoPosition
 
     let q = supabase.from('item_details')
-      .select('item_id, card_number, subject, collectible_set_id, subcollectble_set_id')
+      .select('item_id, card_number, subject, collectible_set_id, subcollectble_set_id, print_type_id')
       .eq('collectible_set_id', catalogAdminFranchiseId)
     if (catalogAdminSubsetId) q = q.eq('subcollectble_set_id', catalogAdminSubsetId)
+    if (bulkPhotoPrintTypeId) q = q.eq('print_type_id', bulkPhotoPrintTypeId)
     const { data: subsetItems } = await q
     const items = subsetItems || []
     setBulkPhotoSubsetItems(items)
@@ -6288,7 +6291,7 @@ function App() {
       matchType: null,
       extractedText: '',
       description: '',
-      print_type_id: '',
+      print_type_id: bulkPhotoPrintTypeId || '',
       hasExistingImage: false,
       status: 'pending',
       errorMsg: '',
@@ -11998,13 +12001,27 @@ function App() {
                             )}
                             </>) })()}
                           </div>
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Card Side</p>
+                          {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 && (
+                            <>
+                              <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Print Type</p>
+                              <select
+                                value={bulkPhotoPrintTypeId}
+                                onChange={e => setBulkPhotoPrintTypeId(e.target.value)}
+                                style={{ maxWidth: 280 }}
+                              >
+                                <option value="">All print types</option>
+                                {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                              </select>
+                              <p className="catalog-admin-hint" style={{ marginTop: 4, marginBottom: 0 }}>Selecting a print type filters card matching to that variant only.</p>
+                            </>
+                          )}
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>{CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 ? '3' : '2'}. Card Side</p>
                           <div className="bulk-photo-side-toggle">
                             <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 0 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(0)}>Front</button>
                             <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 1 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(1)}>Back</button>
                           </div>
                           <p className="catalog-admin-hint" style={{ marginTop: 6, marginBottom: 0 }}>OCR text will be pre-filled into the card's description — edit or clear it during review before approving.</p>
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>3. Upload Folder of Images</p>
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>{CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 ? '4' : '3'}. Upload Folder of Images</p>
                           <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Images are OCR-scanned to match subject name. You approve or deny each match before saving.</p>
                           <label className={`bulk-import-upload-area${!catalogAdminFranchiseId ? ' bulk-import-upload-area--disabled' : ''}`}>
                             <input
@@ -12036,7 +12053,7 @@ function App() {
                           <div className="bulk-photo-skipped-review">
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                               <p className="catalog-admin-section-title" style={{ margin: 0 }}>Step 3 of 3 — Review</p>
-                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Start Over</button>
+                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null); setBulkPhotoPrintTypeId('') }}>Start Over</button>
                             </div>
                             <p className="catalog-admin-hint" style={{ marginBottom: 12 }}>
                               {saved.length} saved{errors.length > 0 ? `, ${errors.length} errors` : ''}{skipped.length > 0 ? `, ${skipped.length} skipped` : ''}
@@ -12129,7 +12146,7 @@ function App() {
                                     Next: Update Existing Photos →
                                   </button>
                                 )}
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Start Over</button>
+                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null); setBulkPhotoPrintTypeId('') }}>Start Over</button>
                               </div>
                             </div>
                             <div className="bulk-import-split">
@@ -12203,18 +12220,6 @@ function App() {
                                           </div>
                                         )}
                                       </div>
-                                      {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
-                                        <div className="bulk-import-editor-field">
-                                          <label>Print Type</label>
-                                          <select
-                                            value={cur.print_type_id || ''}
-                                            onChange={e => updateBulkPhotoRow(bulkPhotoIdx, { print_type_id: e.target.value })}
-                                          >
-                                            <option value="">None</option>
-                                            {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                          </select>
-                                        </div>
-                                      )}
                                       <div className="bulk-import-editor-field bulk-import-editor-field--wide">
                                         <label>Description <span className="catalog-admin-hint">(from OCR — edit or clear before approving)</span></label>
                                         <textarea
