@@ -3375,10 +3375,10 @@ function App() {
     if (q.length < 2) { setBulkPhotoManualResults([]); return }
     const timer = setTimeout(async () => {
       let query = supabase.from('item_details')
-        .select('item_id, card_number, subject')
+        .select('item_id, card_number, subject, print_type')
         .ilike('subject', `%${q}%`)
         .order('subject')
-        .limit(10)
+        .limit(30)
       if (catalogAdminFranchiseId) query = query.eq('collectible_set_id', catalogAdminFranchiseId)
       if (catalogAdminSubsetId) query = query.eq('subcollectble_set_id', catalogAdminSubsetId)
       if (bulkPhotoPrintTypeId) query = query.eq('print_type_id', bulkPhotoPrintTypeId)
@@ -12184,7 +12184,9 @@ function App() {
                                        row.status === 'saved'    ? '✅' : '✗'}
                                     </span>
                                     <span className="bulk-import-row-label" style={{ fontSize: '0.75rem' }}>
-                                      {row.matchedItem ? row.matchedItem.subject || row.matchedItem.card_number || '?' : row.filename}
+                                      {row.matchedItem
+                                        ? [row.matchedItem.card_number ? `#${row.matchedItem.card_number}` : null, row.matchedItem.subject || null, row.matchedItem.print_type || null].filter(Boolean).join(' — ')
+                                        : row.filename}
                                     </span>
                                   </button>
                                 ))}
@@ -12207,6 +12209,7 @@ function App() {
                                           <span className="catalog-admin-subject-tag">
                                             {cur.matchedItem.card_number && <strong>#{cur.matchedItem.card_number}</strong>}
                                             {' '}{cur.matchedItem.subject || ''}
+                                            {cur.matchedItem.print_type && <span style={{ marginLeft: 4 }}>— {cur.matchedItem.print_type}</span>}
                                             <span className="catalog-admin-hint" style={{ marginLeft: 6 }}>{cur.matchType === 'manual' ? 'manual' : 'name match'}</span>
                                             <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: null, matchType: null }); setBulkPhotoManualSearch('') }}>✕</button>
                                           </span>
@@ -12228,6 +12231,7 @@ function App() {
                                                     onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: it, matchType: 'manual' }); setBulkPhotoManualSearch(''); setBulkPhotoManualResults([]) }}>
                                                     {it.card_number && <strong style={{ marginRight: 6 }}>#{it.card_number}</strong>}
                                                     <span style={{ textTransform: 'uppercase' }}>{it.subject || '—'}</span>
+                                                    {it.print_type && <span className="catalog-admin-hint" style={{ marginLeft: 6 }}>— {it.print_type}</span>}
                                                   </button>
                                                 ))}
                                               </div>
