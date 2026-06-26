@@ -85,6 +85,33 @@ const CATALOG_SUBCATEGORY_OPTIONS = {
 }
 const CARD_CONDITION_CATEGORIES = new Set(['Trading Cards', 'Sports Cards'])
 
+const PROFILE_ACHIEVEMENTS = [
+  // Collection size — copies
+  { id: 'first_item',   icon: '🎯', name: 'First Step',          desc: 'Add your first item',                         rarity: 'common',   check: s => s.totalItems >= 1 },
+  { id: 'ten_items',    icon: '📦', name: 'Getting Started',      desc: 'Collect 10 items',                            rarity: 'common',   check: s => s.totalItems >= 10 },
+  { id: 'fifty_items',  icon: '🏆', name: 'Dedicated Collector',  desc: 'Collect 50 items',                            rarity: 'uncommon', check: s => s.totalItems >= 50 },
+  { id: 'century',      icon: '⭐', name: 'Century Club',         desc: 'Collect 100 items',                           rarity: 'uncommon', check: s => s.totalItems >= 100 },
+  { id: 'five_hundred', icon: '💎', name: 'Serious Collector',    desc: 'Collect 500 items',                           rarity: 'rare',     check: s => s.totalItems >= 500 },
+  { id: 'one_thousand', icon: '👑', name: 'Master Collector',     desc: 'Collect 1,000 items',                         rarity: 'legendary',check: s => s.totalItems >= 1000 },
+  // Unique items
+  { id: 'unique_10',    icon: '🃏', name: 'Variety Pack',         desc: '10 unique items in the collection',           rarity: 'common',   check: s => s.uniqueItems >= 10 },
+  { id: 'unique_50',    icon: '🎨', name: "Collector's Eye",      desc: '50 unique items in the collection',           rarity: 'uncommon', check: s => s.uniqueItems >= 50 },
+  { id: 'unique_250',   icon: '🔭', name: 'Deep Diver',           desc: '250 unique items in the collection',          rarity: 'rare',     check: s => s.uniqueItems >= 250 },
+  // Value
+  { id: 'value_100',    icon: '💰', name: 'First Investment',     desc: 'Collection valued at $100+',                  rarity: 'common',   check: s => s.totalValue >= 100 },
+  { id: 'value_500',    icon: '💵', name: 'Big Spender',          desc: 'Collection valued at $500+',                  rarity: 'uncommon', check: s => s.totalValue >= 500 },
+  { id: 'value_1000',   icon: '🏦', name: 'High Roller',          desc: 'Collection valued at $1,000+',                rarity: 'rare',     check: s => s.totalValue >= 1000 },
+  { id: 'value_5000',   icon: '💸', name: 'Whale',                desc: 'Collection valued at $5,000+',                rarity: 'legendary',check: s => s.totalValue >= 5000 },
+  // Diversity
+  { id: 'diverse_2',    icon: '🌐', name: 'Branching Out',        desc: 'Collect items across 2 or more categories',   rarity: 'common',   check: s => s.categoryCount >= 2 },
+  { id: 'diverse_4',    icon: '🌍', name: 'Well Rounded',         desc: 'Collect items across 4 or more categories',   rarity: 'uncommon', check: s => s.categoryCount >= 4 },
+  { id: 'diverse_6',    icon: '🗺️',  name: 'Everything Collector', desc: 'Collect items across 6 or more categories',  rarity: 'rare',     check: s => s.categoryCount >= 6 },
+  // Grading
+  { id: 'graded_1',     icon: '🔬', name: 'Grade Conscious',      desc: 'Have at least one graded item',               rarity: 'uncommon', check: s => s.gradedCount >= 1 },
+  { id: 'graded_10',    icon: '🏅', name: 'Grading Pro',          desc: 'Have 10 or more graded items',                rarity: 'rare',     check: s => s.gradedCount >= 10 },
+  { id: 'graded_50',    icon: '🎖️', name: 'Grade Master',         desc: 'Have 50 or more graded items',                rarity: 'legendary',check: s => s.gradedCount >= 50 },
+]
+
 const CATEGORY_LABEL_OVERRIDES = {
   Music: {
     subcategory: 'Format',
@@ -2804,7 +2831,7 @@ function App() {
     setProfileIsLoading(true)
     const uid = currentUser.id
     Promise.all([
-      supabase.from('owned_copies').select('catalog_item_id, purchase_price, created_at', { count: 'exact' }).eq('user_id', uid),
+      supabase.from('owned_copies').select('catalog_item_id, purchase_price, grading_company, created_at', { count: 'exact' }).eq('user_id', uid),
       supabase.from('owned_copies')
         .select('catalog_item_id, created_at')
         .eq('user_id', uid)
@@ -2814,6 +2841,7 @@ function App() {
       const allRows = allRes.data || []
       const totalItems = allRes.count ?? allRows.length
       const totalValue = allRows.reduce((s, r) => s + (Number(r.purchase_price) || 0), 0)
+      const gradedCount = allRows.filter(r => r.grading_company).length
       const uniqueItemIds = [...new Set(allRows.map(r => r.catalog_item_id))]
 
       // Fetch item_details for recent items
@@ -2844,7 +2872,7 @@ function App() {
           .slice(0, 6)
       }
 
-      setProfileStats({ totalItems, totalValue, uniqueItems: uniqueItemIds.length, categoryBreakdown })
+      setProfileStats({ totalItems, totalValue, uniqueItems: uniqueItemIds.length, gradedCount, categoryCount: categoryBreakdown.length, categoryBreakdown })
       setProfileRecentItems(recentDetails)
       setProfileIsLoading(false)
     })
@@ -14096,26 +14124,56 @@ function App() {
                 ) : (
                   <>
                     {/* Stats strip */}
-                    <div className="profile-stats-strip">
-                      <div className="profile-stat">
-                        <span className="profile-stat-value">{profileStats?.totalItems?.toLocaleString() ?? '—'}</span>
-                        <span className="profile-stat-label">Total Copies</span>
-                      </div>
-                      <div className="profile-stat">
-                        <span className="profile-stat-value">{profileStats?.uniqueItems?.toLocaleString() ?? '—'}</span>
-                        <span className="profile-stat-label">Unique Items</span>
-                      </div>
-                      <div className="profile-stat">
-                        <span className="profile-stat-value">
-                          {profileStats?.totalValue != null
-                            ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : '—'}
-                        </span>
-                        <span className="profile-stat-label">Collection Value</span>
-                      </div>
-                      <div className="profile-stat">
-                        <span className="profile-stat-value">{profileStats?.categoryBreakdown?.length ?? '—'}</span>
-                        <span className="profile-stat-label">Categories</span>
+                    {(() => {
+                      const unlockedCount = profileStats
+                        ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
+                      return (
+                        <div className="profile-stats-strip">
+                          <div className="profile-stat">
+                            <span className="profile-stat-value">{profileStats?.totalItems?.toLocaleString() ?? '—'}</span>
+                            <span className="profile-stat-label">Total Copies</span>
+                          </div>
+                          <div className="profile-stat">
+                            <span className="profile-stat-value">{profileStats?.uniqueItems?.toLocaleString() ?? '—'}</span>
+                            <span className="profile-stat-label">Unique Items</span>
+                          </div>
+                          <div className="profile-stat">
+                            <span className="profile-stat-value">
+                              {profileStats?.totalValue != null
+                                ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : '—'}
+                            </span>
+                            <span className="profile-stat-label">Collection Value</span>
+                          </div>
+                          <div className="profile-stat">
+                            <span className="profile-stat-value">{unlockedCount} / {PROFILE_ACHIEVEMENTS.length}</span>
+                            <span className="profile-stat-label">Achievements</span>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Achievements */}
+                    <div className="profile-section">
+                      <h2 className="profile-section-title">Achievements</h2>
+                      <div className="profile-achievements-grid">
+                        {PROFILE_ACHIEVEMENTS.map(achievement => {
+                          const unlocked = profileStats ? achievement.check(profileStats) : false
+                          return (
+                            <div
+                              key={achievement.id}
+                              className={`profile-achievement-card profile-achievement-card--${achievement.rarity}${unlocked ? ' profile-achievement-card--unlocked' : ''}`}
+                              title={achievement.desc}
+                            >
+                              <div className="profile-achievement-icon">{unlocked ? achievement.icon : '🔒'}</div>
+                              <div className="profile-achievement-body">
+                                <div className="profile-achievement-name">{achievement.name}</div>
+                                <div className="profile-achievement-desc">{achievement.desc}</div>
+                              </div>
+                              {unlocked && <div className={`profile-achievement-rarity profile-achievement-rarity--${achievement.rarity}`}>{achievement.rarity}</div>}
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
 

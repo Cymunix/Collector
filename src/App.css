@@ -5586,6 +5586,93 @@ h2 {
   text-align: right;
 }
 
+/* Achievements grid */
+.profile-achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.profile-achievement-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(23, 37, 61, 0.1);
+  background: rgba(23, 37, 61, 0.04);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.profile-achievement-card--unlocked {
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.profile-achievement-card--unlocked:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* Rarity accent border */
+.profile-achievement-card--unlocked.profile-achievement-card--common    { border-color: rgba(100, 180, 100, 0.5); }
+.profile-achievement-card--unlocked.profile-achievement-card--uncommon  { border-color: rgba(94, 197, 255, 0.5); }
+.profile-achievement-card--unlocked.profile-achievement-card--rare      { border-color: rgba(148, 103, 255, 0.5); }
+.profile-achievement-card--unlocked.profile-achievement-card--legendary { border-color: rgba(255, 185, 0, 0.6); box-shadow: 0 0 12px rgba(255, 185, 0, 0.15); }
+
+/* Locked state */
+.profile-achievement-card:not(.profile-achievement-card--unlocked) {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.profile-achievement-icon {
+  font-size: 1.7rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.profile-achievement-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-achievement-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #17253d;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-achievement-desc {
+  font-size: 0.72rem;
+  color: #8898b0;
+  line-height: 1.35;
+}
+
+.profile-achievement-rarity {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.profile-achievement-rarity--common    { background: rgba(100, 180, 100, 0.15); color: #3a9a50; }
+.profile-achievement-rarity--uncommon  { background: rgba(94, 197, 255, 0.15);  color: #2a9fd0; }
+.profile-achievement-rarity--rare      { background: rgba(148, 103, 255, 0.15); color: #7b4fcf; }
+.profile-achievement-rarity--legendary { background: rgba(255, 185, 0, 0.18);   color: #b8800a; }
+
 /* Recent items grid */
 .profile-recent-grid {
   display: grid;
