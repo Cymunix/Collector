@@ -86,30 +86,56 @@ const CATALOG_SUBCATEGORY_OPTIONS = {
 const CARD_CONDITION_CATEGORIES = new Set(['Trading Cards', 'Sports Cards'])
 
 const PROFILE_ACHIEVEMENTS = [
-  // Collection size — copies
-  { id: 'first_item',   icon: '🎯', name: 'First Step',          desc: 'Add your first item',                         rarity: 'common',   check: s => s.totalItems >= 1 },
-  { id: 'ten_items',    icon: '📦', name: 'Getting Started',      desc: 'Collect 10 items',                            rarity: 'common',   check: s => s.totalItems >= 10 },
-  { id: 'fifty_items',  icon: '🏆', name: 'Dedicated Collector',  desc: 'Collect 50 items',                            rarity: 'uncommon', check: s => s.totalItems >= 50 },
-  { id: 'century',      icon: '⭐', name: 'Century Club',         desc: 'Collect 100 items',                           rarity: 'uncommon', check: s => s.totalItems >= 100 },
-  { id: 'five_hundred', icon: '💎', name: 'Serious Collector',    desc: 'Collect 500 items',                           rarity: 'rare',     check: s => s.totalItems >= 500 },
-  { id: 'one_thousand', icon: '👑', name: 'Master Collector',     desc: 'Collect 1,000 items',                         rarity: 'legendary',check: s => s.totalItems >= 1000 },
-  // Unique items
-  { id: 'unique_10',    icon: '🃏', name: 'Variety Pack',         desc: '10 unique items in the collection',           rarity: 'common',   check: s => s.uniqueItems >= 10 },
-  { id: 'unique_50',    icon: '🎨', name: "Collector's Eye",      desc: '50 unique items in the collection',           rarity: 'uncommon', check: s => s.uniqueItems >= 50 },
-  { id: 'unique_250',   icon: '🔭', name: 'Deep Diver',           desc: '250 unique items in the collection',          rarity: 'rare',     check: s => s.uniqueItems >= 250 },
-  // Value
-  { id: 'value_100',    icon: '💰', name: 'First Investment',     desc: 'Collection valued at $100+',                  rarity: 'common',   check: s => s.totalValue >= 100 },
-  { id: 'value_500',    icon: '💵', name: 'Big Spender',          desc: 'Collection valued at $500+',                  rarity: 'uncommon', check: s => s.totalValue >= 500 },
-  { id: 'value_1000',   icon: '🏦', name: 'High Roller',          desc: 'Collection valued at $1,000+',                rarity: 'rare',     check: s => s.totalValue >= 1000 },
-  { id: 'value_5000',   icon: '💸', name: 'Whale',                desc: 'Collection valued at $5,000+',                rarity: 'legendary',check: s => s.totalValue >= 5000 },
-  // Diversity
-  { id: 'diverse_2',    icon: '🌐', name: 'Branching Out',        desc: 'Collect items across 2 or more categories',   rarity: 'common',   check: s => s.categoryCount >= 2 },
-  { id: 'diverse_4',    icon: '🌍', name: 'Well Rounded',         desc: 'Collect items across 4 or more categories',   rarity: 'uncommon', check: s => s.categoryCount >= 4 },
-  { id: 'diverse_6',    icon: '🗺️',  name: 'Everything Collector', desc: 'Collect items across 6 or more categories',  rarity: 'rare',     check: s => s.categoryCount >= 6 },
-  // Grading
-  { id: 'graded_1',     icon: '🔬', name: 'Grade Conscious',      desc: 'Have at least one graded item',               rarity: 'uncommon', check: s => s.gradedCount >= 1 },
-  { id: 'graded_10',    icon: '🏅', name: 'Grading Pro',          desc: 'Have 10 or more graded items',                rarity: 'rare',     check: s => s.gradedCount >= 10 },
-  { id: 'graded_50',    icon: '🎖️', name: 'Grade Master',         desc: 'Have 50 or more graded items',                rarity: 'legendary',check: s => s.gradedCount >= 50 },
+  // §1 Collection Milestones — total copies
+  { id: 'first_step',       icon: '🎯', name: 'First Step',           desc: 'Add your first item',               rarity: 'common',    group: 'Collection', check: s => s.totalItems >= 1 },
+  { id: 'getting_started',  icon: '📦', name: 'Getting Started',      desc: 'Collect 10 items',                  rarity: 'common',    group: 'Collection', check: s => s.totalItems >= 10 },
+  { id: 'dedicated',        icon: '🏆', name: 'Dedicated Collector',  desc: 'Collect 50 items',                  rarity: 'uncommon',  group: 'Collection', check: s => s.totalItems >= 50 },
+  { id: 'century_club',     icon: '⭐', name: 'Century Club',          desc: 'Collect 100 items',                 rarity: 'uncommon',  group: 'Collection', check: s => s.totalItems >= 100 },
+  { id: 'serious',          icon: '💎', name: 'Serious Collector',    desc: 'Collect 500 items',                 rarity: 'rare',      group: 'Collection', check: s => s.totalItems >= 500 },
+  { id: 'master_collector', icon: '👑', name: 'Master Collector',     desc: 'Collect 1,000 items',               rarity: 'epic',      group: 'Collection', check: s => s.totalItems >= 1000 },
+  { id: 'hoarder',          icon: '🐉', name: 'Hoarder',              desc: 'Collect 5,000 items',               rarity: 'legendary', group: 'Collection', check: s => s.totalItems >= 5000 },
+  // §2 Unique Items
+  { id: 'variety_pack',     icon: '🃏', name: 'Variety Pack',         desc: '10 unique items',                   rarity: 'common',    group: 'Collection', check: s => s.uniqueItems >= 10 },
+  { id: 'collectors_eye',   icon: '🎨', name: "Collector's Eye",      desc: '50 unique items',                   rarity: 'uncommon',  group: 'Collection', check: s => s.uniqueItems >= 50 },
+  { id: 'deep_diver',       icon: '🔭', name: 'Deep Diver',           desc: '250 unique items',                  rarity: 'uncommon',  group: 'Collection', check: s => s.uniqueItems >= 250 },
+  { id: 'connoisseur',      icon: '🏛️', name: 'Connoisseur',          desc: '1,000 unique items',                rarity: 'epic',      group: 'Collection', check: s => s.uniqueItems >= 1000 },
+  // §3 Collection Value
+  { id: 'first_invest',     icon: '💰', name: 'First Investment',     desc: 'Collection valued at $100+',        rarity: 'common',    group: 'Value',      check: s => s.totalValue >= 100 },
+  { id: 'big_spender',      icon: '💵', name: 'Big Spender',          desc: 'Collection valued at $500+',        rarity: 'uncommon',  group: 'Value',      check: s => s.totalValue >= 500 },
+  { id: 'high_roller',      icon: '🏦', name: 'High Roller',          desc: 'Collection valued at $1,000+',      rarity: 'uncommon',  group: 'Value',      check: s => s.totalValue >= 1000 },
+  { id: 'whale',            icon: '💸', name: 'Whale',                desc: 'Collection valued at $5,000+',      rarity: 'rare',      group: 'Value',      check: s => s.totalValue >= 5000 },
+  { id: 'vault_keeper',     icon: '🏰', name: 'Vault Keeper',         desc: 'Collection valued at $25,000+',     rarity: 'legendary', group: 'Value',      check: s => s.totalValue >= 25000 },
+  // §4 Grading
+  { id: 'grade_conscious',  icon: '🔬', name: 'Grade Conscious',      desc: '1+ graded item',                    rarity: 'common',    group: 'Grading',    check: s => s.gradedCount >= 1 },
+  { id: 'grading_pro',      icon: '🏅', name: 'Grading Pro',          desc: '10+ graded items',                  rarity: 'uncommon',  group: 'Grading',    check: s => s.gradedCount >= 10 },
+  { id: 'grade_master',     icon: '🎖️', name: 'Grade Master',         desc: '50+ graded items',                  rarity: 'rare',      group: 'Grading',    check: s => s.gradedCount >= 50 },
+  { id: 'gem_mint',         icon: '💍', name: 'Gem Mint',             desc: 'Own a PSA 10 / top-grade item',     rarity: 'epic',      group: 'Grading',    check: s => s.gemMintCount >= 1 },
+  // §5 Category Breadth
+  { id: 'branching_out',    icon: '🌐', name: 'Branching Out',        desc: 'Items in 2+ categories',            rarity: 'common',    group: 'Diversity',  check: s => s.categoryCount >= 2 },
+  { id: 'well_rounded',     icon: '🌍', name: 'Well Rounded',         desc: 'Items in 4+ categories',            rarity: 'uncommon',  group: 'Diversity',  check: s => s.categoryCount >= 4 },
+  { id: 'everything',       icon: '🗺️', name: 'Everything Collector', desc: 'Items in 6+ categories',            rarity: 'rare',      group: 'Diversity',  check: s => s.categoryCount >= 6 },
+  // §6 Set Completion
+  { id: 'set_builder',      icon: '🧱', name: 'Set Builder',          desc: '25% of any base set',               rarity: 'common',    group: 'Sets',       check: s => s.maxSetPct >= 25 },
+  { id: 'halfway_there',    icon: '🎪', name: 'Halfway There',        desc: '50% of any base set',               rarity: 'uncommon',  group: 'Sets',       check: s => s.maxSetPct >= 50 },
+  { id: 'almost_home',      icon: '🏁', name: 'Almost Home',          desc: '75% of any base set',               rarity: 'rare',      group: 'Sets',       check: s => s.maxSetPct >= 75 },
+  { id: 'set_complete',     icon: '✅', name: 'Set Complete',          desc: 'Complete 100% of any base set',     rarity: 'epic',      group: 'Sets',       check: s => s.maxSetPct >= 100 },
+  // §7 Rainbow / Parallels
+  { id: 'color_started',    icon: '🌈', name: 'Color Started',        desc: '3+ parallels of one card',          rarity: 'common',    group: 'Rainbow',    check: s => s.maxParallels >= 3 },
+  { id: 'rainbow_chaser',   icon: '🌠', name: 'Rainbow Chaser',       desc: '7+ parallels of one card',          rarity: 'rare',      group: 'Rainbow',    check: s => s.maxParallels >= 7 },
+  { id: 'full_rainbow',     icon: '🔮', name: 'Full Rainbow',         desc: 'Every parallel of one card',        rarity: 'legendary', group: 'Rainbow',    check: s => s.fullRainbow >= 1 },
+  // §8 Chase / Scarcity
+  { id: 'numbered',         icon: '🔢', name: 'Numbered',             desc: 'Own a serial-numbered card',        rarity: 'common',    group: 'Chase',      check: s => s.numberedCount >= 1 },
+  { id: 'low_pop',          icon: '🦄', name: 'Low Pop',              desc: 'Own a card /25 or scarcer',         rarity: 'rare',      group: 'Chase',      check: s => s.lowPopCount >= 1 },
+  { id: 'one_of_one',       icon: '🥇', name: 'One of One',           desc: 'Own a 1-of-1',                      rarity: 'legendary', group: 'Chase',      check: s => s.oneOfOneCount >= 1 },
+  // §9 Rookies
+  { id: 'rookie_hound',     icon: '🐶', name: 'Rookie Hound',         desc: 'Own 10 rookies',                    rarity: 'common',    group: 'Rookies',    check: s => s.rookieCount >= 10 },
+  { id: 'class_of',         icon: '🎓', name: 'Class Of',             desc: 'Own 50 rookies',                    rarity: 'uncommon',  group: 'Rookies',    check: s => s.rookieCount >= 50 },
+  // §10 Depth in One Set
+  { id: 'getting_deep',     icon: '📚', name: 'Getting Deep',         desc: '25 cards from a single set',        rarity: 'common',    group: 'Sets',       check: s => s.maxSetDepth >= 25 },
+  { id: 'set_specialist',   icon: '🔍', name: 'Set Specialist',       desc: '100 cards from a single set',       rarity: 'rare',      group: 'Sets',       check: s => s.maxSetDepth >= 100 },
+  // §11 Wishlist
+  { id: 'making_a_list',    icon: '📋', name: 'Making a List',        desc: 'Add your first want',               rarity: 'common',    group: 'Wishlist',   check: s => s.wishlistCount >= 1 },
+  { id: 'want_it_all',      icon: '🛒', name: 'Want It All',          desc: 'Want-list of 50 items',             rarity: 'uncommon',  group: 'Wishlist',   check: s => s.wishlistCount >= 50 },
 ]
 
 const CATEGORY_LABEL_OVERRIDES = {
@@ -2830,21 +2856,100 @@ function App() {
     if (currentScreen !== 'profile' || !currentUser) return
     setProfileIsLoading(true)
     const uid = currentUser.id
-    Promise.all([
-      supabase.from('owned_copies').select('catalog_item_id, purchase_price, grading_company, created_at', { count: 'exact' }).eq('user_id', uid),
-      supabase.from('owned_copies')
-        .select('catalog_item_id, created_at')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false })
-        .limit(12),
-    ]).then(async ([allRes, recentRes]) => {
+
+    const loadProfileData = async () => {
+      // 1. All owned copies (grading, value, count)
+      const [allRes, recentRes] = await Promise.all([
+        supabase.from('owned_copies')
+          .select('catalog_item_id, purchase_price, grading_company, grade', { count: 'exact' })
+          .eq('user_id', uid),
+        supabase.from('owned_copies')
+          .select('catalog_item_id, created_at')
+          .eq('user_id', uid)
+          .order('created_at', { ascending: false })
+          .limit(12),
+      ])
       const allRows = allRes.data || []
       const totalItems = allRes.count ?? allRows.length
       const totalValue = allRows.reduce((s, r) => s + (Number(r.purchase_price) || 0), 0)
       const gradedCount = allRows.filter(r => r.grading_company).length
+      const gemMintCount = allRows.filter(r => r.grade === '10' || (r.grade || '').toLowerCase().startsWith('gem')).length
       const uniqueItemIds = [...new Set(allRows.map(r => r.catalog_item_id))]
 
-      // Fetch item_details for recent items
+      // 2. Item details for all unique owned items (batched, for stats)
+      let detailRows = []
+      if (uniqueItemIds.length) {
+        for (let i = 0; i < uniqueItemIds.length; i += 500) {
+          const chunk = uniqueItemIds.slice(i, i + 500)
+          const { data } = await supabase.from('item_details')
+            .select('item_id, category_id, collectible_set_id, card_number, print_count')
+            .in('item_id', chunk)
+          detailRows.push(...(data || []))
+        }
+      }
+
+      // Category breakdown
+      const catCount = {}
+      detailRows.forEach(r => { if (r.category_id) catCount[r.category_id] = (catCount[r.category_id] || 0) + 1 })
+      const categoryBreakdown = Object.entries(catCount).sort((a, b) => b[1] - a[1]).slice(0, 6)
+
+      // Set depth: group by collectible_set_id → max count in any one set
+      const setCountMap = {}
+      detailRows.forEach(r => { if (r.collectible_set_id) setCountMap[r.collectible_set_id] = (setCountMap[r.collectible_set_id] || 0) + 1 })
+      const setDepthValues = Object.values(setCountMap)
+      const maxSetDepth = setDepthValues.length ? Math.max(...setDepthValues) : 0
+
+      // Parallels: group by (set, card_number) → max variants of same position
+      const posMap = {}
+      detailRows.forEach(r => {
+        if (!r.collectible_set_id || !r.card_number) return
+        const key = `${r.collectible_set_id}::${r.card_number}`
+        posMap[key] = (posMap[key] || 0) + 1
+      })
+      const posValues = Object.values(posMap)
+      const maxParallels = posValues.length ? Math.max(...posValues) : 0
+
+      // Serial-numbered (print_count on the catalog item)
+      const numberedCount = detailRows.filter(r => r.print_count != null && r.print_count > 1).length
+      const lowPopCount   = detailRows.filter(r => r.print_count != null && r.print_count <= 25).length
+      const oneOfOneCount = detailRows.filter(r => r.print_count === 1).length
+
+      // Set completion %: check top 5 sets by owned count against catalog total
+      let maxSetPct = 0
+      const topSets = Object.entries(setCountMap).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      await Promise.all(topSets.map(async ([setId, ownedCount]) => {
+        const { count: total } = await supabase.from('item_details')
+          .select('item_id', { count: 'exact', head: true })
+          .eq('collectible_set_id', setId)
+        if (total > 0) {
+          const pct = Math.min(100, Math.round((ownedCount / total) * 100))
+          if (pct > maxSetPct) maxSetPct = pct
+        }
+      }))
+
+      // Wishlist count
+      const { count: wishlistCount } = await supabase.from('wishlist_items')
+        .select('*', { count: 'exact', head: true }).eq('user_id', uid)
+
+      // Rookie count: find Rookie card_type_ids then intersect with owned items
+      let rookieCount = 0
+      if (uniqueItemIds.length) {
+        const { data: rookieTypes } = await supabase.from('card_types')
+          .select('card_type_id').ilike('name', '%Rookie%')
+        if (rookieTypes?.length) {
+          const rtIds = rookieTypes.map(r => r.card_type_id)
+          const rookieItemIds = new Set()
+          for (let i = 0; i < uniqueItemIds.length; i += 500) {
+            const chunk = uniqueItemIds.slice(i, i + 500)
+            const { data: ict } = await supabase.from('item_card_types')
+              .select('item_id').in('item_id', chunk).in('card_type_id', rtIds)
+            ;(ict || []).forEach(r => rookieItemIds.add(r.item_id))
+          }
+          rookieCount = rookieItemIds.size
+        }
+      }
+
+      // Recent items display details
       const recentIds = (recentRes.data || []).map(r => r.catalog_item_id)
       let recentDetails = []
       if (recentIds.length) {
@@ -2853,29 +2958,22 @@ function App() {
           .in('item_id', recentIds)
         const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
         recentDetails = (recentRes.data || []).map(r => ({
-          ...r,
-          ...detById[r.catalog_item_id],
-          item_id: r.catalog_item_id,
+          ...r, ...detById[r.catalog_item_id], item_id: r.catalog_item_id,
         }))
       }
 
-      // Category breakdown
-      let categoryBreakdown = []
-      if (uniqueItemIds.length) {
-        const { data: catRows } = await supabase.from('item_details')
-          .select('item_id, category_id')
-          .in('item_id', uniqueItemIds)
-        const catCount = {}
-        ;(catRows || []).forEach(r => { catCount[r.category_id] = (catCount[r.category_id] || 0) + 1 })
-        categoryBreakdown = Object.entries(catCount)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 6)
-      }
-
-      setProfileStats({ totalItems, totalValue, uniqueItems: uniqueItemIds.length, gradedCount, categoryCount: categoryBreakdown.length, categoryBreakdown })
+      setProfileStats({
+        totalItems, totalValue, gradedCount, gemMintCount,
+        uniqueItems: uniqueItemIds.length, categoryCount: categoryBreakdown.length, categoryBreakdown,
+        maxSetDepth, maxParallels, numberedCount, lowPopCount, oneOfOneCount, maxSetPct,
+        wishlistCount: wishlistCount || 0, rookieCount,
+        fullRainbow: 0,
+      })
       setProfileRecentItems(recentDetails)
       setProfileIsLoading(false)
-    })
+    }
+
+    loadProfileData()
   }, [currentScreen, currentUser])
 
   useEffect(() => {
@@ -14155,26 +14253,42 @@ function App() {
 
                     {/* Achievements */}
                     <div className="profile-section">
-                      <h2 className="profile-section-title">Achievements</h2>
-                      <div className="profile-achievements-grid">
-                        {PROFILE_ACHIEVEMENTS.map(achievement => {
-                          const unlocked = profileStats ? achievement.check(profileStats) : false
-                          return (
-                            <div
-                              key={achievement.id}
-                              className={`profile-achievement-card profile-achievement-card--${achievement.rarity}${unlocked ? ' profile-achievement-card--unlocked' : ''}`}
-                              title={achievement.desc}
-                            >
-                              <div className="profile-achievement-icon">{unlocked ? achievement.icon : '🔒'}</div>
-                              <div className="profile-achievement-body">
-                                <div className="profile-achievement-name">{achievement.name}</div>
-                                <div className="profile-achievement-desc">{achievement.desc}</div>
-                              </div>
-                              {unlocked && <div className={`profile-achievement-rarity profile-achievement-rarity--${achievement.rarity}`}>{achievement.rarity}</div>}
-                            </div>
-                          )
-                        })}
-                      </div>
+                      {(() => {
+                        const unlockedCount = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
+                        const groups = [...new Set(PROFILE_ACHIEVEMENTS.map(a => a.group))]
+                        return (
+                          <>
+                            <h2 className="profile-section-title">Achievements — {unlockedCount} / {PROFILE_ACHIEVEMENTS.length} Unlocked</h2>
+                            {groups.map(group => {
+                              const groupAchievements = PROFILE_ACHIEVEMENTS.filter(a => a.group === group)
+                              return (
+                                <div key={group} className="profile-achievement-group">
+                                  <div className="profile-achievement-group-label">{group}</div>
+                                  <div className="profile-achievements-grid">
+                                    {groupAchievements.map(achievement => {
+                                      const unlocked = profileStats ? achievement.check(profileStats) : false
+                                      return (
+                                        <div
+                                          key={achievement.id}
+                                          className={`profile-achievement-card profile-achievement-card--${achievement.rarity}${unlocked ? ' profile-achievement-card--unlocked' : ''}`}
+                                          title={achievement.desc}
+                                        >
+                                          <div className="profile-achievement-icon">{unlocked ? achievement.icon : '🔒'}</div>
+                                          <div className="profile-achievement-body">
+                                            <div className="profile-achievement-name">{achievement.name}</div>
+                                            <div className="profile-achievement-desc">{achievement.desc}</div>
+                                          </div>
+                                          {unlocked && <div className={`profile-achievement-rarity profile-achievement-rarity--${achievement.rarity}`}>{achievement.rarity}</div>}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </>
+                        )
+                      })()}
                     </div>
 
                     {/* Category breakdown */}

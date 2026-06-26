@@ -5587,6 +5587,19 @@ h2 {
 }
 
 /* Achievements grid */
+.profile-achievement-group {
+  margin-bottom: 20px;
+}
+
+.profile-achievement-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8898b0;
+  margin-bottom: 8px;
+}
+
 .profile-achievements-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
