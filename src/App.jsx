@@ -5975,6 +5975,7 @@ function App() {
     const iRb       = col(['rebrickable_fig_id','rebrickable_id','rebrickable','rb_id','fig_num'])
     const iPieces      = col(['piece_count','pieces','parts','num_parts'])
     const iPrintCount  = col(['print_count','print_run'])
+    const iPrintType   = col(['print_type','print_type_name','variant'])
     const iDesc        = col(['description','desc','notes'])
     const iUpc         = col(['upc','barcode'])
     const iYear     = col(['release_year','year'])
@@ -6000,6 +6001,7 @@ function App() {
         release_year: g(iYear),
         subcollectble_set_id: '',
         print_type_id: '',
+        print_type_name: g(iPrintType),
         card_type_ids: [],
         card_treatment_names: g(iTreatments),
         rarity_id: '',
@@ -6073,6 +6075,30 @@ function App() {
           const ids = r.card_treatment_names.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
             .map(n => treatmentByName.get(n)).filter(Boolean)
           return ids.length ? { ...r, card_type_ids: [...new Set([...(r.card_type_ids || []), ...ids])] } : r
+        })
+      }
+      // Auto-match and auto-create print types from CSV print_type column
+      const ptNames = [...new Set(rows.map(r => r.print_type_name).filter(Boolean))]
+      if (ptNames.length > 0) {
+        const subsetId = catalogAdminSubsetId || null
+        const existingByName = new Map(catalogAdminPrintTypes.map(pt => [pt.name.toLowerCase(), pt.id]))
+        const missingNames = ptNames.filter(n => !existingByName.has(n.toLowerCase()))
+        if (missingNames.length > 0) {
+          const { data: newPts } = await supabase.from('print_types')
+            .insert(missingNames.map(name => ({ name, subcollectble_set_id: subsetId })))
+            .select('print_type_id, name')
+          if (newPts?.length) {
+            newPts.forEach(pt => existingByName.set(pt.name.toLowerCase(), pt.print_type_id))
+            setCatalogAdminPrintTypes(prev =>
+              [...prev, ...newPts.map(pt => ({ id: pt.print_type_id, name: pt.name }))]
+                .sort((a, b) => a.name.localeCompare(b.name))
+            )
+          }
+        }
+        rows = rows.map(r => {
+          if (!r.print_type_name) return r
+          const id = existingByName.get(r.print_type_name.toLowerCase())
+          return id ? { ...r, print_type_id: id } : r
         })
       }
       setBulkImportRows(rows)
