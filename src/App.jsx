@@ -6288,6 +6288,7 @@ function App() {
       matchType: null,
       extractedText: '',
       description: '',
+      print_type_id: '',
       hasExistingImage: false,
       status: 'pending',
       errorMsg: '',
@@ -6372,8 +6373,11 @@ function App() {
         const { error: upErr } = await supabase.storage.from('item-images').upload(path, row.file)
         if (upErr) { updateBulkPhotoRow(row._origIdx, { status: 'error', errorMsg: upErr.message }); continue }
         await supabase.from('item_images').insert({ item_id, image_path: path, position: pos })
-        if (row.description?.trim()) {
-          await supabase.from('items').update({ description: row.description.trim() }).eq('item_id', item_id)
+        const itemUpdate = {}
+        if (row.description?.trim()) itemUpdate.description = row.description.trim()
+        if (row.print_type_id) itemUpdate.print_type_id = row.print_type_id
+        if (Object.keys(itemUpdate).length) {
+          await supabase.from('items').update(itemUpdate).eq('item_id', item_id)
         }
         updateBulkPhotoRow(row._origIdx, { status: 'saved' })
         saved++
@@ -12199,6 +12203,18 @@ function App() {
                                           </div>
                                         )}
                                       </div>
+                                      {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
+                                        <div className="bulk-import-editor-field">
+                                          <label>Print Type</label>
+                                          <select
+                                            value={cur.print_type_id || ''}
+                                            onChange={e => updateBulkPhotoRow(bulkPhotoIdx, { print_type_id: e.target.value })}
+                                          >
+                                            <option value="">None</option>
+                                            {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                          </select>
+                                        </div>
+                                      )}
                                       <div className="bulk-import-editor-field bulk-import-editor-field--wide">
                                         <label>Description <span className="catalog-admin-hint">(from OCR — edit or clear before approving)</span></label>
                                         <textarea
