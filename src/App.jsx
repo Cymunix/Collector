@@ -2748,12 +2748,12 @@ function App() {
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
           .in('subject_id', subjectIds).ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
         const seen = new Set()
-        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name) ? false : seen.add(r.subject_name)).map(r => ({ id: r.subject_id, name: r.subject_name })))
+        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name.toLowerCase()) ? false : seen.add(r.subject_name.toLowerCase())).map(r => ({ id: r.subject_id, name: r.subject_name })))
       } else {
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
           .ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
         const seen = new Set()
-        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name) ? false : seen.add(r.subject_name)).map(r => ({ id: r.subject_id, name: r.subject_name })))
+        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name.toLowerCase()) ? false : seen.add(r.subject_name.toLowerCase())).map(r => ({ id: r.subject_id, name: r.subject_name })))
       }
       setCatalogSubjectSearching(false)
     }, 250)
@@ -2836,7 +2836,7 @@ function App() {
         const selectedName = catalogSubjectSearch.trim()
         let allSubjectIds = [catalogSubjectId]
         if (selectedName) {
-          const { data: nameRows } = await supabase.from('subjects').select('subject_id').eq('subject_name', selectedName)
+          const { data: nameRows } = await supabase.from('subjects').select('subject_id').ilike('subject_name', selectedName)
           if (nameRows?.length) allSubjectIds = nameRows.map(r => r.subject_id)
         }
         const { data: subjectRows } = await supabase.from('item_subjects').select('item_id').in('subject_id', allSubjectIds)
