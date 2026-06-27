@@ -1687,6 +1687,8 @@ function App() {
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
   const [catalogItemImages, setCatalogItemImages] = useState([])
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
+  const [catalogDetailTeams, setCatalogDetailTeams] = useState([])
+  const [catalogDetailCardTypes, setCatalogDetailCardTypes] = useState([])
   const [isCatalogItemEditMode, setIsCatalogItemEditMode] = useState(false)
   const [catalogItemEditValues, setCatalogItemEditValues] = useState({})
   const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [] })
@@ -1722,6 +1724,17 @@ function App() {
   const [bulkPhotoPrintTypeId, setBulkPhotoPrintTypeId] = useState('')
   const [profileStats, setProfileStats] = useState(null)
   const [profileRecentItems, setProfileRecentItems] = useState([])
+  const [profileMostValuable, setProfileMostValuable] = useState([])
+  const [catalogItemOrigin, setCatalogItemOrigin] = useState('catalog')
+  const [quickAddMode, setQuickAddMode] = useState('')
+  const [quickAddPrice, setQuickAddPrice] = useState('')
+  const [profileFriends, setProfileFriends] = useState([])
+  const [profileFriendRequests, setProfileFriendRequests] = useState([])
+  const [profileSentToIds, setProfileSentToIds] = useState(new Set())
+  const [friendSearchQuery, setFriendSearchQuery] = useState('')
+  const [friendSearchResults, setFriendSearchResults] = useState([])
+  const [friendSearchLoading, setFriendSearchLoading] = useState(false)
+  const [isFriendSearchOpen, setIsFriendSearchOpen] = useState(false)
   const [profileIsLoading, setProfileIsLoading] = useState(false)
   const [bulkPhotoAnalyzing, setBulkPhotoAnalyzing] = useState(false)
   const [bulkPhotoAnalyzeProgress, setBulkPhotoAnalyzeProgress] = useState({ done: 0, total: 0 })
@@ -2859,7 +2872,7 @@ function App() {
 
     const loadProfileData = async () => {
       // 1. All owned copies (grading, value, count)
-      const [allRes, recentRes] = await Promise.all([
+      const [allRes, recentRes, valuableRes] = await Promise.all([
         supabase.from('owned_copies')
           .select('catalog_item_id, purchase_price, grading_company, grade', { count: 'exact' })
           .eq('user_id', uid),
@@ -2867,6 +2880,13 @@ function App() {
           .select('catalog_item_id, created_at')
           .eq('user_id', uid)
           .order('created_at', { ascending: false })
+          .limit(12),
+        supabase.from('owned_copies')
+          .select('catalog_item_id, purchase_price')
+          .eq('user_id', uid)
+          .not('purchase_price', 'is', null)
+          .gt('purchase_price', 0)
+          .order('purchase_price', { ascending: false })
           .limit(12),
       ])
       const allRows = allRes.data || []
@@ -2949,15 +2969,22 @@ function App() {
         }
       }
 
-      // Recent items display details
-      const recentIds = (recentRes.data || []).map(r => r.catalog_item_id)
+      // Recent + most valuable — fetch item_details for both in one pass
+      const recentIds   = (recentRes.data || []).map(r => r.catalog_item_id)
+      const valuableIds = (valuableRes.data || []).map(r => r.catalog_item_id)
+      const allDisplayIds = [...new Set([...recentIds, ...valuableIds])]
+
       let recentDetails = []
-      if (recentIds.length) {
+      let valuableDetails = []
+      if (allDisplayIds.length) {
         const { data: det } = await supabase.from('item_details')
-          .select('item_id, subject, print_type, card_number, front_image_path, collectible_set')
-          .in('item_id', recentIds)
+          .select('item_id, subject, print_type, card_number, front_image_path, collectible_set, category_id, subcategory_id, collectible_set_id, brand_id, franchise_id, description, release_year')
+          .in('item_id', allDisplayIds)
         const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
         recentDetails = (recentRes.data || []).map(r => ({
+          ...r, ...detById[r.catalog_item_id], item_id: r.catalog_item_id,
+        }))
+        valuableDetails = (valuableRes.data || []).map(r => ({
           ...r, ...detById[r.catalog_item_id], item_id: r.catalog_item_id,
         }))
       }
@@ -2970,6 +2997,32 @@ function App() {
         fullRainbow: 0,
       })
       setProfileRecentItems(recentDetails)
+      setProfileMostValuable(valuableDetails)
+
+      // Friends
+      const { data: myFriendships } = await supabase
+        .from('friendships')
+        .select('id, requester_id, addressee_id, status')
+        .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
+      if (myFriendships) {
+        const accepted = myFriendships.filter(f => f.status === 'accepted')
+        const incoming = myFriendships.filter(f => f.status === 'pending' && f.addressee_id === uid)
+        const outgoing = new Set(myFriendships.filter(f => f.status === 'pending' && f.requester_id === uid).map(f => f.addressee_id))
+        const friendIds = accepted.map(f => f.requester_id === uid ? f.addressee_id : f.requester_id)
+        const allIds = [...new Set([...friendIds, ...incoming.map(f => f.requester_id)])]
+        let profilesById = {}
+        if (allIds.length) {
+          const { data: fps } = await supabase.from('profiles').select('id, display_name, avatar_url').in('id', allIds)
+          profilesById = Object.fromEntries((fps || []).map(p => [p.id, p]))
+        }
+        setProfileFriends(accepted.map(f => {
+          const fid = f.requester_id === uid ? f.addressee_id : f.requester_id
+          return { friendshipId: f.id, userId: fid, ...(profilesById[fid] || {}) }
+        }))
+        setProfileFriendRequests(incoming.map(f => ({ friendshipId: f.id, userId: f.requester_id, ...(profilesById[f.requester_id] || {}) })))
+        setProfileSentToIds(outgoing)
+      }
+
       setProfileIsLoading(false)
     }
 
@@ -3197,6 +3250,8 @@ function App() {
     if (currentScreen !== 'catalog_item' || !selectedCatalogItem?.id) {
       setCatalogItemImages([])
       setCatalogDetailSubjects([])
+      setCatalogDetailTeams([])
+      setCatalogDetailCardTypes([])
       setCatalogDetailMtgCardTypeId('')
       setCatalogDetailRarityId('')
       setCatalogDetailStats(null)
@@ -3206,7 +3261,7 @@ function App() {
     const load = async () => {
       const itemBrandId = selectedCatalogItem._details?.brand_id
       const isMinifig = selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col')
-      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }, { data: marketData }, { data: ownerCountData }] = await Promise.all([
+      const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }, { data: marketData }, { data: ownerCountData }, { data: itemTeamRows }, { data: itemCardTypeRows }] = await Promise.all([
         supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
         supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
         isMinifig && itemBrandId
@@ -3215,11 +3270,15 @@ function App() {
         supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
         supabase.rpc('get_item_market_stats', { item_ids: [selectedCatalogItem.id] }),
         supabase.rpc('get_item_owner_count', { item_id: selectedCatalogItem.id }),
+        supabase.from('item_teams').select('team_id, teams(name)').eq('item_id', selectedCatalogItem.id),
+        supabase.from('item_card_types').select('card_type_id, card_types(name)').eq('item_id', selectedCatalogItem.id),
       ])
       if (imgErr) console.error('item_images load error:', imgErr)
       if (!cancelled) {
         setCatalogItemImages(images || [])
         setCatalogDetailSubjects((subjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
+        setCatalogDetailTeams((itemTeamRows || []).map(r => r.teams?.name).filter(Boolean))
+        setCatalogDetailCardTypes((itemCardTypeRows || []).map(r => r.card_types?.name).filter(Boolean))
         setCatalogMarketVariants(variants || [])
         setCatalogItemConditionId('')
         setCatalogDetailMtgCardTypeId(itemMeta?.mtg_card_type_id || '')
@@ -3564,7 +3623,8 @@ function App() {
         .limit(30)
       if (catalogAdminFranchiseId) query = query.eq('collectible_set_id', catalogAdminFranchiseId)
       if (catalogAdminSubsetId) query = query.eq('subcollectble_set_id', catalogAdminSubsetId)
-      if (bulkPhotoPrintTypeId) query = query.eq('print_type_id', bulkPhotoPrintTypeId)
+      if (bulkPhotoPrintTypeId === '__none__') query = query.is('print_type_id', null)
+      else if (bulkPhotoPrintTypeId) query = query.eq('print_type_id', bulkPhotoPrintTypeId)
       const { data, error } = await query
       if (error) console.error('bulk photo search error:', error)
       setBulkPhotoManualResults(data || [])
@@ -5171,6 +5231,67 @@ function App() {
     setIsLocationMenuOpen(false)
   }
 
+  const handleSendFriendRequest = async (targetUserId) => {
+    if (!currentUser?.id || !targetUserId) return
+    const { data } = await supabase.from('friendships').insert({ requester_id: currentUser.id, addressee_id: targetUserId }).select('id').single()
+    if (data) {
+      setProfileSentToIds(prev => new Set([...prev, targetUserId]))
+      setFriendSearchResults(prev => prev.map(u => u.id === targetUserId ? { ...u, _sent: true } : u))
+    }
+  }
+
+  const handleAcceptFriendRequest = async (req) => {
+    await supabase.from('friendships').update({ status: 'accepted' }).eq('id', req.friendshipId)
+    setProfileFriendRequests(prev => prev.filter(r => r.friendshipId !== req.friendshipId))
+    setProfileFriends(prev => [...prev, { ...req }])
+  }
+
+  const handleDeclineFriendRequest = async (friendshipId) => {
+    await supabase.from('friendships').delete().eq('id', friendshipId)
+    setProfileFriendRequests(prev => prev.filter(r => r.friendshipId !== friendshipId))
+  }
+
+  const handleRemoveFriend = async (friendshipId, userId) => {
+    await supabase.from('friendships').delete().eq('id', friendshipId)
+    setProfileFriends(prev => prev.filter(f => f.friendshipId !== friendshipId))
+    setProfileSentToIds(prev => { const next = new Set(prev); next.delete(userId); return next })
+  }
+
+  const handleFriendSearch = async (query) => {
+    setFriendSearchQuery(query)
+    if (!query.trim()) { setFriendSearchResults([]); return }
+    setFriendSearchLoading(true)
+    const { data } = await supabase.from('profiles').select('id, display_name, avatar_url').ilike('display_name', `%${query.trim()}%`).neq('id', currentUser.id).limit(10)
+    setFriendSearchResults(data || [])
+    setFriendSearchLoading(false)
+  }
+
+  const handleOpenProfileItem = async (item) => {
+    let categoryName = catalogCategoryById[item.category_id] || ''
+    let subcategoryName = catalogSubcategoryById[item.subcategory_id] || ''
+    if (!categoryName && item.category_id) {
+      const { data } = await supabase.from('categories').select('name').eq('category_id', item.category_id).maybeSingle()
+      categoryName = data?.name || ''
+    }
+    if (!subcategoryName && item.subcategory_id) {
+      const { data } = await supabase.from('subcategories').select('name').eq('subcategory_id', item.subcategory_id).maybeSingle()
+      subcategoryName = data?.name || ''
+    }
+    setSelectedCatalogItem({
+      ...item,
+      id: item.item_id,
+      categoryName,
+      subcategoryName,
+      brandName: '',
+      franchiseName: '',
+      setName: item.collectible_set || '',
+      imageUrl: '',
+    })
+    setCatalogItemOrigin('profile')
+    setCurrentScreen('catalog_item')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const handleSiteSearchSubmit = () => {
     if (!siteSearchQuery.trim()) {
       return
@@ -5364,6 +5485,38 @@ function App() {
   const handleOpenAddToCollectionModal = () => {
     resetAddToCollectionForm()
     setIsAddToCollectionModalOpen(true)
+  }
+
+  const performQuickAdd = async (itemId) => {
+    if (!currentUser?.id || !itemId) return
+    const isGift = quickAddMode === 'gift'
+    const price = isGift ? 0 : Number(quickAddPrice)
+    if (!isGift && (!Number.isFinite(price) || price < 0)) return
+    try {
+      const collectionId = await getOrCreateDefaultCollectionId(currentUser.id)
+      const { error } = await supabase.from('owned_copies').insert({
+        collection_id: collectionId,
+        user_id: currentUser.id,
+        catalog_item_id: itemId,
+        acquisition_type: isGift ? 'gift' : 'direct',
+        purchase_price: price,
+        purchase_date: new Date().toISOString().slice(0, 10),
+        metadata: { source: 'quick_add' },
+      })
+      if (error) throw error
+      setOwnedCatalogItemCounts(prev => ({ ...prev, [itemId]: (Number(prev[itemId]) || 0) + 1 }))
+      if (price >= 0) {
+        setOwnedCatalogItemPurchases(prev => ({
+          ...prev,
+          [itemId]: [...(Array.isArray(prev[itemId]) ? prev[itemId] : []), {
+            acquisitionType: isGift ? 'gift' : 'direct',
+            unitPrice: price,
+          }],
+        }))
+      }
+    } catch (err) {
+      console.error('Quick add failed:', err)
+    }
   }
 
   const getOrCreateDefaultCollectionId = async (userId) => {
@@ -5912,16 +6065,21 @@ function App() {
       piece_count:          d.piece_count           ?? '',
     })
     setCatalogItemEditError('')
-    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }, { data: itemMtgMeta }] = await Promise.all([
+    const franchiseId = d.franchise_id || ''
+    const [{ data: cardTypes }, { data: itemTeams }, { data: itemCardTypes }, { data: itemSubjects }, { data: itemMtgMeta }, { data: franchiseTeams }] = await Promise.all([
       supabase.from('card_types').select('card_type_id, name').order('name'),
       supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
       supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
+      franchiseId
+        ? supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
+        : Promise.resolve({ data: [] }),
     ])
     const cardTypesList = (cardTypes || []).map(r => ({ id: r.card_type_id, name: r.name }))
+    const teamsList = (franchiseTeams || []).map(r => ({ id: r.team_id, name: r.name }))
     setCatalogItemEditLookups({
-      franchises: [], subjects: [], sets: [], subsets: [], teams: [], printTypes: [],
+      franchises: [], subjects: [], sets: [], subsets: [], teams: teamsList, printTypes: [],
       cardTypes: cardTypesList,
     })
     setCatalogItemEditTeamIds((itemTeams || []).map(r => r.team_id))
@@ -5987,6 +6145,48 @@ function App() {
       )
       if (ctErr) console.error('item_card_types insert error:', ctErr)
     }
+    // Immediately reflect new card types in the detail view
+    setCatalogDetailCardTypes(
+      catalogItemEditCardTypeIds
+        .map(id => catalogItemEditLookups.cardTypes.find(ct => ct.id === id)?.name)
+        .filter(Boolean)
+    )
+    // Immediately reflect new teams in the detail view
+    setCatalogDetailTeams(
+      catalogItemEditTeamIds
+        .map(id => catalogItemEditLookups.teams.find(t => t.id === id)?.name)
+        .filter(Boolean)
+    )
+    // Patch selectedCatalogItem so the detail view reflects saved values immediately
+    setSelectedCatalogItem(prev => {
+      if (!prev) return prev
+      const updatedDetails = {
+        ...prev._details,
+        card_number:          v.card_number?.trim() || null,
+        description:          v.description?.trim() || null,
+        print_count:          v.print_count !== '' ? Number(v.print_count) : null,
+        category_id:          v.category_id || null,
+        subcategory_id:       v.subcategory_id || null,
+        franchise_id:         v.franchise_id || null,
+        brand_id:             v.brand_id || null,
+        collectible_set_id:   v.collectible_set_id || null,
+        print_type_id:        v.print_type_id || null,
+        release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
+        upc:                  v.upc?.trim() || null,
+        piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
+      }
+      const subjectName = prev._subject_name || ''
+      const printType   = updatedDetails.print_type || prev._print_type || ''
+      const cardNum     = updatedDetails.card_number ? `#${updatedDetails.card_number}` : ''
+      const nameParts   = [subjectName, printType, cardNum || null].filter(Boolean)
+      return {
+        ...prev,
+        card_number: updatedDetails.card_number,
+        description: updatedDetails.description,
+        name:        nameParts.join(' — ') || updatedDetails.description || prev.name || 'Unnamed Item',
+        _details:    updatedDetails,
+      }
+    })
     setCatalogReloadToken(t => t + 1)
     setIsCatalogItemEditMode(false)
     setIsSavingCatalogItem(false)
@@ -6471,7 +6671,8 @@ function App() {
       .select('item_id, card_number, subject, collectible_set_id, subcollectble_set_id, print_type_id')
       .eq('collectible_set_id', catalogAdminFranchiseId)
     if (catalogAdminSubsetId) q = q.eq('subcollectble_set_id', catalogAdminSubsetId)
-    if (bulkPhotoPrintTypeId) q = q.eq('print_type_id', bulkPhotoPrintTypeId)
+    if (bulkPhotoPrintTypeId === '__none__') q = q.is('print_type_id', null)
+    else if (bulkPhotoPrintTypeId) q = q.eq('print_type_id', bulkPhotoPrintTypeId)
     const { data: subsetItems } = await q
     const items = subsetItems || []
     setBulkPhotoSubsetItems(items)
@@ -11539,6 +11740,61 @@ function App() {
               </div>
             </div>
 
+            {/* Quick Add bar */}
+            {currentUser && (
+              <div className="quick-add-bar">
+                <label className="quick-add-toggle-wrap">
+                  <span className="quick-add-label">Quick Add</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!!quickAddMode}
+                    className={`quick-add-switch${quickAddMode ? ' quick-add-switch--on' : ''}`}
+                    onClick={() => setQuickAddMode(m => m ? '' : 'gift')}
+                  />
+                </label>
+                {quickAddMode && (
+                  <div className="quick-add-options">
+                    <button
+                      type="button"
+                      className={`quick-add-mode-btn${quickAddMode === 'gift' ? ' quick-add-mode-btn--active' : ''}`}
+                      onClick={() => setQuickAddMode('gift')}
+                    >
+                      Gift
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-add-mode-btn${quickAddMode === 'purchase' ? ' quick-add-mode-btn--active' : ''}`}
+                      onClick={() => setQuickAddMode('purchase')}
+                    >
+                      Purchase
+                    </button>
+                    {quickAddMode === 'purchase' && (
+                      <div className="quick-add-price-wrap">
+                        <span className="quick-add-price-symbol">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          className="quick-add-price-input"
+                          value={quickAddPrice}
+                          onChange={e => setQuickAddPrice(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <span className="quick-add-hint">
+                      {quickAddMode === 'gift'
+                        ? 'Click Collect to instantly add as a gift'
+                        : quickAddPrice
+                          ? `Click Collect to instantly add at $${Number(quickAddPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : 'Enter a price then click Collect'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="catalog-layout">
               <aside className="catalog-card catalog-filters" aria-label="Catalog filters">
                 <div className="catalog-card-head">
@@ -12057,8 +12313,12 @@ function App() {
                                   title="Add to Collection"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    setSelectedCatalogItem({ ...item, categoryName: catalogCategoryById[item.category_id] || '', subcategoryName: catalogSubcategoryById[item.subcategory_id] || '', setName: item._set_name || '', brandName: item._brand_name || '', imageUrl: item.metadata?.image_url || '' })
-                                    handleOpenAddToCollectionModal()
+                                    if (quickAddMode) {
+                                      performQuickAdd(item.id)
+                                    } else {
+                                      setSelectedCatalogItem({ ...item, categoryName: catalogCategoryById[item.category_id] || '', subcategoryName: catalogSubcategoryById[item.subcategory_id] || '', setName: item._set_name || '', brandName: item._brand_name || '', imageUrl: item.metadata?.image_url || '' })
+                                      handleOpenAddToCollectionModal()
+                                    }
                                   }}
                                 >
                                   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
@@ -12217,6 +12477,7 @@ function App() {
                                 style={{ maxWidth: 280 }}
                               >
                                 <option value="">All print types</option>
+                                <option value="__none__">No print type</option>
                                 {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                               </select>
                               <p className="catalog-admin-hint" style={{ marginTop: 4, marginBottom: 0 }}>Selecting a print type filters card matching to that variant only.</p>
@@ -13182,9 +13443,9 @@ function App() {
               <button
                 type="button"
                 className="catalog-action-pill"
-                onClick={() => { setCurrentScreen('catalog') }}
+                onClick={() => { setCurrentScreen(catalogItemOrigin || 'catalog') }}
               >
-                ← Back to Catalog
+                {catalogItemOrigin === 'profile' ? '← Back to Profile' : '← Back to Catalog'}
               </button>
 
               {catalogSetNavItems.length > 1 && (
@@ -13335,9 +13596,9 @@ function App() {
                     <button
                       type="button"
                       className="catalog-detail-btn catalog-detail-btn-collect"
-                      onClick={handleOpenAddToCollectionModal}
+                      onClick={() => quickAddMode ? performQuickAdd(selectedCatalogItem.id) : handleOpenAddToCollectionModal()}
                     >
-                      Add to My Collection
+                      {quickAddMode ? (quickAddMode === 'gift' ? 'Collect (Gift)' : 'Collect (Purchase)') : 'Add to My Collection'}
                     </button>
                     <button
                       type="button"
@@ -14146,8 +14407,8 @@ function App() {
                           { label: 'Subject',       value: d.subject,             onClick: null, subjects: catalogDetailSubjects },
                           { label: 'Subject Type',  value: d.subject_type,        onClick: null },
                           { label: 'Species',       value: d.species,             onClick: null },
-                          { label: 'Team(s)',       value: d.teams,               onClick: null },
-                          { label: 'Card Treatment', value: d.card_types,           onClick: null },
+                          ...(catalogDetailTeams.length ? [{ label: 'Team(s)', value: catalogDetailTeams.join(', '), onClick: null }] : []),
+                          ...(catalogDetailCardTypes.length ? [{ label: 'Card Treatment', value: catalogDetailCardTypes.join(', '), onClick: null }] : []),
                           ...(catalogDetailRarityId ? [
                             { label: 'Rarity', value: catalogRarities.find(r => r.id === catalogDetailRarityId)?.name ?? 'N/A', onClick: null },
                           ] : []),
@@ -14198,22 +14459,23 @@ function App() {
                 <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>Log in</button>
               </div>
             ) : (
-              <>
-                {/* Banner + Avatar */}
-                <div className="profile-banner">
-                  <div className="profile-banner-bg" />
-                  <div className="profile-identity">
-                    <div className="profile-avatar-wrap">
-                      {profile.avatar_url
-                        ? <img src={profile.avatar_url} alt="avatar" className="profile-avatar" />
-                        : <div className="profile-avatar profile-avatar--placeholder">{(profile.display_name || currentUser.email || '?')[0].toUpperCase()}</div>
-                      }
-                    </div>
-                    <div className="profile-identity-text">
+              <div className="profile-layout">
+                {/* Hero banner */}
+                <div className="profile-hero-banner" />
+
+                {/* Identity card — overlaps banner */}
+                <div className="profile-identity-card">
+                  <div className="profile-avatar-outer">
+                    {profile.avatar_url
+                      ? <img src={profile.avatar_url} alt="avatar" className="profile-avatar" />
+                      : <div className="profile-avatar profile-avatar--placeholder">{(profile.display_name || currentUser.email || '?')[0].toUpperCase()}</div>
+                    }
+                  </div>
+                  <div className="profile-identity-body">
+                    <div>
                       <h1 className="profile-username">{profile.display_name || currentUser.email?.split('@')[0] || 'Collector'}</h1>
-                      <p className="profile-email">{currentUser.email}</p>
-                      <span className="profile-tier-badge">{profile.subscription_tier ? profile.subscription_tier.replace(/_/g, ' ') : 'Free Collector'}</span>
                     </div>
+                    <span className="profile-tier-pill">{profile.subscription_tier ? profile.subscription_tier.replace(/_/g, ' ') : 'Free Collector'}</span>
                   </div>
                 </div>
 
@@ -14221,103 +14483,118 @@ function App() {
                   <div className="profile-loading">Loading stats…</div>
                 ) : (
                   <>
-                    {/* Stats strip */}
+                    {/* Stat cards row */}
                     {(() => {
-                      const unlockedCount = profileStats
-                        ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
+                      const unlockedCount = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
                       return (
-                        <div className="profile-stats-strip">
-                          <div className="profile-stat">
-                            <span className="profile-stat-value">{profileStats?.totalItems?.toLocaleString() ?? '—'}</span>
-                            <span className="profile-stat-label">Total Copies</span>
-                          </div>
-                          <div className="profile-stat">
-                            <span className="profile-stat-value">{profileStats?.uniqueItems?.toLocaleString() ?? '—'}</span>
-                            <span className="profile-stat-label">Unique Items</span>
-                          </div>
-                          <div className="profile-stat">
-                            <span className="profile-stat-value">
-                              {profileStats?.totalValue != null
-                                ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                : '—'}
-                            </span>
-                            <span className="profile-stat-label">Collection Value</span>
-                          </div>
-                          <div className="profile-stat">
-                            <span className="profile-stat-value">{unlockedCount} / {PROFILE_ACHIEVEMENTS.length}</span>
-                            <span className="profile-stat-label">Achievements</span>
-                          </div>
+                        <div className="profile-stats-row">
+                          {[
+                            { value: profileStats?.totalItems?.toLocaleString() ?? '—', label: 'Total Copies' },
+                            { value: profileStats?.uniqueItems?.toLocaleString() ?? '—', label: 'Unique Items' },
+                            { value: profileStats?.totalValue != null ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—', label: 'Est. Value' },
+                            { value: `${unlockedCount} / ${PROFILE_ACHIEVEMENTS.length}`, label: 'Achievements' },
+                          ].map(({ value, label }) => (
+                            <div key={label} className="profile-stat-card">
+                              <span className="profile-stat-number">{value}</span>
+                              <span className="profile-stat-label">{label}</span>
+                            </div>
+                          ))}
                         </div>
                       )
                     })()}
 
-                    {/* Achievements */}
-                    <div className="profile-section">
-                      {(() => {
-                        const unlockedCount = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
-                        const groups = [...new Set(PROFILE_ACHIEVEMENTS.map(a => a.group))]
-                        return (
-                          <>
-                            <h2 className="profile-section-title">Achievements — {unlockedCount} / {PROFILE_ACHIEVEMENTS.length} Unlocked</h2>
-                            {groups.map(group => {
-                              const groupAchievements = PROFILE_ACHIEVEMENTS.filter(a => a.group === group)
-                              return (
-                                <div key={group} className="profile-achievement-group">
-                                  <div className="profile-achievement-group-label">{group}</div>
-                                  <div className="profile-achievements-grid">
-                                    {groupAchievements.map(achievement => {
-                                      const unlocked = profileStats ? achievement.check(profileStats) : false
-                                      return (
-                                        <div
-                                          key={achievement.id}
-                                          className={`profile-achievement-card profile-achievement-card--${achievement.rarity}${unlocked ? ' profile-achievement-card--unlocked' : ''}`}
-                                          title={achievement.desc}
-                                        >
-                                          <div className="profile-achievement-icon">{unlocked ? achievement.icon : '🔒'}</div>
-                                          <div className="profile-achievement-body">
-                                            <div className="profile-achievement-name">{achievement.name}</div>
-                                            <div className="profile-achievement-desc">{achievement.desc}</div>
-                                          </div>
-                                          {unlocked && <div className={`profile-achievement-rarity profile-achievement-rarity--${achievement.rarity}`}>{achievement.rarity}</div>}
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </>
-                        )
-                      })()}
-                    </div>
+                    {/* Friends */}
+                    <div className="profile-panel">
+                      <div className="profile-panel-header">
+                        <h2 className="profile-panel-title">Friends{profileFriends.length > 0 ? ` (${profileFriends.length})` : ''}</h2>
+                        <button
+                          type="button"
+                          className="profile-friend-find-btn"
+                          onClick={() => { setIsFriendSearchOpen(s => !s); setFriendSearchQuery(''); setFriendSearchResults([]) }}
+                        >
+                          {isFriendSearchOpen ? 'Cancel' : 'Find Friends'}
+                        </button>
+                      </div>
 
-                    {/* Category breakdown */}
-                    {profileStats?.categoryBreakdown?.length > 0 && (
-                      <div className="profile-section">
-                        <h2 className="profile-section-title">Collection by Category</h2>
-                        <div className="profile-category-grid">
-                          {profileStats.categoryBreakdown.map(([catId, count]) => {
-                            const catName = catalogCategories.find(c => c.id === catId)?.name || 'Unknown'
-                            const total = profileStats.uniqueItems || 1
-                            const pct = Math.round((count / total) * 100)
+                      {/* Incoming requests */}
+                      {profileFriendRequests.length > 0 && (
+                        <div className="profile-friend-requests">
+                          <p className="profile-friend-requests-label">{profileFriendRequests.length} pending {profileFriendRequests.length === 1 ? 'request' : 'requests'}</p>
+                          {profileFriendRequests.map(req => (
+                            <div key={req.friendshipId} className="profile-friend-request-row">
+                              <div className="profile-friend-avatar profile-friend-avatar--sm">
+                                {req.avatar_url ? <img src={req.avatar_url} alt="" /> : <span>{(req.display_name || '?')[0].toUpperCase()}</span>}
+                              </div>
+                              <span className="profile-friend-name">{req.display_name || 'Unknown'}</span>
+                              <button type="button" className="profile-friend-action-btn profile-friend-action-btn--accept" onClick={() => handleAcceptFriendRequest(req)}>Accept</button>
+                              <button type="button" className="profile-friend-action-btn profile-friend-action-btn--decline" onClick={() => handleDeclineFriendRequest(req.friendshipId)}>Decline</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Find Friends search */}
+                      {isFriendSearchOpen && (
+                        <div className="profile-friend-search">
+                          <input
+                            type="text"
+                            className="profile-friend-search-input"
+                            placeholder="Search by display name…"
+                            value={friendSearchQuery}
+                            onChange={e => handleFriendSearch(e.target.value)}
+                            autoFocus
+                          />
+                          {friendSearchLoading && <p className="profile-friend-search-hint">Searching…</p>}
+                          {!friendSearchLoading && friendSearchQuery && friendSearchResults.length === 0 && (
+                            <p className="profile-friend-search-hint">No users found.</p>
+                          )}
+                          {friendSearchResults.map(user => {
+                            const alreadyFriend = profileFriends.some(f => f.userId === user.id)
+                            const sent = profileSentToIds.has(user.id) || user._sent
+                            const incoming = profileFriendRequests.some(r => r.userId === user.id)
                             return (
-                              <div key={catId} className="profile-category-card">
-                                <div className="profile-category-name">{catName}</div>
-                                <div className="profile-category-bar-wrap">
-                                  <div className="profile-category-bar" style={{ width: `${pct}%` }} />
+                              <div key={user.id} className="profile-friend-result-row">
+                                <div className="profile-friend-avatar profile-friend-avatar--sm">
+                                  {user.avatar_url ? <img src={user.avatar_url} alt="" /> : <span>{(user.display_name || '?')[0].toUpperCase()}</span>}
                                 </div>
-                                <div className="profile-category-count">{count.toLocaleString()} items</div>
+                                <span className="profile-friend-name">{user.display_name || 'Unknown'}</span>
+                                {alreadyFriend ? (
+                                  <span className="profile-friend-status">Friends</span>
+                                ) : incoming ? (
+                                  <span className="profile-friend-status">Requested you</span>
+                                ) : sent ? (
+                                  <span className="profile-friend-status">Request sent</span>
+                                ) : (
+                                  <button type="button" className="profile-friend-action-btn profile-friend-action-btn--add" onClick={() => handleSendFriendRequest(user.id)}>Add Friend</button>
+                                )}
                               </div>
                             )
                           })}
                         </div>
-                      </div>
-                    )}
+                      )}
+
+                      {/* Friends grid */}
+                      {profileFriends.length > 0 ? (
+                        <div className="profile-friends-grid">
+                          {profileFriends.map(friend => (
+                            <div key={friend.friendshipId} className="profile-friend-card">
+                              <div className="profile-friend-avatar">
+                                {friend.avatar_url ? <img src={friend.avatar_url} alt="" /> : <span>{(friend.display_name || '?')[0].toUpperCase()}</span>}
+                              </div>
+                              <p className="profile-friend-card-name">{friend.display_name || 'Unknown'}</p>
+                              <button type="button" className="profile-friend-remove-btn" title="Remove friend" onClick={() => handleRemoveFriend(friend.friendshipId, friend.userId)}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : !isFriendSearchOpen && profileFriendRequests.length === 0 && (
+                        <p className="profile-friend-empty">No friends yet. Click Find Friends to connect with other collectors.</p>
+                      )}
+                    </div>
 
                     {/* Recently added */}
                     {profileRecentItems.length > 0 && (
-                      <div className="profile-section">
-                        <h2 className="profile-section-title">Recently Added</h2>
+                      <div className="profile-panel">
+                        <h2 className="profile-panel-title">Recently Added</h2>
                         <div className="profile-recent-grid">
                           {profileRecentItems.map((item, i) => {
                             const imgUrl = item.front_image_path
@@ -14327,26 +14604,118 @@ function App() {
                               : null
                             const label = [item.subject, item.print_type, item.card_number ? `#${item.card_number}` : null].filter(Boolean).join(' — ') || item.collectible_set || 'Item'
                             return (
-                              <div key={`${item.item_id}-${i}`} className="profile-recent-card">
+                              <button key={`${item.item_id}-${i}`} type="button" className="profile-recent-card profile-recent-card--btn" onClick={() => handleOpenProfileItem(item)}>
                                 <div className="profile-recent-img-wrap">
                                   {imgUrl
                                     ? <img src={imgUrl} alt={label} className="profile-recent-img" />
-                                    : <div className="profile-recent-img-placeholder">?</div>
+                                    : <div className="profile-recent-img-placeholder" />
                                   }
                                 </div>
                                 <p className="profile-recent-label">{label}</p>
-                                {item.created_at && (
-                                  <p className="profile-recent-date">{new Date(item.created_at).toLocaleDateString()}</p>
-                                )}
+                                {item.created_at && <p className="profile-recent-date">{new Date(item.created_at).toLocaleDateString()}</p>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Most Valuable */}
+                    {profileMostValuable.length > 0 && (
+                      <div className="profile-panel">
+                        <h2 className="profile-panel-title">Most Valuable</h2>
+                        <div className="profile-recent-grid">
+                          {profileMostValuable.map((item, i) => {
+                            const imgUrl = item.front_image_path
+                              ? (item.front_image_path.startsWith('http')
+                                  ? item.front_image_path
+                                  : `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/item-images/${item.front_image_path}`)
+                              : null
+                            const label = [item.subject, item.print_type, item.card_number ? `#${item.card_number}` : null].filter(Boolean).join(' — ') || item.collectible_set || 'Item'
+                            return (
+                              <button key={`mv-${item.item_id}-${i}`} type="button" className="profile-recent-card profile-recent-card--btn" onClick={() => handleOpenProfileItem(item)}>
+                                <div className="profile-recent-img-wrap">
+                                  {imgUrl
+                                    ? <img src={imgUrl} alt={label} className="profile-recent-img" />
+                                    : <div className="profile-recent-img-placeholder" />
+                                  }
+                                </div>
+                                <p className="profile-recent-label">{label}</p>
+                                <p className="profile-recent-date profile-recent-value">${item.purchase_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Category breakdown */}
+                    {profileStats?.categoryBreakdown?.length > 0 && (
+                      <div className="profile-panel">
+                        <h2 className="profile-panel-title">Collection by Category</h2>
+                        <div className="profile-category-list">
+                          {profileStats.categoryBreakdown.map(([catId, count]) => {
+                            const catName = catalogCategories.find(c => c.id === catId)?.name || 'Unknown'
+                            const pct = Math.round((count / (profileStats.uniqueItems || 1)) * 100)
+                            return (
+                              <div key={catId} className="profile-category-row">
+                                <span className="profile-category-name">{catName}</span>
+                                <div className="profile-category-track">
+                                  <div className="profile-category-fill" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="profile-category-count">{count.toLocaleString()}</span>
                               </div>
                             )
                           })}
                         </div>
                       </div>
                     )}
+
+                    {/* Achievements */}
+                    {(() => {
+                      const groups = [...new Set(PROFILE_ACHIEVEMENTS.map(a => a.group))]
+                      const totalUnlocked = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
+                      return (
+                        <div className="profile-panel">
+                          <div className="profile-panel-header">
+                            <h2 className="profile-panel-title">Achievements</h2>
+                            <span className="profile-achievements-count">{totalUnlocked} / {PROFILE_ACHIEVEMENTS.length} unlocked</span>
+                          </div>
+                          {groups.map(group => {
+                            const list = PROFILE_ACHIEVEMENTS.filter(a => a.group === group)
+                            const groupUnlocked = profileStats ? list.filter(a => a.check(profileStats)).length : 0
+                            return (
+                              <div key={group} className="profile-ach-group">
+                                <div className="profile-ach-group-header">
+                                  <span className="profile-ach-group-name">{group}</span>
+                                  <span className="profile-ach-group-count">{groupUnlocked}/{list.length}</span>
+                                </div>
+                                <div className="profile-ach-grid">
+                                  {list.map(ach => {
+                                    const unlocked = profileStats ? ach.check(profileStats) : false
+                                    return (
+                                      <div
+                                        key={ach.id}
+                                        className={`profile-ach-card profile-ach-card--${ach.rarity}${unlocked ? ' profile-ach-card--on' : ''}`}
+                                        title={ach.desc}
+                                      >
+                                        <div className="profile-ach-icon">{unlocked ? ach.icon : '🔒'}</div>
+                                        <div className="profile-ach-name">{ach.name}</div>
+                                        <div className="profile-ach-desc">{ach.desc}</div>
+                                        {unlocked && <div className={`profile-ach-rarity profile-ach-rarity--${ach.rarity}`}>{ach.rarity}</div>}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
                   </>
                 )}
-              </>
+              </div>
             )}
           </section>
         ) : currentScreen === 'settings' ? (
