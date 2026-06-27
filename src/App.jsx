@@ -12164,11 +12164,14 @@ function App() {
                     {catalogViewMode === 'grid' ? (
                       <div className="catalog-results-grid">
                         {paginatedCatalogItems.map((item) => {
+                          const categoryName     = catalogCategoryById[item.category_id] || ''
                           const franchiseName    = item._set_name || 'Unassigned set'
                           const franchiseBrandName = item._franchise_name || ''
+                          const subsetName       = item._details?.subcollectible_set || ''
+                          const isCard           = CARD_CONDITION_CATEGORIES.has(categoryName)
                           const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
-                          const isMusic          = (catalogCategoryById[item.category_id] || '') === 'Music'
-                          const itemCardLabels   = getCategoryLabels(catalogCategoryById[item.category_id] || '')
+                          const isMusic          = categoryName === 'Music'
+                          const itemCardLabels   = getCategoryLabels(categoryName)
                           const imageUrl         = item.front_image_path
                             ? item.front_image_path.startsWith('http')
                               ? item.front_image_path
@@ -12199,7 +12202,9 @@ function App() {
                                 <p className="catalog-item-meta">{isMusic ? (item.name || 'Untitled item') : franchiseName}</p>
                                 {isMusic
                                   ? (catalogSubcategoryById[item.subcategory_id] ? <p className="catalog-item-brand">Format: {catalogSubcategoryById[item.subcategory_id]}</p> : null)
-                                  : (franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null)}
+                                  : isCard
+                                    ? (subsetName ? <p className="catalog-item-brand">Subset: {subsetName}</p> : null)
+                                    : (franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null)}
                                 {brandName ? <p className="catalog-item-brand">{itemCardLabels.brand}: {brandName}</p> : null}
                                 {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
                               </div>
@@ -12275,26 +12280,28 @@ function App() {
                                 </div>
                                 <div className="catalog-list-buy">
                                   <span className="catalog-list-buy-label">Buy:</span>
-                                  <a
-                                    className="catalog-list-buy-link"
-                                    href={item.card_number
-                                      ? `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(item.card_number)}`
-                                      : `https://www.bricklink.com/v2/search.page?q=${encodeURIComponent(item._subject_name || item.name || '')}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    BrickLink
-                                  </a>
-                                  <a
-                                    className="catalog-list-buy-link"
-                                    href={`https://www.brickowl.com/search/catalog?query=${encodeURIComponent(item._subject_name || item.name || '')}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    Brick Owl
-                                  </a>
+                                  {categoryName === 'Building Blocks' && (<>
+                                    <a
+                                      className="catalog-list-buy-link"
+                                      href={item.card_number
+                                        ? `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(item.card_number)}`
+                                        : `https://www.bricklink.com/v2/search.page?q=${encodeURIComponent(item._subject_name || item.name || '')}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      BrickLink
+                                    </a>
+                                    <a
+                                      className="catalog-list-buy-link"
+                                      href={`https://www.brickowl.com/search/catalog?query=${encodeURIComponent(item._subject_name || item.name || '')}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      Brick Owl
+                                    </a>
+                                  </>)}
                                   <a
                                     className="catalog-list-buy-link"
                                     href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
