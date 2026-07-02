@@ -6569,12 +6569,22 @@ function App() {
       }
       let subjectId = row.subjectObj?.id || null
       if (!subjectId && row.subject_name?.trim()) {
-        const { data: newSub } = await supabase
+        const trimmedName = row.subject_name.trim()
+        // Look up existing subject by name before creating a new one
+        const { data: existingSubs } = await supabase
           .from('subjects')
-          .insert({ subject_name: row.subject_name.trim(), subject_type: getBulkSubjectType() })
           .select('subject_id')
-          .single()
-        subjectId = newSub?.subject_id || null
+          .ilike('subject_name', trimmedName)
+          .limit(1)
+        subjectId = existingSubs?.[0]?.subject_id || null
+        if (!subjectId) {
+          const { data: newSub } = await supabase
+            .from('subjects')
+            .insert({ subject_name: trimmedName, subject_type: getBulkSubjectType() })
+            .select('subject_id')
+            .single()
+          subjectId = newSub?.subject_id || null
+        }
         if (subjectId && catalogAdminRealFranchiseId) {
           await supabase.from('subject_franchise').upsert(
             { subject_id: subjectId, franchise_id: catalogAdminRealFranchiseId },
