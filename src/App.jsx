@@ -3169,10 +3169,26 @@ function App() {
       const queryText = siteSearchQuery.trim()
       const queryStart = (catalogPage - 1) * CATALOG_PAGE_SIZE
       const queryEnd = queryStart + CATALOG_PAGE_SIZE - 1
+      const useExactCount = Boolean(
+        queryText ||
+        selectedCatalogCategoryRecord ||
+        selectedCatalogSubcategoryRecord ||
+        selectedCatalogFranchiseRecord ||
+        catalogBrandId ||
+        catalogTeamId ||
+        catalogSetId ||
+        catalogSubsetId ||
+        catalogPrintTypeId ||
+        catalogCardTypeIds.length > 0 ||
+        catalogRarityId ||
+        catalogSubjectId ||
+        catalogMinYear ||
+        catalogMaxYear,
+      )
 
       let itemsQuery = supabase
         .from('item_details')
-        .select('*', { count: 'planned' })
+        .select('*', { count: useExactCount ? 'exact' : 'planned' })
 
       if (selectedCatalogCategoryRecord) {
         itemsQuery = itemsQuery.eq('category_id', selectedCatalogCategoryRecord.id)
@@ -10240,6 +10256,13 @@ function App() {
 
   const storageLocationPathById = buildStorageLocationPathById(storageLocations)
   const normalizedCollectionSearch = collectionSearchQuery.trim().toLowerCase()
+  const getCollectionSortValue = (item) => {
+    const marketValue = Number(item?.currentMarketValue || 0)
+    if (marketValue > 0) {
+      return marketValue
+    }
+    return Number(item?.totalInvested || 0)
+  }
   const filteredCollectionItems = collectionItems.filter((item) => {
     if (activeCollectionFilter !== 'all') {
       if (!Array.isArray(item.collectionIds) || !item.collectionIds.includes(activeCollectionFilter)) {
@@ -10278,8 +10301,8 @@ function App() {
   }).sort((a, b) => {
     switch (collectionSortKey) {
       case 'name':        return (a.name || '').localeCompare(b.name || '')
-      case 'value_desc':  return Number(b.currentMarketValue || 0) - Number(a.currentMarketValue || 0)
-      case 'value_asc':   return Number(a.currentMarketValue || 0) - Number(b.currentMarketValue || 0)
+      case 'value_desc':  return getCollectionSortValue(b) - getCollectionSortValue(a)
+      case 'value_asc':   return getCollectionSortValue(a) - getCollectionSortValue(b)
       case 'quantity':    return Number(b.totalQuantity || 0) - Number(a.totalQuantity || 0)
       case 'recent':
       default:            return (b.latestAddedAt || '').localeCompare(a.latestAddedAt || '')
