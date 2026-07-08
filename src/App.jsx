@@ -4414,10 +4414,30 @@ function App() {
 
       let catalogItemsById = {}
       if (catalogItemIds.length > 0) {
-        const { data: catalogRows, error: catalogRowsError } = await supabase
-          .from('item_details')
-          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path, franchise, teams, species, brand')
-          .in('item_id', catalogItemIds)
+        const catalogItemIdChunks = []
+        for (let index = 0; index < catalogItemIds.length; index += 150) {
+          catalogItemIdChunks.push(catalogItemIds.slice(index, index + 150))
+        }
+
+        const catalogRowsByChunk = await Promise.all(catalogItemIdChunks.map((chunk) => (
+          supabase
+            .from('item_details')
+            .select('*')
+            .in('item_id', chunk)
+        )))
+
+        const normalizeDelimitedList = (value) => {
+          if (Array.isArray(value)) {
+            return value.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)
+          }
+          if (typeof value === 'string') {
+            return value.split(',').map((entry) => entry.trim()).filter((entry) => entry && entry.toUpperCase() !== 'N/A')
+          }
+          return []
+        }
+
+        const catalogRows = catalogRowsByChunk.flatMap((result) => (Array.isArray(result.data) ? result.data : []))
+        const catalogRowsError = catalogRowsByChunk.find((result) => result.error)?.error || null
 
         if (!catalogRowsError && Array.isArray(catalogRows)) {
           catalogItemsById = catalogRows.reduce((accumulator, row) => {
@@ -4445,6 +4465,8 @@ function App() {
                 rarity_id:         row.rarity_id || null,
                 metadata:          { image_url: imageUrl, set: setName },
                 dynamic_fields:    {},
+                teams:             normalizeDelimitedList(row.teams),
+                species:           typeof row.species === 'string' ? row.species : '',
               }
             }
             return accumulator
@@ -4558,7 +4580,11 @@ function App() {
             setName: '',
             franchiseName: resolvedCatalogItem?.franchise || '',
             subtheme: resolvedCatalogItem?.collectible_set || '',
-            teams: (resolvedCatalogItem?.teams || '').split(',').map(s => s.trim()).filter(s => s && s.toUpperCase() !== 'N/A'),
+            teams: Array.isArray(resolvedCatalogItem?.teams)
+              ? resolvedCatalogItem.teams
+              : typeof resolvedCatalogItem?.teams === 'string'
+                ? resolvedCatalogItem.teams.split(',').map((s) => s.trim()).filter((s) => s && s.toUpperCase() !== 'N/A')
+                : [],
             species: resolvedCatalogItem?.species || '',
             conditions: new Set(),
             currentMarketValue: 0,
