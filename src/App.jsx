@@ -2059,7 +2059,7 @@ function App() {
     lookup[franchise.id] = franchise.name
     return lookup
   }, {})
-  const catalogSetById = catalogFranchises.reduce((lookup, setRecord) => {
+  const catalogSetById = catalogSets.reduce((lookup, setRecord) => {
     lookup[setRecord.id] = setRecord
     return lookup
   }, {})
@@ -2089,12 +2089,14 @@ function App() {
           (subcategory) =>
             subcategory.name === catalogSubcategory && subcategory.category_id === selectedCatalogCategoryRecord.id,
         ) || null
-  const catalogFranchiseOptions = [...new Set(catalogFranchiseBrands.map((f) => f.name))]
-    .sort((left, right) => left.localeCompare(right))
+  const catalogFranchiseOptions = [...catalogFranchiseBrands]
+    .sort((left, right) => left.name.localeCompare(right.name))
   const selectedCatalogFranchiseRecord =
     catalogFranchise === 'all'
       ? null
-      : catalogFranchiseBrands.find((franchiseBrand) => franchiseBrand.name === catalogFranchise) || null
+      : catalogFranchiseBrands.find((franchiseBrand) => franchiseBrand.id === catalogFranchise)
+        || catalogFranchiseBrands.find((franchiseBrand) => franchiseBrand.name === catalogFranchise)
+        || null
   const filteredCatalogItems = catalogItems
   const catalogTotalPages = Math.max(1, Math.ceil(catalogTotalItemCount / CATALOG_PAGE_SIZE))
   const paginatedCatalogItems = catalogItems
@@ -2782,7 +2784,7 @@ function App() {
     })
   }, [currentScreen, catalogReloadToken])
 
-  // Effect B: franchise cascade from subcategory via franchise_subcategory
+  // Effect B: franchise cascade from the selected subcategory's actual items.
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const subcategoryId = selectedCatalogSubcategoryRecord?.id || ''
@@ -2800,12 +2802,21 @@ function App() {
       setCatalogSubsetId('')
       setCatalogPrintTypeId('')
     }
-    supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
-      .then(({ data: fsRows }) => {
-        const ids = (fsRows || []).map(r => r.franchise_id)
+    supabase.from('items').select('franchise_id').eq('subcategory_id', subcategoryId).not('franchise_id', 'is', null)
+      .then(({ data: itemRows }) => {
+        const ids = [...new Set((itemRows || []).map((row) => row.franchise_id).filter(Boolean))]
         if (!ids.length) { setCatalogFranchiseBrands([]); return }
         supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
-          .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
+          .then(({ data }) => {
+            const byName = new Map()
+            for (const row of data || []) {
+              if (!row?.franchise_id || !row?.name) continue
+              if (!byName.has(row.name)) {
+                byName.set(row.name, { id: row.franchise_id, name: row.name })
+              }
+            }
+            setCatalogFranchiseBrands([...byName.values()])
+          })
       })
   }, [currentScreen, selectedCatalogSubcategoryRecord])
 
@@ -2830,29 +2841,47 @@ function App() {
       setCatalogPrintTypeId('')
       setCatalogBrandId('')
     }
+    setCatalogTeams([])
+    setCatalogSets([])
+    setCatalogFranchiseLinkedBrands([])
     supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
       .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
-    // Brands: a franchise can span categories (e.g. "Star Wars" has LEGO items
-    // AND Trading Cards). Brands are franchise-scoped but not category-scoped, so
-    // brand_franchise alone would list card brands (Topps/WizKids) under LEGO.
-    // When a category is selected, derive the brand list from items that actually
-    // exist in that category+franchise so only relevant brands appear.
-    const brandCatId = selectedCatalogCategoryRecord?.id || null
-    const brandSubId = selectedCatalogSubcategoryRecord?.id || null
-    if (brandCatId) {
-      let bq = supabase.from('items').select('brand_id').eq('franchise_id', franchiseId).eq('category_id', brandCatId).not('brand_id', 'is', null)
-      if (brandSubId) bq = bq.eq('subcategory_id', brandSubId)
-      bq.then(({ data }) => {
-        const ids = new Set((data || []).map(r => r.brand_id))
-        setCatalogFranchiseLinkedBrands(catalogBrands.filter(b => ids.has(b.id)))
+
+    if (franchiseId) {
+      let brandQuery = supabase
+        .from('items')
+        .select('brand_id')
+        .eq('franchise_id', franchiseId)
+        .not('brand_id', 'is', null)
+
+      if (selectedCatalogCategoryRecord?.id) {
+        brandQuery = brandQuery.eq('category_id', selectedCatalogCategoryRecord.id)
+      }
+      if (selectedCatalogSubcategoryRecord?.id) {
+        brandQuery = brandQuery.eq('subcategory_id', selectedCatalogSubcategoryRecord.id)
+      }
+
+      brandQuery.then(({ data }) => {
+        const ids = new Set((data || []).map((row) => row.brand_id).filter(Boolean))
+        setCatalogFranchiseLinkedBrands(catalogBrands.filter((brand) => ids.has(brand.id)))
       })
     } else {
-      supabase.from('brand_franchise').select('brand_id').eq('franchise_id', franchiseId)
-        .then(({ data }) => {
+      const brandCatId = selectedCatalogCategoryRecord?.id || null
+      const brandSubId = selectedCatalogSubcategoryRecord?.id || null
+      if (brandCatId) {
+        let bq = supabase.from('items').select('brand_id').not('brand_id', 'is', null).eq('category_id', brandCatId)
+        if (brandSubId) {
+          bq = bq.eq('subcategory_id', brandSubId)
+        }
+        bq.then(({ data }) => {
           const ids = new Set((data || []).map(r => r.brand_id))
           setCatalogFranchiseLinkedBrands(catalogBrands.filter(b => ids.has(b.id)))
         })
+      } else {
+        setCatalogFranchiseLinkedBrands([])
+      }
     }
+
     let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
     if (catalogBrandId) setQ = setQ.eq('brand_id', catalogBrandId)
     setQ.then(({ data }) => setCatalogSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
@@ -3357,7 +3386,7 @@ function App() {
       setCatalogFranchise('all')
       return
     }
-    if (catalogFranchise !== 'all' && !catalogFranchiseOptions.includes(catalogFranchise)) {
+    if (catalogFranchise !== 'all' && !catalogFranchiseOptions.some((franchise) => franchise.id === catalogFranchise || franchise.name === catalogFranchise)) {
       setCatalogFranchise('all')
     }
     if (catalogCardTypeIds.length > 0 && !CARD_CONDITION_CATEGORIES.has(catalogCategory)) {
@@ -12909,7 +12938,7 @@ function App() {
                     >
                       <option value="all">All</option>
                       {catalogFranchiseOptions.map((franchise) => (
-                        <option key={franchise} value={franchise}>{franchise}</option>
+                        <option key={franchise.id} value={franchise.id}>{franchise.name}</option>
                       ))}
                     </select>
                   </>
@@ -12920,15 +12949,11 @@ function App() {
                 <select
                   id="catalog-brand"
                   value={catalogBrandId}
+                  disabled={!selectedCatalogFranchiseRecord}
                   onChange={(event) => setCatalogBrandId(event.target.value)}
                 >
-                  <option value="">All</option>
-                  {(catalogFranchiseLinkedBrands.length > 0
-                    ? catalogFranchiseLinkedBrands
-                    : catalogCategory === 'Music' && musicBrandIds.size > 0
-                      ? catalogBrands.filter(b => musicBrandIds.has(b.id))
-                      : catalogBrands
-                  ).map((b) => (
+                  <option value="">{selectedCatalogFranchiseRecord ? 'All' : 'Select franchise first'}</option>
+                  {catalogFranchiseLinkedBrands.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
@@ -14660,7 +14685,7 @@ function App() {
                           <button type="button" className="catalog-detail-meta-link" onClick={() => {
                             setCatalogCategory(selectedCatalogItem._details.category || 'all')
                             setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
-                            setCatalogFranchise(selectedCatalogItem._details.franchise)
+                            setCatalogFranchise(selectedCatalogItem._details.franchise_id || selectedCatalogItem._details.franchise || 'all')
                             setCatalogSetId('')
                             setCurrentScreen('catalog')
                           }}>{selectedCatalogItem._details.franchise}</button>
@@ -14679,7 +14704,7 @@ function App() {
                               <button type="button" className="catalog-detail-meta-link" onClick={() => {
                                 setCatalogCategory(selectedCatalogItem._details.category || 'all')
                                 setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
-                                setCatalogFranchise(selectedCatalogItem._details.franchise || 'all')
+                                setCatalogFranchise(selectedCatalogItem._details.franchise_id || selectedCatalogItem._details.franchise || 'all')
                                 setCatalogSetId(selectedCatalogItem._details.collectible_set_id || '')
                                 setCurrentScreen('catalog')
                               }}>{selectedCatalogItem._details.collectible_set}</button>
@@ -15587,12 +15612,12 @@ function App() {
                         const rows = [
                           { label: 'Category',      value: d.category,            onClick: d.category ? () => goTo(() => setCatalogCategory(d.category)) : null },
                           { label: 'Subcategory',   value: d.subcategory,         onClick: d.subcategory ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory) }) : null },
-                          { label: 'Franchise',     value: d.franchise,           onClick: d.franchise ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise) }) : null },
-                          { label: 'Brand',         value: d.brand,               onClick: d.brand_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id) }) : null },
-                          { label: 'Collectible Set', value: d.collectible_set,   onClick: d.collectible_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id) }) : null },
+                          { label: 'Franchise',     value: d.franchise,           onClick: d.franchise ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all') }) : null },
+                          { label: 'Brand',         value: d.brand,               onClick: d.brand_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id) }) : null },
+                          { label: 'Collectible Set', value: d.collectible_set,   onClick: d.collectible_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id) }) : null },
                           { label: 'Release Year',  value: d.release_year ?? 'N/A', onClick: d.release_year ? () => goTo(() => { setCatalogMinYear(String(d.release_year)); setCatalogMaxYear(String(d.release_year)) }) : null },
-                          { label: 'Subset',        value: d.subcollectible_set,  onClick: d.subcollectble_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id) }) : null },
-                          { label: 'Print Type',    value: d.print_type,          onClick: d.print_type_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id || ''); setCatalogPrintTypeId(d.print_type_id) }) : null },
+                          { label: 'Subset',        value: d.subcollectible_set,  onClick: d.subcollectble_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id) }) : null },
+                          { label: 'Print Type',    value: d.print_type,          onClick: d.print_type_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id || ''); setCatalogPrintTypeId(d.print_type_id) }) : null },
                           { label: 'Subject',       value: d.subject,             onClick: null, subjects: catalogDetailSubjects },
                           { label: 'Subject Type',  value: d.subject_type,        onClick: null },
                           { label: 'Species',       value: d.species,             onClick: null },
