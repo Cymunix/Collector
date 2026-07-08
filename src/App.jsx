@@ -1721,10 +1721,22 @@ function App() {
   const [catalogPage, setCatalogPage] = useState(1)
   const [catalogPageInput, setCatalogPageInput] = useState('1')
   const [catalogViewMode, setCatalogViewMode] = useState('grid')
+  const [isCatalogBulkEditMode, setIsCatalogBulkEditMode] = useState(false)
+  const [catalogBulkSelectedIds, setCatalogBulkSelectedIds] = useState(new Set())
+  const [catalogBulkEditValues, setCatalogBulkEditValues] = useState({
+    brand_id: '',
+    collectible_set_id: '',
+  })
+  const [catalogBulkBrandOptions, setCatalogBulkBrandOptions] = useState([])
+  const [catalogBulkSetOptions, setCatalogBulkSetOptions] = useState([])
+  const [isApplyingCatalogBulkEdit, setIsApplyingCatalogBulkEdit] = useState(false)
+  const [catalogBulkEditError, setCatalogBulkEditError] = useState('')
+  const [catalogBulkEditMessage, setCatalogBulkEditMessage] = useState('')
   const [catalogSetNavItems, setCatalogSetNavItems] = useState([])
   const [catalogSetNavIndex, setCatalogSetNavIndex] = useState(-1)
   const [catalogTotalItemCount, setCatalogTotalItemCount] = useState(0)
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
+  const [catalogDetailViewTab, setCatalogDetailViewTab] = useState('overview')
   const [catalogItemImages, setCatalogItemImages] = useState([])
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
   const [catalogDetailTeams, setCatalogDetailTeams] = useState([])
@@ -1794,6 +1806,8 @@ function App() {
   const [catalogDetailLegoCond, setCatalogDetailLegoCond] = useState({})
   // Minifigs connected to the currently-viewed set (via set_minifigs).
   const [catalogDetailSetMinifigs, setCatalogDetailSetMinifigs] = useState([])
+  // Sets that include the currently-viewed minifig (via set_minifigs).
+  const [catalogDetailParentSets, setCatalogDetailParentSets] = useState([])
   // Per-minifig "included?" state for the add-to-collection modal (item_id → bool).
   const [collectionMinifigInclusion, setCollectionMinifigInclusion] = useState({})
   const [catalogDetailCertNumber, setCatalogDetailCertNumber] = useState('')
@@ -2100,6 +2114,12 @@ function App() {
   const filteredCatalogItems = catalogItems
   const catalogTotalPages = Math.max(1, Math.ceil(catalogTotalItemCount / CATALOG_PAGE_SIZE))
   const paginatedCatalogItems = catalogItems
+  const paginatedCatalogItemIds = paginatedCatalogItems.map((item) => item.id).filter(Boolean)
+  const selectedCatalogVisibleCount = paginatedCatalogItemIds.filter((itemId) => catalogBulkSelectedIds.has(itemId)).length
+  const allVisibleCatalogItemsSelected = paginatedCatalogItemIds.length > 0 && selectedCatalogVisibleCount === paginatedCatalogItemIds.length
+  const selectedCatalogBulkItems = catalogItems.filter((item) => catalogBulkSelectedIds.has(item.id))
+  const selectedCatalogBulkFranchiseIds = [...new Set(selectedCatalogBulkItems.map((item) => item.franchise_id).filter(Boolean))]
+  const selectedCatalogBulkFranchiseId = selectedCatalogBulkFranchiseIds.length === 1 ? selectedCatalogBulkFranchiseIds[0] : ''
   const selectedCatalogItemMetadata =
     selectedCatalogItem?.metadata && typeof selectedCatalogItem.metadata === 'object' ? selectedCatalogItem.metadata : {}
   const selectedCatalogItemCategoryLabels = getCategoryLabels(
@@ -2272,6 +2292,55 @@ function App() {
   const localAvailability = Array.isArray(selectedCatalogItemMetadata.local_availability)
     ? selectedCatalogItemMetadata.local_availability.filter((item) => item && typeof item === 'object')
     : []
+  const catalogDetailReviews = (
+    Array.isArray(selectedCatalogItemMetadata.reviews)
+      ? selectedCatalogItemMetadata.reviews
+      : Array.isArray(selectedCatalogItemMetadata.review_list)
+        ? selectedCatalogItemMetadata.review_list
+        : []
+  )
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry, index) => {
+      const ratingCandidate = Number(
+        entry.rating ??
+        entry.score ??
+        entry.stars ??
+        entry.review_rating ??
+        NaN,
+      )
+      const normalizedRating = Number.isFinite(ratingCandidate)
+        ? Math.max(1, Math.min(5, ratingCandidate))
+        : null
+      const reviewDateRaw =
+        entry.created_at ||
+        entry.createdAt ||
+        entry.reviewed_at ||
+        entry.reviewedAt ||
+        entry.date ||
+        ''
+      const reviewDate = reviewDateRaw ? new Date(reviewDateRaw) : null
+      const reviewDateLabel = reviewDate && !Number.isNaN(reviewDate.getTime())
+        ? reviewDate.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' })
+        : ''
+
+      return {
+        id: entry.id || entry.review_id || entry.reviewId || `review-${index}`,
+        author:
+          entry.author ||
+          entry.author_name ||
+          entry.authorName ||
+          entry.user_name ||
+          entry.username ||
+          'Collector',
+        title: entry.title || entry.headline || entry.summary || '',
+        body: entry.body || entry.comment || entry.review || entry.text || '',
+        rating: normalizedRating,
+        dateLabel: reviewDateLabel,
+      }
+    })
+  const catalogDetailAverageRating = catalogDetailReviews.length > 0
+    ? catalogDetailReviews.reduce((sum, review) => sum + (review.rating || 0), 0) / catalogDetailReviews.length
+    : null
   const insights =
     selectedCatalogItemMetadata.collector_insights && typeof selectedCatalogItemMetadata.collector_insights === 'object'
       ? selectedCatalogItemMetadata.collector_insights
@@ -3258,7 +3327,7 @@ function App() {
       if (queryText) {
         // Broad top-search. The item_details view is an expensive join, so an
         // ilike across its columns times out — instead match on cheap base tables
-        // (subject names, set names, description, bricklink id), collect item ids,
+        // (subject names, set names, descriptions, and common code fields), collect item ids,
         // then filter the view by id (fast, index-backed).
         const escapedText = queryText.replace(/[%_]/g, '\\$&').replace(/[(),]/g, ' ')
         const like = `%${escapedText}%`
@@ -3277,8 +3346,21 @@ function App() {
           const { data: itRows } = await supabase.from('items').select('item_id').in('collectible_set_id', csIds).limit(2000)
           for (const r of itRows || []) idSet.add(r.item_id)
         }
-        // 3. Item description / BrickLink id
-        const { data: descRows } = await supabase.from('items').select('item_id').or(`description.ilike.${like},bricklink_id.ilike.${like}`).limit(1000)
+        // 3. Item description + code fields (set/minifig/searchable IDs)
+        const { data: descRows } = await supabase
+          .from('items')
+          .select('item_id')
+          .or(
+            [
+              `description.ilike.${like}`,
+              `bricklink_id.ilike.${like}`,
+              `lego_set_number.ilike.${like}`,
+              `minifig_code.ilike.${like}`,
+              `rebrickable_fig_id.ilike.${like}`,
+              `upc.ilike.${like}`,
+            ].join(',')
+          )
+          .limit(1000)
         for (const r of descRows || []) idSet.add(r.item_id)
 
         const ids = [...idSet]
@@ -3434,12 +3516,16 @@ function App() {
       setCatalogDetailLego(null)
       setCatalogDetailLegoCond({})
       setCatalogDetailSetMinifigs([])
+      setCatalogDetailParentSets([])
       return
     }
     let cancelled = false
     const load = async () => {
       const itemBrandId = selectedCatalogItem._details?.brand_id
-      const isMinifig = selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col')
+      const isMinifig =
+        selectedCatalogItem._details?.brand === 'Minifigures' ||
+        selectedCatalogItem._details?.bricklink_id?.toLowerCase().startsWith('col') ||
+        Boolean(selectedCatalogItem._details?.rebrickable_fig_id)
       const [{ data: images, error: imgErr }, { data: subjects }, { data: variants }, { data: itemMeta }, { data: marketData }, { data: ownerCountData }, { data: itemTeamRows }, { data: itemCardTypeRows }] = await Promise.all([
         supabase.from('item_images').select('item_image_id, image_path, position').eq('item_id', selectedCatalogItem.id).order('position'),
         supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
@@ -3512,10 +3598,56 @@ function App() {
         }).sort((a, b) => a.name.localeCompare(b.name))
       }
       if (!cancelled) setCatalogDetailSetMinifigs(setMinifigs)
+
+      // Sets connected to this minifig (empty for non-minifigs / sets).
+      let minifigParentSets = []
+      if (isMinifig) {
+        const { data: parentSetRows } = await supabase
+          .from('set_minifigs')
+          .select('set_item_id, quantity')
+          .eq('minifig_item_id', selectedCatalogItem.id)
+
+        if (parentSetRows?.length) {
+          const uniqueSetIds = [...new Set(parentSetRows.map((row) => row.set_item_id).filter(Boolean))]
+          const qtyBySetId = parentSetRows.reduce((lookup, row) => {
+            const nextQty = Number(row.quantity)
+            lookup[row.set_item_id] = (lookup[row.set_item_id] || 0) + (Number.isFinite(nextQty) ? nextQty : 1)
+            return lookup
+          }, {})
+          const { data: parentSetDetails } = await supabase
+            .from('item_details')
+            .select('item_id, collectible_set, subject, description, release_year, franchise')
+            .in('item_id', uniqueSetIds)
+
+          const byId = Object.fromEntries((parentSetDetails || []).map((setItem) => [setItem.item_id, setItem]))
+          minifigParentSets = uniqueSetIds
+            .map((setId) => {
+              const details = byId[setId] || {}
+              const setName =
+                (typeof details.collectible_set === 'string' && details.collectible_set !== 'N/A' && details.collectible_set.trim()) ||
+                (typeof details.subject === 'string' && details.subject !== 'N/A' && details.subject.trim()) ||
+                (typeof details.description === 'string' && details.description.trim()) ||
+                'Set'
+              return {
+                item_id: setId,
+                name: setName,
+                franchise: details.franchise || '',
+                release_year: details.release_year || null,
+                quantity: qtyBySetId[setId] || 1,
+              }
+            })
+            .sort((left, right) => left.name.localeCompare(right.name))
+        }
+      }
+      if (!cancelled) setCatalogDetailParentSets(minifigParentSets)
     }
     load()
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
+
+  useEffect(() => {
+    setCatalogDetailViewTab('overview')
+  }, [selectedCatalogItem?.id])
 
   useEffect(() => {
     if (catalogPage > catalogTotalPages) {
@@ -3746,10 +3878,65 @@ function App() {
         const ids = (fsRows || []).map(r => r.franchise_id)
         if (!ids.length) { setCatalogAdminRealFranchises([]); setCatalogAdminRealFranchiseId(''); return }
         supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
-          .then(({ data }) => {
-            const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
+          .then(async ({ data }) => {
+            const rows = (data || [])
+            const allIds = [...new Set(rows.map((row) => row.franchise_id).filter(Boolean))]
+            const itemCountById = {}
+            const setCountById = {}
+
+            if (allIds.length) {
+              const [{ data: itemRows }, { data: setRows }] = await Promise.all([
+                supabase
+                  .from('items')
+                  .select('franchise_id')
+                  .eq('subcategory_id', catalogAdminSubcategoryId)
+                  .in('franchise_id', allIds),
+                supabase
+                  .from('collectible_sets')
+                  .select('franchise_id')
+                  .in('franchise_id', allIds),
+              ])
+
+              for (const row of itemRows || []) {
+                if (!row?.franchise_id) continue
+                itemCountById[row.franchise_id] = (itemCountById[row.franchise_id] || 0) + 1
+              }
+              for (const row of setRows || []) {
+                if (!row?.franchise_id) continue
+                setCountById[row.franchise_id] = (setCountById[row.franchise_id] || 0) + 1
+              }
+            }
+
+            const groupedByName = new Map()
+            for (const row of rows) {
+              const name = typeof row.name === 'string' ? row.name.trim() : ''
+              if (!row.franchise_id || !name) continue
+              const key = name.toLowerCase()
+              if (!groupedByName.has(key)) groupedByName.set(key, [])
+              groupedByName.get(key).push({ id: row.franchise_id, name })
+            }
+
+            const list = [...groupedByName.values()]
+              .map((candidates) => (
+                candidates.sort((left, right) => {
+                  const itemDelta = (itemCountById[right.id] || 0) - (itemCountById[left.id] || 0)
+                  if (itemDelta !== 0) return itemDelta
+                  const setDelta = (setCountById[right.id] || 0) - (setCountById[left.id] || 0)
+                  if (setDelta !== 0) return setDelta
+                  return String(left.id).localeCompare(String(right.id))
+                })[0]
+              ))
+              .sort((left, right) => left.name.localeCompare(right.name))
+
             setCatalogAdminRealFranchises(list)
-            setCatalogAdminRealFranchiseId(prev => list.some(f => f.id === prev) ? prev : '')
+            setCatalogAdminRealFranchiseId((prev) => {
+              if (!prev) return ''
+              if (list.some((franchise) => franchise.id === prev)) return prev
+              const prevName = rows.find((row) => row.franchise_id === prev)?.name
+              if (!prevName) return ''
+              const match = list.find((franchise) => franchise.name.toLowerCase() === String(prevName).trim().toLowerCase())
+              return match?.id || ''
+            })
           })
       })
   }, [catalogAdminSubcategoryId, isPlatformAdmin, selectedCatalogAdminCategoryName])
@@ -3918,29 +4105,52 @@ function App() {
     if (!isCatalogItemEditMode) return
     const isInitialLoad = catalogEditInitialRef.current
     const subcategoryId = catalogItemEditValues.subcategory_id
+    const selectedSetId = catalogItemEditValues.collectible_set_id
     if (!subcategoryId) {
       setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
       if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
       return
     }
-    supabase.from('franchise_subcategory').select('franchise_id').eq('subcategory_id', subcategoryId)
-      .then(({ data: fsRows }) => {
-        const ids = (fsRows || []).map(r => r.franchise_id)
-        if (!ids.length) {
-          setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
-          if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
-          return
+    const loadFranchises = async () => {
+      const { data: fsRows } = await supabase
+        .from('franchise_subcategory')
+        .select('franchise_id')
+        .eq('subcategory_id', subcategoryId)
+
+      let ids = (fsRows || []).map(r => r.franchise_id).filter(Boolean)
+
+      // If a set is already chosen, constrain franchise options to that set's franchise.
+      if (selectedSetId) {
+        const { data: setRow } = await supabase
+          .from('collectible_sets')
+          .select('franchise_id')
+          .eq('collectible_set_id', selectedSetId)
+          .maybeSingle()
+        if (setRow?.franchise_id) {
+          ids = ids.filter((id) => id === setRow.franchise_id)
         }
-        supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
-          .then(({ data }) => {
-            const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
-            setCatalogItemEditLookups(v => ({ ...v, franchises: list }))
-            if (!isInitialLoad) {
-              setCatalogItemEditValues(v => ({ ...v, franchise_id: list.some(f => f.id === v.franchise_id) ? v.franchise_id : '' }))
-            }
-          })
-      })
-  }, [isCatalogItemEditMode, catalogItemEditValues.subcategory_id])
+      }
+
+      if (!ids.length) {
+        setCatalogItemEditLookups(v => ({ ...v, franchises: [] }))
+        if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, franchise_id: '' }))
+        return
+      }
+
+      const { data } = await supabase
+        .from('franchises')
+        .select('franchise_id, name')
+        .in('franchise_id', ids)
+        .order('name')
+      const list = (data || []).map(r => ({ id: r.franchise_id, name: r.name }))
+      setCatalogItemEditLookups(v => ({ ...v, franchises: list }))
+      if (!isInitialLoad) {
+        setCatalogItemEditValues(v => ({ ...v, franchise_id: list.some(f => f.id === v.franchise_id) ? v.franchise_id : '' }))
+      }
+    }
+
+    loadFranchises()
+  }, [isCatalogItemEditMode, catalogItemEditValues.subcategory_id, catalogItemEditValues.collectible_set_id])
 
   // Edit panel: cascade teams from franchise
   useEffect(() => {
@@ -6554,6 +6764,181 @@ function App() {
     setCatalogAdminIsCreatingBrand(false)
     setCatalogAdminIsSavingBrand(false)
   }
+
+  const handleToggleCatalogBulkSelect = (itemId) => {
+    if (!itemId) return
+    setCatalogBulkSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+    setCatalogBulkEditError('')
+    setCatalogBulkEditMessage('')
+  }
+
+  const handleSelectAllCatalogPageItems = () => {
+    setCatalogBulkSelectedIds((current) => {
+      const next = new Set(current)
+      for (const itemId of paginatedCatalogItemIds) next.add(itemId)
+      return next
+    })
+    setCatalogBulkEditError('')
+    setCatalogBulkEditMessage('')
+  }
+
+  const handleClearCatalogBulkSelection = () => {
+    setCatalogBulkSelectedIds(new Set())
+    setCatalogBulkEditError('')
+    setCatalogBulkEditMessage('')
+  }
+
+  const handleApplyCatalogBulkEdit = async () => {
+    const selectedIds = Array.from(catalogBulkSelectedIds)
+    if (selectedIds.length === 0) {
+      setCatalogBulkEditError('Select at least one item first.')
+      return
+    }
+
+    if (selectedCatalogBulkFranchiseIds.length !== 1) {
+      setCatalogBulkEditError('Selected items must share one franchise before changing collectible set.')
+      return
+    }
+
+    if (!catalogBulkEditValues.brand_id) {
+      setCatalogBulkEditError('Choose a brand to apply.')
+      return
+    }
+
+    if (!catalogBulkEditValues.collectible_set_id) {
+      setCatalogBulkEditError('Choose a collectible set to apply.')
+      return
+    }
+
+    const payload = {
+      brand_id: catalogBulkEditValues.brand_id,
+      collectible_set_id: catalogBulkEditValues.collectible_set_id,
+      subcollectble_set_id: null,
+      print_type_id: null,
+    }
+
+    setIsApplyingCatalogBulkEdit(true)
+    setCatalogBulkEditError('')
+    setCatalogBulkEditMessage('')
+
+    const CHUNK_SIZE = 250
+    for (let index = 0; index < selectedIds.length; index += CHUNK_SIZE) {
+      const chunk = selectedIds.slice(index, index + CHUNK_SIZE)
+      const { error } = await supabase
+        .from('items')
+        .update(payload)
+        .in('item_id', chunk)
+
+      if (error) {
+        setCatalogBulkEditError(error.message || 'Could not apply bulk update.')
+        setIsApplyingCatalogBulkEdit(false)
+        return
+      }
+    }
+
+    setCatalogBulkEditMessage(`Updated ${selectedIds.length} item${selectedIds.length === 1 ? '' : 's'}.`)
+    setCatalogBulkSelectedIds(new Set())
+    setCatalogReloadToken((currentToken) => currentToken + 1)
+    setIsApplyingCatalogBulkEdit(false)
+  }
+
+  useEffect(() => {
+    if (!isCatalogBulkEditMode) return
+    setCatalogBulkEditValues({
+      brand_id: '',
+      collectible_set_id: '',
+    })
+    setCatalogBulkBrandOptions([])
+    setCatalogBulkSetOptions([])
+    setCatalogBulkEditError('')
+    setCatalogBulkEditMessage('')
+  }, [isCatalogBulkEditMode])
+
+  useEffect(() => {
+    if (!isCatalogBulkEditMode) return
+
+    const franchiseId = selectedCatalogBulkFranchiseId
+    if (!franchiseId) {
+      setCatalogBulkBrandOptions([])
+      setCatalogBulkEditValues((current) => {
+        if (!current.brand_id && !current.collectible_set_id) return current
+        return { ...current, brand_id: '', collectible_set_id: '' }
+      })
+      return
+    }
+
+    let isActive = true
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('items')
+        .select('brand_id')
+        .eq('franchise_id', franchiseId)
+        .not('brand_id', 'is', null)
+
+      if (!isActive) return
+      if (error) {
+        setCatalogBulkBrandOptions([])
+        return
+      }
+
+      const brandIds = new Set((data || []).map((row) => row.brand_id).filter(Boolean))
+      const options = catalogBrands.filter((brand) => brandIds.has(brand.id))
+      setCatalogBulkBrandOptions(options)
+      setCatalogBulkEditValues((current) => {
+        const keepBrand = current.brand_id && options.some((option) => option.id === current.brand_id)
+        if (keepBrand) return current
+        if (!current.brand_id && !current.collectible_set_id) return current
+        return { ...current, brand_id: '', collectible_set_id: '' }
+      })
+    })()
+
+    return () => { isActive = false }
+  }, [isCatalogBulkEditMode, selectedCatalogBulkFranchiseId, catalogBrands])
+
+  useEffect(() => {
+    if (!isCatalogBulkEditMode) return
+
+    const franchiseId = selectedCatalogBulkFranchiseId
+    if (!franchiseId || !catalogBulkEditValues.brand_id) {
+      setCatalogBulkSetOptions([])
+      setCatalogBulkEditValues((current) => {
+        if (!current.collectible_set_id) return current
+        return { ...current, collectible_set_id: '' }
+      })
+      return
+    }
+
+    let isActive = true
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('collectible_sets')
+        .select('collectible_set_id, name')
+        .eq('franchise_id', franchiseId)
+        .eq('brand_id', catalogBulkEditValues.brand_id)
+        .order('name')
+
+      if (!isActive) return
+      if (error) {
+        setCatalogBulkSetOptions([])
+        return
+      }
+
+      const options = (data || []).map((row) => ({ id: row.collectible_set_id, name: row.name }))
+      setCatalogBulkSetOptions(options)
+      setCatalogBulkEditValues((current) => {
+        if (!current.collectible_set_id) return current
+        const exists = options.some((option) => option.id === current.collectible_set_id)
+        return exists ? current : { ...current, collectible_set_id: '' }
+      })
+    })()
+
+    return () => { isActive = false }
+  }, [isCatalogBulkEditMode, selectedCatalogBulkFranchiseId, catalogBulkEditValues.brand_id])
 
   const handleOpenCatalogItemEdit = async () => {
     const d = selectedCatalogItem?._details || {}
@@ -10255,6 +10640,9 @@ function App() {
   }
 
   const storageLocationPathById = buildStorageLocationPathById(storageLocations)
+  const assignableCustomCollections = customCollections.filter(
+    (collection) => (collection?.name || '').trim() !== DEFAULT_USER_COLLECTION_NAME,
+  )
   const normalizedCollectionSearch = collectionSearchQuery.trim().toLowerCase()
   const getCollectionSortValue = (item) => {
     const marketValue = Number(item?.currentMarketValue || 0)
@@ -12100,8 +12488,9 @@ function App() {
                                   value={primaryLocationId}
                                   onChange={(event) => handleAssignStorageLocationToItem(item, event.target.value)}
                                   disabled={isSavingCollectionOrganization}
+                                  aria-label={`Storage location for ${item.name}`}
                                 >
-                                  <option value="">Set Location</option>
+                                  <option value="">Unassigned</option>
                                   {storageLocations.map((location) => (
                                     <option key={`item-location-${item.id}-${location.id}`} value={location.id}>
                                       {storageLocationPathById[location.id] || location.name}
@@ -12109,7 +12498,7 @@ function App() {
                                   ))}
                                 </select>
 
-                                {customCollections.map((collection) => {
+                                {assignableCustomCollections.map((collection) => {
                                   const isAssigned = Array.isArray(item.collectionIds) && item.collectionIds.includes(collection.id)
                                   return (
                                     <button
@@ -12770,6 +13159,16 @@ function App() {
                     >
                       Manage Catalog
                     </button>
+                    <button
+                      type="button"
+                      className={`catalog-action-pill${isCatalogBulkEditMode ? ' active' : ''}`}
+                      onClick={() => {
+                        setIsCatalogBulkEditMode((current) => !current)
+                        if (isCatalogBulkEditMode) setCatalogBulkSelectedIds(new Set())
+                      }}
+                    >
+                      {isCatalogBulkEditMode ? 'Exit Bulk Edit' : 'Bulk Edit'}
+                    </button>
                   </>
                 )}
                 <button type="button" className="catalog-action-pill">
@@ -13174,6 +13573,27 @@ function App() {
                   <div>
                     <div className="catalog-view-bar">
                       <span className="catalog-view-count">{catalogTotalItemCount.toLocaleString()} items</span>
+                      {isPlatformAdmin && isCatalogBulkEditMode && (
+                        <div className="catalog-bulk-toolbar" role="group" aria-label="Bulk edit selection controls">
+                          <button
+                            type="button"
+                            className="catalog-action-pill"
+                            onClick={handleSelectAllCatalogPageItems}
+                            disabled={paginatedCatalogItemIds.length === 0 || allVisibleCatalogItemsSelected}
+                          >
+                            Select Page
+                          </button>
+                          <button
+                            type="button"
+                            className="catalog-action-pill"
+                            onClick={handleClearCatalogBulkSelection}
+                            disabled={catalogBulkSelectedIds.size === 0}
+                          >
+                            Clear
+                          </button>
+                          <span className="catalog-bulk-count">{catalogBulkSelectedIds.size} selected</span>
+                        </div>
+                      )}
                       <div className="catalog-view-toggle">
                         <button
                           type="button"
@@ -13205,6 +13625,63 @@ function App() {
                       </div>
                     </div>
 
+                    {isPlatformAdmin && isCatalogBulkEditMode && (
+                      <section className="catalog-card catalog-bulk-edit-panel" aria-label="Bulk edit fields">
+                        <div className="catalog-bulk-edit-head">
+                          <h3>Bulk Update Selected Items</h3>
+                          <p>Change collectible set for all selected items in one action. Franchise is not changed.</p>
+                        </div>
+                        <div className="catalog-bulk-edit-grid">
+                          <label htmlFor="catalog-bulk-brand">Brand</label>
+                          <select
+                            id="catalog-bulk-brand"
+                            value={catalogBulkEditValues.brand_id}
+                            disabled={selectedCatalogBulkFranchiseIds.length !== 1}
+                            onChange={(event) => setCatalogBulkEditValues((current) => ({
+                              ...current,
+                              brand_id: event.target.value,
+                              collectible_set_id: '',
+                            }))}
+                          >
+                            <option value="">{selectedCatalogBulkFranchiseIds.length === 1 ? 'Choose brand' : 'Select items from one franchise'}</option>
+                            {catalogBulkBrandOptions.map((brand) => (
+                              <option key={brand.id} value={brand.id}>{brand.name}</option>
+                            ))}
+                          </select>
+
+                          <label htmlFor="catalog-bulk-set">Collectible Set</label>
+                          <select
+                            id="catalog-bulk-set"
+                            value={catalogBulkEditValues.collectible_set_id}
+                            disabled={selectedCatalogBulkFranchiseIds.length !== 1 || !catalogBulkEditValues.brand_id}
+                            onChange={(event) => setCatalogBulkEditValues((current) => ({ ...current, collectible_set_id: event.target.value }))}
+                          >
+                            <option value="">{selectedCatalogBulkFranchiseIds.length === 1 && catalogBulkEditValues.brand_id ? 'Choose collectible set' : 'Choose brand first'}</option>
+                            {catalogBulkSetOptions.map((setRow) => (
+                              <option key={setRow.id} value={setRow.id}>{setRow.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {(catalogBulkEditError || catalogBulkEditMessage) && (
+                          <p className={`catalog-bulk-edit-feedback${catalogBulkEditError ? ' error' : ' success'}`}>
+                            {catalogBulkEditError || catalogBulkEditMessage}
+                          </p>
+                        )}
+
+                        <div className="catalog-bulk-edit-actions">
+                          <button
+                            type="button"
+                            className="catalog-action-pill"
+                            onClick={handleApplyCatalogBulkEdit}
+                            disabled={isApplyingCatalogBulkEdit || catalogBulkSelectedIds.size === 0}
+                          >
+                            {isApplyingCatalogBulkEdit ? 'Applying…' : `Apply to ${catalogBulkSelectedIds.size} item${catalogBulkSelectedIds.size === 1 ? '' : 's'}`}
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
                     {catalogViewMode === 'grid' ? (
                       <div className="catalog-results-grid">
                         {paginatedCatalogItems.map((item) => {
@@ -13225,7 +13702,7 @@ function App() {
                           return (
                             <article
                               key={item.id}
-                              className="catalog-card catalog-item-card"
+                              className={`catalog-card catalog-item-card${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-item-card-selected' : ''}`}
                               role="button"
                               tabIndex={0}
                               onClick={() => handleOpenCatalogItem(item)}
@@ -13236,6 +13713,19 @@ function App() {
                                 }
                               }}
                             >
+                              {isPlatformAdmin && isCatalogBulkEditMode && (
+                                <label
+                                  className="catalog-bulk-select-toggle"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={catalogBulkSelectedIds.has(item.id)}
+                                    onChange={() => handleToggleCatalogBulkSelect(item.id)}
+                                    aria-label={`Select ${item.name || 'catalog item'}`}
+                                  />
+                                </label>
+                              )}
                               {imageUrl ? (
                                 <img className="catalog-item-image" src={imageUrl} alt={item.name || 'Catalog item'} loading="lazy" />
                               ) : (
@@ -13287,12 +13777,25 @@ function App() {
                           return (
                             <article
                               key={item.id}
-                              className="catalog-list-row"
+                              className={`catalog-list-row${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-list-row-selected' : ''}`}
                               role="button"
                               tabIndex={0}
                               onClick={() => handleOpenCatalogItem(item)}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenCatalogItem(item) } }}
                             >
+                              {isPlatformAdmin && isCatalogBulkEditMode && (
+                                <label
+                                  className="catalog-bulk-select-toggle catalog-bulk-select-toggle-list"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={catalogBulkSelectedIds.has(item.id)}
+                                    onChange={() => handleToggleCatalogBulkSelect(item.id)}
+                                    aria-label={`Select ${item.name || 'catalog item'}`}
+                                  />
+                                </label>
+                              )}
                               <div className="catalog-list-thumb">
                                 {imageUrl
                                   ? <img src={imageUrl} alt={item.name || 'Item'} loading="lazy" />
@@ -14772,11 +15275,39 @@ function App() {
                   </div>
                 </header>
 
-                {isCatalogItemEditMode && (
-                  <section className="catalog-card catalog-detail-section catalog-item-edit-panel">
+                <div className="catalog-detail-tabs" role="tablist" aria-label="Item detail tabs">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={catalogDetailViewTab === 'overview'}
+                    className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'overview' ? 'active' : ''}`}
+                    onClick={() => setCatalogDetailViewTab('overview')}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={catalogDetailViewTab === 'reviews'}
+                    className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'reviews' ? 'active' : ''}`}
+                    onClick={() => setCatalogDetailViewTab('reviews')}
+                  >
+                    Reviews ({catalogDetailReviews.length})
+                  </button>
+                </div>
+
+                {catalogDetailViewTab === 'overview' ? (
+                  <>
+                    {isCatalogItemEditMode && (
+                      <section className="catalog-card catalog-detail-section catalog-item-edit-panel">
                     <div className="catalog-item-edit-header">
                       <h3>Edit Item</h3>
-                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
+                      <div className="catalog-item-edit-header-actions">
+                        <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={isSavingCatalogItem} onClick={handleSaveCatalogItem}>
+                          {isSavingCatalogItem ? 'Saving…' : 'Save Changes'}
+                        </button>
+                        <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
+                      </div>
                     </div>
                     {catalogItemEditError && <p className="catalog-admin-form-error">{catalogItemEditError}</p>}
                     <div className="catalog-item-edit-grid">
@@ -14944,16 +15475,10 @@ function App() {
                         })}
                       </div>
                     </div>
-                    <div className="catalog-item-edit-footer">
-                      <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={isSavingCatalogItem} onClick={handleSaveCatalogItem}>
-                        {isSavingCatalogItem ? 'Saving…' : 'Save Changes'}
-                      </button>
-                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
-                    </div>
-                  </section>
-                )}
+                      </section>
+                    )}
 
-                <section className="catalog-detail-market-card">
+                    <section className="catalog-detail-market-card">
                   <div className={`catalog-detail-market-image-wrap${isPsaActive ? ' psa-slab-wrap' : ''}${isBgsActive ? ` bgs-slab-wrap${isBgsBlackLabel ? ' bgs-black-label-wrap' : ''}` : ''}${isCgcActive ? ' cgc-slab-wrap' : ''}${isTAGActive ? ' tag-slab-wrap' : ''}`}>
                     <div className={`catalog-detail-image-frame${isPsaActive ? ' psa-slab-frame' : ''}${isBgsActive ? ` bgs-slab-frame${isBgsBlackLabel ? ' bgs-black-label-frame' : ''}` : ''}${isCgcActive ? ' cgc-slab-frame' : ''}${isTAGActive ? ' tag-slab-frame' : ''}`}>
                     {(() => {
@@ -15402,14 +15927,14 @@ function App() {
                       ) : null}
                     </aside>
                   </div>
-                </section>
+                    </section>
 
-                {/* ── Description band ── */}
-                <section className="catalog-detail-description-band">
-                  <p>{selectedCatalogItem._details?.description || selectedCatalogItem.description || 'N/A'}</p>
-                </section>
+                    {/* ── Description band ── */}
+                    <section className="catalog-detail-description-band">
+                      <p>{selectedCatalogItem._details?.description || selectedCatalogItem.description || 'N/A'}</p>
+                    </section>
 
-                <section className="catalog-detail-grid">
+                    <section className="catalog-detail-grid">
                   <article className="catalog-card catalog-detail-section">
                     <h3>Available Listings on CollectorsHub</h3>
                     <div className="catalog-detail-list-row" role="button" tabIndex={0}>
@@ -15480,9 +16005,9 @@ function App() {
                       <span className="catalog-detail-map-link">N/A</span>
                     )}
                   </article>
-                </section>
+                  </section>
 
-                <section className="catalog-card catalog-detail-section">
+                  <section className="catalog-card catalog-detail-section">
                   <h3>Collector Insights</h3>
                   <div className="catalog-detail-community-grid" aria-label="Collector insights">
                     <div className="catalog-detail-community-item">
@@ -15502,10 +16027,10 @@ function App() {
                       <p>{catalogDetailStats?.community_owned != null ? catalogDetailStats.community_owned : '—'}</p>
                     </div>
                   </div>
-                </section>
+                    </section>
 
-                {marketplaceCompletionMatches.length > 0 && ownershipCount === 0 ? (
-                  <section className="catalog-card catalog-detail-section">
+                    {marketplaceCompletionMatches.length > 0 && ownershipCount === 0 ? (
+                      <section className="catalog-card catalog-detail-section">
                     <h3>Needed For</h3>
                     <div className="collection-needed-list">
                       {marketplaceCompletionMatches.map((goal) => {
@@ -15520,10 +16045,10 @@ function App() {
                         )
                       })}
                     </div>
-                  </section>
-                ) : null}
+                      </section>
+                    ) : null}
 
-                <section className="catalog-card catalog-detail-section">
+                    <section className="catalog-card catalog-detail-section">
                   <h3>Tracked Certificate Sales History</h3>
                   {ownedCertEntries.length === 0 ? (
                     <p className="catalog-detail-listing-condition">Add this graded card with a cert number to start tracking cert-level sales history.</p>
@@ -15546,11 +16071,11 @@ function App() {
                       )
                     })
                   )}
-                </section>
+                    </section>
 
-                {/* ── Minifigures in this set ── */}
-                {catalogDetailSetMinifigs.length > 0 && (
-                  <section className="catalog-card catalog-detail-section">
+                    {/* ── Minifigures in this set ── */}
+                    {catalogDetailSetMinifigs.length > 0 && (
+                      <section className="catalog-card catalog-detail-section">
                     <h3>Minifigures in this set ({catalogDetailSetMinifigs.length})</h3>
                     <div className="catalog-detail-minifig-list">
                       {catalogDetailSetMinifigs.map(m => (
@@ -15569,12 +16094,41 @@ function App() {
                         </button>
                       ))}
                     </div>
-                  </section>
-                )}
+                      </section>
+                    )}
 
-                {/* ── Item images ── */}
-                {(catalogItemImages.length > 0 || isPlatformAdmin) && (
-                  <section className="catalog-card catalog-detail-section catalog-detail-images-section">
+                    {isLegoMinifig && (
+                      <section className="catalog-card catalog-detail-section">
+                        <h3>Sets this minifig appears in ({catalogDetailParentSets.length})</h3>
+                        {catalogDetailParentSets.length === 0 ? (
+                          <p className="catalog-detail-listing-condition">No linked sets found for this minifig yet.</p>
+                        ) : (
+                          <div className="catalog-detail-minifig-list">
+                            {catalogDetailParentSets.map((setItem) => (
+                              <button
+                                key={setItem.item_id}
+                                type="button"
+                                className="catalog-detail-minifig-row"
+                                onClick={() => openCatalogItemById(setItem.item_id)}
+                              >
+                                <span className="catalog-detail-parent-set-name">
+                                  {setItem.name}
+                                  {setItem.franchise ? <span className="catalog-detail-minifig-variant"> — {setItem.franchise}</span> : null}
+                                  {setItem.release_year ? <span className="catalog-detail-minifig-variant"> • {setItem.release_year}</span> : null}
+                                </span>
+                                <span className="catalog-detail-parent-set-meta">
+                                  {setItem.quantity > 1 ? `x${setItem.quantity} in set` : 'Included'}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {/* ── Item images ── */}
+                    {(catalogItemImages.length > 0 || isPlatformAdmin) && (
+                      <section className="catalog-card catalog-detail-section catalog-detail-images-section">
                     <div className="catalog-detail-images-header">
                       <h3>Card Images</h3>
                       {isPlatformAdmin && !isCatalogItemEditMode && (
@@ -15614,12 +16168,12 @@ function App() {
                         })}
                       </div>
                     )}
-                  </section>
-                )}
+                      </section>
+                    )}
 
-                {/* ── Full card information ── */}
-                {selectedCatalogItem._details && (
-                  <section className="catalog-card catalog-detail-section catalog-detail-card-info">
+                    {/* ── Full card information ── */}
+                    {selectedCatalogItem._details && (
+                      <section className="catalog-card catalog-detail-section catalog-detail-card-info">
                     <h3>Full Information</h3>
                     <div className="catalog-detail-card-info-grid">
                       {(() => {
@@ -15699,12 +16253,44 @@ function App() {
                         ))
                       })()}
                     </div>
+                      </section>
+                    )}
+
+                    <div className="catalog-detail-cartbar">
+                      <button type="button" className="catalog-detail-cartbtn">Add to Cart</button>
+                    </div>
+                  </>
+                ) : (
+                  <section className="catalog-card catalog-detail-section catalog-detail-reviews-section" role="tabpanel" aria-label="Item reviews">
+                    <div className="catalog-detail-reviews-header">
+                      <h3>Collector Reviews</h3>
+                      <p>
+                        {catalogDetailAverageRating == null
+                          ? `No ratings yet • ${catalogDetailReviews.length} review${catalogDetailReviews.length === 1 ? '' : 's'}`
+                          : `${catalogDetailAverageRating.toFixed(1)}/5 avg • ${catalogDetailReviews.length} review${catalogDetailReviews.length === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                    {catalogDetailReviews.length === 0 ? (
+                      <p className="catalog-detail-listing-condition">No reviews have been added for this item yet.</p>
+                    ) : (
+                      <div className="catalog-detail-reviews-list">
+                        {catalogDetailReviews.map((review) => (
+                          <article key={review.id} className="catalog-detail-review-card">
+                            <div className="catalog-detail-review-topline">
+                              <strong>{review.author}</strong>
+                              <span>
+                                {review.rating == null ? 'Unrated' : `${review.rating.toFixed(1)}/5`}
+                                {review.dateLabel ? ` • ${review.dateLabel}` : ''}
+                              </span>
+                            </div>
+                            {review.title ? <p className="catalog-detail-review-title">{review.title}</p> : null}
+                            <p>{review.body || 'No written comments.'}</p>
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </section>
                 )}
-
-                <div className="catalog-detail-cartbar">
-                  <button type="button" className="catalog-detail-cartbtn">Add to Cart</button>
-                </div>
               </>
             ) : (
               <div className="catalog-card catalog-loading-panel">Item not found.</div>
