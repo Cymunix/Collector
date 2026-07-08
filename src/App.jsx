@@ -3143,7 +3143,7 @@ function App() {
 
       let itemsQuery = supabase
         .from('item_details')
-        .select('*', { count: 'exact' })
+        .select('*', { count: 'planned' })
 
       if (selectedCatalogCategoryRecord) {
         itemsQuery = itemsQuery.eq('category_id', selectedCatalogCategoryRecord.id)
