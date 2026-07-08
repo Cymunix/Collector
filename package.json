@@ -10,7 +10,15 @@
     "preview": "vite preview",
     "import:scryfall": "node scripts/import-scryfall-bulk.mjs",
     "setup:music": "node scripts/setup-music.mjs",
-    "dedup:subjects": "node scripts/dedup-subjects.mjs"
+    "dedup:subjects": "node scripts/dedup-subjects.mjs",
+    "dedup:lego": "node scripts/dedup-lego-items.mjs",
+    "dedup:lego-fig": "node scripts/dedup-lego-rebrickable.mjs",
+    "import:lego3": "node scripts/import-lego-3table.mjs",
+    "import:lego": "node scripts/import-lego-set-minifigs.mjs",
+    "import:minifigs": "node scripts/import-lego-minifigs.mjs",
+    "prices:lego": "node scripts/set-lego-retail-prices.mjs",
+    "seed:sw-factions": "node scripts/seed-star-wars-factions.mjs",
+    "seed:sw-species": "node scripts/seed-star-wars-species.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
@@ -19,7 +27,8 @@
     "react-dom": "^19.2.6",
     "stream-chain": "^4.1.1",
     "stream-json": "^3.2.0",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

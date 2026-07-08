@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import './App.css'
 import { supabase } from './lib/supabaseClient'
 import Admin from './lib/Admin'
@@ -300,6 +301,24 @@ const CARD_CONDITION_SCALE = [
   '1 Poor',
 ]
 
+// LEGO condition scales — sets and minifigs split first on sealed vs opened.
+const LEGO_SET_CONDITION_SCALE = [
+  'New / Sealed (MISB)',
+  'New / Opened',
+  'Used / Complete',
+  'Used / Incomplete',
+]
+const LEGO_MINIFIG_CONDITION_SCALE = [
+  'New / Sealed (MISB)',
+  'New',
+  'Used / Complete',
+  'Used / Incomplete',
+]
+// Sub-grade for a sealed set's box (value is mostly box condition since contents are hidden).
+const LEGO_SET_BOX_GRADES = ['Mint box', 'Minor shelf wear', 'Creased / damaged box']
+// Presence sub-condition for orthogonal parts (instructions, box).
+const LEGO_PRESENCE_OPTIONS = ['Present — mint', 'Present — worn', 'Missing']
+
 const GRADING_COMPANY_OPTIONS = GRADING_COMPANIES.map((c) => c.shortName)
 
 const BGS_SUBGRADE_OPTIONS = ['10', '9.5', '9', '8.5', '8', '7.5', '7', '6.5', '6', '5.5', '5', '4.5', '4', '3.5', '3', '2.5', '2', '1.5', '1']
@@ -388,6 +407,26 @@ const normalizeNullablePositiveInteger = (value) => {
 }
 
 const CATALOG_MINIFIG_CATEGORIES = new Set(['Building Blocks'])
+
+const LEGO_HONORIFICS = [
+  'Grand Admiral', 'Grand Moff', 'Grand Master', 'Fleet Admiral', 'High Admiral',
+  'Admiral', 'General', 'Captain', 'Commander', 'Lieutenant Colonel', 'Lieutenant',
+  'Sergeant Major', 'Sergeant', 'Major', 'Colonel', 'Corporal', 'Private',
+  'Emperor', 'Empress', 'Darth', 'Sith Lord',
+  'Count', 'King', 'Queen', 'Prince', 'Princess',
+  'Master', 'Jedi Master', 'Jedi Knight', 'Jedi',
+  'Lord', 'Lady', 'Doctor', 'Director',
+].sort((a, b) => b.length - a.length)
+
+function deriveMinifigShorthand(name) {
+  if (!name) return ''
+  const alias = name.match(/\(([^)]+)\)/)
+  let s = alias ? alias[1] : name
+  for (const h of LEGO_HONORIFICS) {
+    if (new RegExp(`^${h}\\s+`, 'i').test(s)) { s = s.replace(new RegExp(`^${h}\\s+`, 'i'), ''); break }
+  }
+  return s.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || 'UNKN'
+}
 
 const CATALOG_DYNAMIC_FIELD_DEFINITIONS = {
   'Trading Cards': [
@@ -1680,6 +1719,7 @@ function App() {
   const [catalogLoadError, setCatalogLoadError] = useState('')
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
   const [catalogPage, setCatalogPage] = useState(1)
+  const [catalogPageInput, setCatalogPageInput] = useState('1')
   const [catalogViewMode, setCatalogViewMode] = useState('grid')
   const [catalogSetNavItems, setCatalogSetNavItems] = useState([])
   const [catalogSetNavIndex, setCatalogSetNavIndex] = useState(-1)
@@ -1689,6 +1729,7 @@ function App() {
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
   const [catalogDetailTeams, setCatalogDetailTeams] = useState([])
   const [catalogDetailCardTypes, setCatalogDetailCardTypes] = useState([])
+  const [catalogDetailLego, setCatalogDetailLego] = useState(null)
   const [isCatalogItemEditMode, setIsCatalogItemEditMode] = useState(false)
   const [catalogItemEditValues, setCatalogItemEditValues] = useState({})
   const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [] })
@@ -1708,6 +1749,8 @@ function App() {
   const [bulkImportIdx, setBulkImportIdx] = useState(0)
   const [bulkImportSubjectSearch, setBulkImportSubjectSearch] = useState('')
   const [bulkImportSubjectResults, setBulkImportSubjectResults] = useState([])
+  const [bulkImportTeamSearch, setBulkImportTeamSearch] = useState('')
+  const [bulkImportSpeciesList, setBulkImportSpeciesList] = useState([])
   const [bulkImportIsSaving, setBulkImportIsSaving] = useState(false)
   const [bulkImportSaveError, setBulkImportSaveError] = useState('')
   const [bulkImportSaveProgress, setBulkImportSaveProgress] = useState(0)
@@ -1746,6 +1789,13 @@ function App() {
   const [catalogDetailGradingCompany, setCatalogDetailGradingCompany] = useState('')
   const [catalogDetailSelectedGrade, setCatalogDetailSelectedGrade] = useState('')
   const [catalogDetailSelectedCondition, setCatalogDetailSelectedCondition] = useState('')
+  // LEGO condition sub-fields (sealed box grade, completeness %, orthogonal flags).
+  // Stored on the owned copy under metadata.lego.
+  const [catalogDetailLegoCond, setCatalogDetailLegoCond] = useState({})
+  // Minifigs connected to the currently-viewed set (via set_minifigs).
+  const [catalogDetailSetMinifigs, setCatalogDetailSetMinifigs] = useState([])
+  // Per-minifig "included?" state for the add-to-collection modal (item_id → bool).
+  const [collectionMinifigInclusion, setCollectionMinifigInclusion] = useState({})
   const [catalogDetailCertNumber, setCatalogDetailCertNumber] = useState('')
   const [catalogDetailTagScore, setCatalogDetailTagScore] = useState('')
   const [catalogDetailTagDigReport, setCatalogDetailTagDigReport] = useState('')
@@ -1781,9 +1831,14 @@ function App() {
   const [collectionReloadToken, setCollectionReloadToken] = useState(0)
   const [collectionViewTab, setCollectionViewTab] = useState('overview')
   const [collectionOverviewPage, setCollectionOverviewPage] = useState(1)
+  const [collectionOverviewPageInput, setCollectionOverviewPageInput] = useState('1')
   const [selectedCollectionItemDetailsId, setSelectedCollectionItemDetailsId] = useState('')
   const [selectedCollectionCopyIndex, setSelectedCollectionCopyIndex] = useState(0)
   const [collectionCopySalePriceInput, setCollectionCopySalePriceInput] = useState('')
+  const [isSavingCopyCondition, setIsSavingCopyCondition] = useState(false)
+  // Sell flow: connected minifigs the user owns for the set copy being listed.
+  const [sellConnectedMinifigs, setSellConnectedMinifigs] = useState([])
+  const [sellMinifigInclusion, setSellMinifigInclusion] = useState({})
   const [collectionItemDetailActionError, setCollectionItemDetailActionError] = useState('')
   const [collectionItemDetailActionMessage, setCollectionItemDetailActionMessage] = useState('')
   const [removeConfirmItemId, setRemoveConfirmItemId] = useState('')
@@ -1804,6 +1859,12 @@ function App() {
   const [activeCollectionFilter, setActiveCollectionFilter] = useState('all')
   const [activeStorageFilter, setActiveStorageFilter] = useState('')
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('')
+  // Collection findability: schema-based filters + sort.
+  const [collectionFilterSubtheme, setCollectionFilterSubtheme] = useState('')
+  const [collectionFilterFaction, setCollectionFilterFaction] = useState('')
+  const [collectionFilterSpecies, setCollectionFilterSpecies] = useState('')
+  const [collectionFilterCondition, setCollectionFilterCondition] = useState('')
+  const [collectionSortKey, setCollectionSortKey] = useState('recent')
   const [newCustomCollectionName, setNewCustomCollectionName] = useState('')
   const [newStorageLocationName, setNewStorageLocationName] = useState('')
   const [newStorageParentLocationId, setNewStorageParentLocationId] = useState('')
@@ -1862,6 +1923,7 @@ function App() {
   const [catalogAdminBackImageFile, setCatalogAdminBackImageFile] = useState(null)
   const [catalogAdminBrands, setCatalogAdminBrands] = useState([])
   const [catalogAdminBrandId, setCatalogAdminBrandId] = useState('')
+  const [legoPropertyRegistry, setLegoPropertyRegistry] = useState([])
   const [catalogAdminNewBrandName, setCatalogAdminNewBrandName] = useState('')
   const [catalogAdminIsCreatingBrand, setCatalogAdminIsCreatingBrand] = useState(false)
   const [catalogAdminIsSavingBrand, setCatalogAdminIsSavingBrand] = useState(false)
@@ -2066,6 +2128,13 @@ function App() {
   const metricAllTimeHigh = formatUsd(selectedCatalogItemMetadata.market_all_time_high)
   const metricLowListing = formatUsd(selectedCatalogItemMetadata.market_low_listing)
   const isCardConditionCategory = CARD_CONDITION_CATEGORIES.has(selectedCatalogItem?.categoryName || '')
+  // LEGO condition context: a Building Blocks item is either a set or a minifig.
+  const isLegoConditionCategory = (selectedCatalogItem?.categoryName || '') === 'Building Blocks'
+  const isLegoMinifig = isLegoConditionCategory && (
+    (selectedCatalogItem?._details?.brand || '') === 'Minifigures' ||
+    (!!catalogDetailLego?.rebrickable_fig_id && !catalogDetailLego?.lego_set_number)
+  )
+  const isLegoSet = isLegoConditionCategory && !isLegoMinifig
   const activeGradingCompany = getGradingCompany(catalogDetailGradingCompany)
   const activeGradeScale = catalogDetailIsGraded && catalogDetailGradingCompany
     ? (GRADING_SCALES[catalogDetailGradingCompany] || [])
@@ -2134,7 +2203,11 @@ function App() {
     ? selectedCatalogItemMetadata.conditions.filter((item) => typeof item === 'string' && item.trim())
     : isCardConditionCategory
       ? CARD_CONDITION_SCALE
-      : catalogMarketVariants.map(v => v.name)
+      : isLegoSet
+        ? LEGO_SET_CONDITION_SCALE
+        : isLegoMinifig
+          ? LEGO_MINIFIG_CONDITION_SCALE
+          : catalogMarketVariants.map(v => v.name)
   const selectedCondition =
     typeof catalogDetailSelectedCondition === 'string' && catalogDetailSelectedCondition.trim()
       ? catalogDetailSelectedCondition
@@ -2759,15 +2832,31 @@ function App() {
     }
     supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
       .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
-    supabase.from('brand_franchise').select('brand_id').eq('franchise_id', franchiseId)
-      .then(({ data }) => {
+    // Brands: a franchise can span categories (e.g. "Star Wars" has LEGO items
+    // AND Trading Cards). Brands are franchise-scoped but not category-scoped, so
+    // brand_franchise alone would list card brands (Topps/WizKids) under LEGO.
+    // When a category is selected, derive the brand list from items that actually
+    // exist in that category+franchise so only relevant brands appear.
+    const brandCatId = selectedCatalogCategoryRecord?.id || null
+    const brandSubId = selectedCatalogSubcategoryRecord?.id || null
+    if (brandCatId) {
+      let bq = supabase.from('items').select('brand_id').eq('franchise_id', franchiseId).eq('category_id', brandCatId).not('brand_id', 'is', null)
+      if (brandSubId) bq = bq.eq('subcategory_id', brandSubId)
+      bq.then(({ data }) => {
         const ids = new Set((data || []).map(r => r.brand_id))
         setCatalogFranchiseLinkedBrands(catalogBrands.filter(b => ids.has(b.id)))
       })
+    } else {
+      supabase.from('brand_franchise').select('brand_id').eq('franchise_id', franchiseId)
+        .then(({ data }) => {
+          const ids = new Set((data || []).map(r => r.brand_id))
+          setCatalogFranchiseLinkedBrands(catalogBrands.filter(b => ids.has(b.id)))
+        })
+    }
     let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
     if (catalogBrandId) setQ = setQ.eq('brand_id', catalogBrandId)
     setQ.then(({ data }) => setCatalogSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
-  }, [currentScreen, selectedCatalogFranchiseRecord, catalogBrandId, catalogBrands])
+  }, [currentScreen, selectedCatalogFranchiseRecord, selectedCatalogCategoryRecord, selectedCatalogSubcategoryRecord, catalogBrandId, catalogBrands])
 
   // Effect D: subcollectible set cascade from collectible set
   useEffect(() => {
@@ -2807,6 +2896,7 @@ function App() {
     setCatalogSubjectSearching(true)
     const categoryId = selectedCatalogCategoryRecord?.id || null
     const timer = setTimeout(async () => {
+      let rows = []
       if (categoryId) {
         // Two-step: get subject IDs in this category, then search by name
         const { data: itemRows } = await supabase
@@ -2816,13 +2906,24 @@ function App() {
         if (!subjectIds.length) { setCatalogSubjectResults([]); setCatalogSubjectSearching(false); return }
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
           .in('subject_id', subjectIds).ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
-        const seen = new Set()
-        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name.toLowerCase()) ? false : seen.add(r.subject_name.toLowerCase())).map(r => ({ id: r.subject_id, name: r.subject_name })))
+        rows = data || []
       } else {
         const { data } = await supabase.from('subjects').select('subject_id, subject_name')
           .ilike('subject_name', `%${q}%`).order('subject_name').limit(50)
-        const seen = new Set()
-        setCatalogSubjectResults((data || []).filter(r => seen.has(r.subject_name.toLowerCase()) ? false : seen.add(r.subject_name.toLowerCase())).map(r => ({ id: r.subject_id, name: r.subject_name })))
+        rows = data || []
+      }
+      const seen = new Set()
+      const list = rows.filter(r => seen.has(r.subject_name.toLowerCase()) ? false : seen.add(r.subject_name.toLowerCase()))
+        .map(r => ({ id: r.subject_id, name: r.subject_name }))
+      // Auto-commit when the typed text exactly matches a subject, so typing a full
+      // name applies the filter without needing to click the dropdown result.
+      const exact = list.find(r => r.name.trim().toLowerCase() === q.toLowerCase())
+      if (exact) {
+        setCatalogSubjectId(exact.id)
+        setCatalogSubjectSearch(exact.name)
+        setCatalogSubjectResults([])
+      } else {
+        setCatalogSubjectResults(list)
       }
       setCatalogSubjectSearching(false)
     }, 250)
@@ -3110,8 +3211,38 @@ function App() {
         itemsQuery = itemsQuery.in('item_id', rarityItemIds)
       }
       if (queryText) {
-        const escapedText = queryText.replace(/[%_]/g, '\\$&')
-        itemsQuery = itemsQuery.ilike('subject', `%${escapedText}%`)
+        // Broad top-search. The item_details view is an expensive join, so an
+        // ilike across its columns times out — instead match on cheap base tables
+        // (subject names, set names, description, bricklink id), collect item ids,
+        // then filter the view by id (fast, index-backed).
+        const escapedText = queryText.replace(/[%_]/g, '\\$&').replace(/[(),]/g, ' ')
+        const like = `%${escapedText}%`
+        const idSet = new Set()
+        // 1. Subject names → item_subjects
+        const { data: subjRows } = await supabase.from('subjects').select('subject_id').ilike('subject_name', like).limit(300)
+        const subjIds = (subjRows || []).map(r => r.subject_id)
+        if (subjIds.length) {
+          const { data: isRows } = await supabase.from('item_subjects').select('item_id').in('subject_id', subjIds).limit(2000)
+          for (const r of isRows || []) idSet.add(r.item_id)
+        }
+        // 2. Collectible-set (subtheme) names → items in those sets
+        const { data: csRows } = await supabase.from('collectible_sets').select('collectible_set_id').ilike('name', like).limit(100)
+        const csIds = (csRows || []).map(r => r.collectible_set_id)
+        if (csIds.length) {
+          const { data: itRows } = await supabase.from('items').select('item_id').in('collectible_set_id', csIds).limit(2000)
+          for (const r of itRows || []) idSet.add(r.item_id)
+        }
+        // 3. Item description / BrickLink id
+        const { data: descRows } = await supabase.from('items').select('item_id').or(`description.ilike.${like},bricklink_id.ilike.${like}`).limit(1000)
+        for (const r of descRows || []) idSet.add(r.item_id)
+
+        const ids = [...idSet]
+        if (!ids.length) {
+          setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
+        }
+        // Cap the id list so the request URL stays within limits; broad terms show
+        // the first slice (still paginated within it).
+        itemsQuery = itemsQuery.in('item_id', ids.slice(0, 600))
       }
       if (catalogMinYear) {
         itemsQuery = itemsQuery.gte('release_year', parseInt(catalogMinYear, 10))
@@ -3255,6 +3386,9 @@ function App() {
       setCatalogDetailMtgCardTypeId('')
       setCatalogDetailRarityId('')
       setCatalogDetailStats(null)
+      setCatalogDetailLego(null)
+      setCatalogDetailLegoCond({})
+      setCatalogDetailSetMinifigs([])
       return
     }
     let cancelled = false
@@ -3267,7 +3401,7 @@ function App() {
         isMinifig && itemBrandId
           ? supabase.from('market_variants').select('market_variant_id, name, sort_order').eq('brand_id', itemBrandId).order('sort_order')
           : Promise.resolve({ data: [] }),
-        supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
+        supabase.from('items').select('rarity_id, mtg_card_type_id, lego_set_number, minifig_code, piece_count, upc, bricklink_id, rebrickable_fig_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
         supabase.rpc('get_item_market_stats', { item_ids: [selectedCatalogItem.id] }),
         supabase.rpc('get_item_owner_count', { item_id: selectedCatalogItem.id }),
         supabase.from('item_teams').select('team_id, teams(name)').eq('item_id', selectedCatalogItem.id),
@@ -3283,9 +3417,56 @@ function App() {
         setCatalogItemConditionId('')
         setCatalogDetailMtgCardTypeId(itemMeta?.mtg_card_type_id || '')
         setCatalogDetailRarityId(itemMeta?.rarity_id || '')
+        setCatalogDetailLego(itemMeta || null)
         const stats = Array.isArray(marketData) && marketData.length > 0 ? marketData[0] : null
         setCatalogDetailStats(stats ? { ...stats, community_owned: ownerCountData ?? null } : { community_owned: ownerCountData ?? null })
       }
+
+      // Retail price — isolated query so a not-yet-applied migration (missing
+      // column) can't break the other LEGO detail fields above.
+      const { data: retailRow } = await supabase
+        .from('items').select('retail_price').eq('item_id', selectedCatalogItem.id).maybeSingle()
+      if (!cancelled && retailRow && retailRow.retail_price != null) {
+        setCatalogDetailLego(prev => ({ ...(prev || {}), retail_price: retailRow.retail_price }))
+      }
+
+      // Minifigs connected to this set (empty for non-sets / minifigs).
+      const { data: smRows } = await supabase
+        .from('set_minifigs').select('minifig_item_id, quantity').eq('set_item_id', selectedCatalogItem.id)
+      let setMinifigs = []
+      if (smRows?.length) {
+        const figIds = smRows.map(r => r.minifig_item_id)
+        const { data: figItems } = await supabase
+          .from('items').select('item_id, description, rebrickable_fig_id, minifig_code, subject_id, image_path').in('item_id', figIds)
+        const subjIds = [...new Set((figItems || []).map(f => f.subject_id).filter(Boolean))]
+        const { data: subs } = subjIds.length
+          ? await supabase.from('subjects').select('subject_id, subject_name').in('subject_id', subjIds)
+          : { data: [] }
+        const subjName = Object.fromEntries((subs || []).map(s => [s.subject_id, s.subject_name]))
+        const byId = Object.fromEntries((figItems || []).map(f => [f.item_id, f]))
+        const qtyByFig = Object.fromEntries(smRows.map(r => [r.minifig_item_id, r.quantity]))
+        setMinifigs = figIds.map(id => {
+          const it = byId[id] || {}
+          const subjectName = subjName[it.subject_id]
+          // A set can contain multiple variants of the same character (e.g. two
+          // "Geonosian" figs — one with wings, one without). Show the variant
+          // description so they read as distinct, not duplicated.
+          const variant = subjectName && it.description && it.description.trim().toLowerCase() !== subjectName.trim().toLowerCase()
+            ? it.description.trim()
+            : null
+          return {
+            item_id: id,
+            quantity: qtyByFig[id] || 1,
+            name: subjectName || it.description || 'Minifig',
+            variant,
+            // Prefer our internal minifig code; fall back to the Rebrickable fig-num.
+            code: it.minifig_code || null,
+            figNum: it.rebrickable_fig_id || null,
+            image_path: it.image_path || null,
+          }
+        }).sort((a, b) => a.name.localeCompare(b.name))
+      }
+      if (!cancelled) setCatalogDetailSetMinifigs(setMinifigs)
     }
     load()
     return () => { cancelled = true }
@@ -3296,6 +3477,9 @@ function App() {
       setCatalogPage(catalogTotalPages)
     }
   }, [catalogPage, catalogTotalPages])
+
+  // Keep the "go to page" input in sync when the page changes via buttons/filters.
+  useEffect(() => { setCatalogPageInput(String(catalogPage)) }, [catalogPage])
 
   useEffect(() => {
     const enteredTagCertNumber = normalizeTagCert(catalogDetailCertNumber)
@@ -3470,6 +3654,12 @@ function App() {
     setCatalogAdminDynamicFields(buildCatalogDynamicDefaults(selectedCatalogAdminCategoryName))
     setCatalogAdminPeopleRows(buildDefaultCatalogPeopleRows(selectedCatalogAdminCategoryName))
     setCatalogAdminMinifigRows(CATALOG_MINIFIG_CATEGORIES.has(selectedCatalogAdminCategoryName) ? [buildCatalogMinifigRow()] : [])
+    if (CATALOG_MINIFIG_CATEGORIES.has(selectedCatalogAdminCategoryName)) {
+      supabase.from('lego_property_registry').select('abbreviation, full_name, theme_abbreviation, status').order('abbreviation')
+        .then(({ data }) => setLegoPropertyRegistry(data || []))
+    } else {
+      setLegoPropertyRegistry([])
+    }
   }, [selectedCatalogAdminCategoryName])
 
   useEffect(() => {
@@ -3545,6 +3735,52 @@ function App() {
     supabase.from('teams').select('team_id, name').eq('franchise_id', catalogAdminRealFranchiseId).order('name')
       .then(({ data }) => setCatalogAdminTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
   }, [catalogAdminRealFranchiseId, isPlatformAdmin])
+
+  // Bulk import: load teams for the current row's franchise_name when no global franchise is selected
+  useEffect(() => {
+    if (!isPlatformAdmin || catalogAdminRealFranchiseId) return
+    const franchiseName = bulkImportRows[bulkImportIdx]?.franchise_name?.trim()
+    if (!franchiseName) { setCatalogAdminTeams([]); return }
+    supabase.from('franchises').select('franchise_id').ilike('name', franchiseName).limit(1).maybeSingle()
+      .then(({ data }) => {
+        if (!data?.franchise_id) { setCatalogAdminTeams([]); return }
+        supabase.from('teams').select('team_id, name').eq('franchise_id', data.franchise_id).order('name')
+          .then(({ data: teams }) => setCatalogAdminTeams((teams || []).map(r => ({ id: r.team_id, name: r.name }))))
+      })
+  }, [bulkImportIdx, bulkImportRows, catalogAdminRealFranchiseId, isPlatformAdmin])
+
+  // When teams load (after file is processed), back-fill team_ids on rows that have team_names
+  useEffect(() => {
+    if (!catalogAdminTeams.length || !bulkImportRows.length) return
+    const teamByName = new Map(catalogAdminTeams.map(t => [t.name.toLowerCase(), t.id]))
+    setBulkImportRows(rows => rows.map(r => {
+      if (!r.team_names) return r
+      const ids = r.team_names.split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean)
+        .map(n => teamByName.get(n)).filter(Boolean)
+      if (!ids.length) return r
+      return { ...r, team_ids: [...new Set([...(r.team_ids || []), ...ids])] }
+    }))
+  }, [catalogAdminTeams])
+
+  // Load species list for bulk import (species are global, not franchise-scoped —
+  // matches the catalogAdminSpecies dropdown behavior above).
+  useEffect(() => {
+    if (!bulkImportRows.length) { setBulkImportSpeciesList([]); return }
+    supabase.from('species').select('species_id, name').order('name')
+      .then(({ data }) => setBulkImportSpeciesList((data || []).map(r => ({ id: r.species_id, name: r.name }))))
+  }, [bulkImportRows.length])
+
+  // When species load (after file is processed), back-fill species_id on rows that
+  // carry a species_name from the CSV (case-insensitive match by name).
+  useEffect(() => {
+    if (!bulkImportSpeciesList.length || !bulkImportRows.length) return
+    const speciesByName = new Map(bulkImportSpeciesList.map(s => [s.name.trim().toLowerCase(), s.id]))
+    setBulkImportRows(rows => rows.map(r => {
+      if (r.species_id || !r.species_name?.trim()) return r
+      const id = speciesByName.get(r.species_name.trim().toLowerCase())
+      return id ? { ...r, species_id: id } : r
+    }))
+  }, [bulkImportSpeciesList])
 
   useEffect(() => {
     const q = catalogAdminSubjectSearch.trim()
@@ -4180,7 +4416,7 @@ function App() {
       if (catalogItemIds.length > 0) {
         const { data: catalogRows, error: catalogRowsError } = await supabase
           .from('item_details')
-          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path')
+          .select('item_id, subject, collectible_set, print_type, card_number, print_count, description, category_id, subcategory_id, collectible_set_id, franchise_id, brand_id, front_image_path, franchise, teams, species, brand')
           .in('item_id', catalogItemIds)
 
         if (!catalogRowsError && Array.isArray(catalogRows)) {
@@ -4320,6 +4556,11 @@ function App() {
             categoryName: '',
             subcategoryName: '',
             setName: '',
+            franchiseName: resolvedCatalogItem?.franchise || '',
+            subtheme: resolvedCatalogItem?.collectible_set || '',
+            teams: (resolvedCatalogItem?.teams || '').split(',').map(s => s.trim()).filter(s => s && s.toUpperCase() !== 'N/A'),
+            species: resolvedCatalogItem?.species || '',
+            conditions: new Set(),
             currentMarketValue: 0,
             profitLoss: 0,
             marketUnitPrice: 0,
@@ -4366,6 +4607,7 @@ function App() {
           currentMarketValue,
           profitLoss: currentMarketValue - investedValue,
           categoryName: categoryNameById[resolvedCatalogItem?.category_id] || '',
+          brandName: resolvedCatalogItem?.brand || '',
           subcategoryName: subcategoryNameById[resolvedCatalogItem?.subcategory_id] || '',
           setName: resolvedMetadata.set || resolvedDynamicFields.set || resolvedDynamicFields.series || '',
           createdAt: typeof row?.created_at === 'string' ? row.created_at : '',
@@ -4422,6 +4664,9 @@ function App() {
           resolvedDynamicFields.series ||
           aggregate.setName ||
           ''
+        if (typeof row?.condition === 'string' && row.condition.trim()) {
+          aggregate.conditions.add(row.condition.trim())
+        }
 
         const createdAt = typeof row?.created_at === 'string' ? row.created_at : ''
         if (!aggregate.latestAddedAt || (createdAt && createdAt > aggregate.latestAddedAt)) {
@@ -4449,6 +4694,7 @@ function App() {
           ...item,
           collectionIds: Array.from(item.collectionIds),
           locationIds: Array.from(item.locationIds),
+          conditions: Array.from(item.conditions),
           collectionNames,
           locationPaths,
           primaryLocationPath: locationPaths[0] || '',
@@ -4484,7 +4730,27 @@ function App() {
     let isCancelled = false
 
     const loadCompletionData = async () => {
-      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult, itemCountsResult, categoriesResult, subcategoriesResult, brandsResult, franchisesResult] = await Promise.all([
+      // The item counts drive every "X of Y" total. PostgREST caps a single
+      // response at 1000 rows, so page through ALL items — otherwise the catalog
+      // (9k+ items) is silently truncated and set/category totals come out wrong.
+      const fetchAllItemsWithSet = async () => {
+        const pageSize = 1000
+        let fromIdx = 0
+        const all = []
+        for (;;) {
+          const { data, error } = await supabase
+            .from('items')
+            .select('collectible_set_id, category_id, subcategory_id, franchise_id, brand_id')
+            .not('collectible_set_id', 'is', null)
+            .range(fromIdx, fromIdx + pageSize - 1)
+          if (error || !data?.length) break
+          all.push(...data)
+          if (data.length < pageSize) break
+          fromIdx += pageSize
+        }
+        return all
+      }
+      const [collectibleSetsResult, collectibleSetEntriesResult, trackedGoalsResult, itemRows, categoriesResult, subcategoriesResult, brandsResult, franchisesResult] = await Promise.all([
         supabase
           .from('collectible_sets')
           .select('collectible_set_id, name')
@@ -4501,10 +4767,7 @@ function App() {
           .not('collectible_set_id', 'is', null)
           .eq('is_active', true)
           .order('created_at', { ascending: true }),
-        supabase
-          .from('items')
-          .select('collectible_set_id, category_id, subcategory_id, franchise_id, brand_id')
-          .not('collectible_set_id', 'is', null),
+        fetchAllItemsWithSet(),
         supabase.from('categories').select('category_id, name'),
         supabase.from('subcategories').select('subcategory_id, name'),
         supabase.from('brands').select('brand_id, name'),
@@ -4513,7 +4776,7 @@ function App() {
 
       const itemCountBySetId = {}
       const setMetaById = {}
-      for (const r of (itemCountsResult.data || [])) {
+      for (const r of (itemRows || [])) {
         itemCountBySetId[r.collectible_set_id] = (itemCountBySetId[r.collectible_set_id] || 0) + 1
         if (!setMetaById[r.collectible_set_id]) {
           setMetaById[r.collectible_set_id] = { category_id: r.category_id, subcategory_id: r.subcategory_id, franchise_id: r.franchise_id, brand_id: r.brand_id }
@@ -5482,13 +5745,85 @@ function App() {
     setCollectionPurchaseError('')
   }
 
-  const handleOpenAddToCollectionModal = () => {
-    resetAddToCollectionForm()
-    setIsAddToCollectionModalOpen(true)
+  // Load the minifigs connected to a set (used by the add modal from any entry
+  // point — detail, grid, completion — since the detail effect only runs on the
+  // item screen).
+  const fetchConnectedMinifigs = async (setItemId) => {
+    if (!setItemId) return []
+    const { data: smRows } = await supabase.from('set_minifigs').select('minifig_item_id, quantity').eq('set_item_id', setItemId)
+    if (!smRows?.length) return []
+    const figIds = smRows.map(r => r.minifig_item_id)
+    const { data: figItems } = await supabase.from('items').select('item_id, description, rebrickable_fig_id, minifig_code, subject_id, image_path').in('item_id', figIds)
+    const subjIds = [...new Set((figItems || []).map(f => f.subject_id).filter(Boolean))]
+    const { data: subs } = subjIds.length ? await supabase.from('subjects').select('subject_id, subject_name').in('subject_id', subjIds) : { data: [] }
+    const subjName = Object.fromEntries((subs || []).map(s => [s.subject_id, s.subject_name]))
+    const byId = Object.fromEntries((figItems || []).map(f => [f.item_id, f]))
+    const qtyByFig = Object.fromEntries(smRows.map(r => [r.minifig_item_id, r.quantity]))
+    return figIds.map(id => {
+      const it = byId[id] || {}
+      const subjectName = subjName[it.subject_id]
+      const variant = subjectName && it.description && it.description.trim().toLowerCase() !== subjectName.trim().toLowerCase() ? it.description.trim() : null
+      return { item_id: id, quantity: qtyByFig[id] || 1, name: subjectName || it.description || 'Minifig', variant, code: it.minifig_code || null, figNum: it.rebrickable_fig_id || null, image_path: it.image_path || null }
+    }).sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  const performQuickAdd = async (itemId) => {
+  const handleOpenAddToCollectionModal = async (itemIdOverride = null) => {
+    resetAddToCollectionForm()
+    // Callers may setSelectedCatalogItem() in the same tick, so accept the id
+    // explicitly rather than relying on the (still-stale) state value.
+    const itemId = itemIdOverride || selectedCatalogItem?.id || null
+    // Retail pre-fill (MSRP) — use the loaded value on the detail screen, else fetch.
+    let retail = catalogDetailLego?.retail_price
+    if ((retail == null || retail === '') && itemId) {
+      const { data: rp } = await supabase.from('items').select('retail_price').eq('item_id', itemId).maybeSingle()
+      retail = rp?.retail_price
+    }
+    if (retail != null && retail !== '') setCollectionPurchasePriceInput(String(Number(retail)))
+    setIsAddToCollectionModalOpen(true)
+    // Load connected minifigs on-demand so the include checklist appears no matter
+    // how the modal was opened, then default them all to included.
+    const list = await fetchConnectedMinifigs(itemId)
+    setCatalogDetailSetMinifigs(list)
+    setCollectionMinifigInclusion(Object.fromEntries(list.map(m => [m.item_id, true])))
+  }
+
+  // Open another catalog item's detail screen by id (used by the set→minifig links).
+  const openCatalogItemById = async (itemId) => {
+    if (!itemId) return
+    const { data } = await supabase.from('item_details').select('*').eq('item_id', itemId).maybeSingle()
+    if (!data) return
+    setSelectedCatalogItem({
+      id: itemId,
+      _details: data,
+      categoryName: data.category || '',
+      subcategoryName: data.subcategory || '',
+      name: data.subject || data.description || 'Item',
+      front_image_path: data.front_image_path || null,
+      metadata: {},
+    })
+    setCurrentScreen('catalog_item')
+    if (typeof window !== 'undefined') window.scrollTo?.(0, 0)
+  }
+
+  const performQuickAdd = async (itemArg) => {
+    const itemId = typeof itemArg === 'string' ? itemArg : (itemArg?.id || itemArg?.item_id)
     if (!currentUser?.id || !itemId) return
+    // A set with connected minifigs routes through the modal so the user can choose
+    // which minifigs to include — quick-add can't ask on its own.
+    if (typeof itemArg !== 'string') {
+      const { data: smCheck } = await supabase.from('set_minifigs').select('minifig_item_id').eq('set_item_id', itemId).limit(1)
+      if (smCheck?.length) {
+        setSelectedCatalogItem({
+          ...itemArg,
+          id: itemId,
+          categoryName: itemArg.categoryName || catalogCategoryById[itemArg.category_id] || itemArg._details?.category || '',
+          subcategoryName: itemArg.subcategoryName || catalogSubcategoryById[itemArg.subcategory_id] || itemArg._details?.subcategory || '',
+          brandName: itemArg.brandName || itemArg._brand_name || itemArg._details?.brand || '',
+        })
+        await handleOpenAddToCollectionModal(itemId)
+        return
+      }
+    }
     const isGift = quickAddMode === 'gift'
     const price = isGift ? 0 : Number(quickAddPrice)
     if (!isGift && (!Number.isFinite(price) || price < 0)) return
@@ -5579,6 +5914,37 @@ function App() {
     const copyCondition = catalogDetailIsGraded && isCardConditionCategory
       ? null
       : selectedCondition || null
+    // LEGO sub-condition — prune to only the fields relevant to the chosen condition.
+    const legoConditionMeta = isLegoConditionCategory ? (() => {
+      const lc = catalogDetailLegoCond || {}
+      const out = {}
+      const cond = selectedCondition || ''
+      if (cond.includes('Sealed') && isLegoSet && lc.boxGrade) out.box_grade = lc.boxGrade
+      if (cond.includes('Incomplete') && lc.completenessPct !== '' && lc.completenessPct != null) {
+        const n = Number(lc.completenessPct)
+        if (Number.isFinite(n)) out.completeness_pct = n
+      }
+      if (isLegoSet) {
+        if (lc.instructions) out.instructions = lc.instructions
+        if (lc.box) out.box = lc.box
+        if (lc.minifigs) out.minifigs_present = lc.minifigs
+        // Per-minifig inclusion. A sealed set auto-includes all as New / Sealed (MISB).
+        if (catalogDetailSetMinifigs.length) {
+          const sealed = cond.includes('Sealed')
+          out.minifigs = catalogDetailSetMinifigs.map(m => ({
+            item_id: m.item_id,
+            name: m.name,
+            included: sealed ? true : (collectionMinifigInclusion[m.item_id] ?? true),
+            condition: sealed ? 'New / Sealed (MISB)' : null,
+          }))
+        }
+      }
+      if (isLegoMinifig) {
+        if (lc.accessories) out.accessories = lc.accessories
+        if (lc.assembly) out.assembly = lc.assembly
+      }
+      return Object.keys(out).length ? out : null
+    })() : null
     const collectionId = await getOrCreateDefaultCollectionId(currentUser.id)
     const baseItemPayload = {
       collection_id: collectionId,
@@ -5595,12 +5961,15 @@ function App() {
       purchase_date: new Date().toISOString().slice(0, 10),
       metadata: {
         source: 'catalog_add_modal',
+        ...(legoConditionMeta ? { lego: legoConditionMeta } : {}),
       },
     }
 
-    const { error: insertOwnedCopyError } = await supabase
+    const { data: insertedSetCopy, error: insertOwnedCopyError } = await supabase
       .from('owned_copies')
       .insert(baseItemPayload)
+      .select('id')
+      .single()
 
     if (insertOwnedCopyError) {
       throw new Error(insertOwnedCopyError.message || 'Could not save this copy to your collection.')
@@ -5613,6 +5982,49 @@ function App() {
         [selectedCatalogItem.id]: Number.isFinite(currentCount) ? currentCount + 1 : 1,
       }
     })
+
+    // A set's included minifigs become individually-owned copies, one per physical
+    // instance (a battle-pack fig at ×2 → 2 copies), tagged with provenance back to
+    // this set so the sell flow can offer to include them. Price stays on the set.
+    if (isLegoSet && Array.isArray(legoConditionMeta?.minifigs)) {
+      const figCopies = []
+      for (const mf of legoConditionMeta.minifigs) {
+        if (!mf.included) continue
+        const qty = catalogDetailSetMinifigs.find(x => x.item_id === mf.item_id)?.quantity || 1
+        for (let i = 0; i < qty; i++) {
+          figCopies.push({
+            collection_id: collectionId,
+            user_id: currentUser.id,
+            catalog_item_id: mf.item_id,
+            condition: mf.condition || null,
+            acquisition_type: purchaseDetails?.acquisitionType || 'direct',
+            purchase_price: 0,
+            purchase_date: new Date().toISOString().slice(0, 10),
+            metadata: {
+              source: 'set_inclusion',
+              from_set: {
+                set_catalog_item_id: selectedCatalogItem.id,
+                set_owned_copy_id: insertedSetCopy?.id || null,
+              },
+            },
+          })
+        }
+      }
+      if (figCopies.length) {
+        const { error: figErr } = await supabase.from('owned_copies').insert(figCopies)
+        if (figErr) {
+          console.error('Failed to add included minifigs:', figErr)
+        } else {
+          const added = {}
+          for (const c of figCopies) added[c.catalog_item_id] = (added[c.catalog_item_id] || 0) + 1
+          setOwnedCatalogItemCounts((counts) => {
+            const next = { ...counts }
+            for (const [id, n] of Object.entries(added)) next[id] = (Number(next[id]) || 0) + n
+            return next
+          })
+        }
+      }
+    }
 
     if (shouldTrackCert) {
       setOwnedCatalogItemCerts((currentCerts) => {
@@ -5837,6 +6249,24 @@ function App() {
     }
   }
 
+  const handleUpdateCollectionCopyCondition = async (newCondition) => {
+    if (!currentUser?.id || !selectedCollectionCopyRow?.id || isSavingCopyCondition) return
+    setIsSavingCopyCondition(true)
+    try {
+      const { error } = await supabase
+        .from('owned_copies')
+        .update({ condition: newCondition || null })
+        .eq('id', selectedCollectionCopyRow.id)
+        .eq('user_id', currentUser.id)
+      if (error) throw error
+      setCollectionReloadToken((token) => token + 1)
+    } catch (error) {
+      console.error('Update copy condition failed:', error)
+    } finally {
+      setIsSavingCopyCondition(false)
+    }
+  }
+
   const handleListSelectedCollectionCopyForSale = async () => {
     if (!currentUser?.id || !selectedCollectionCopyRow?.id || isListingCollectionCopyForSale) {
       return
@@ -5864,6 +6294,15 @@ function App() {
         ...(selectedCollectionCopyMetadata || {}),
         listed_for_sale: true,
         listed_at: new Date().toISOString(),
+      }
+      // Bundle the owned connected minifigs the seller chose to include.
+      const includedMinifigs = sellConnectedMinifigs.filter(m => sellMinifigInclusion[m.ownedCopyId])
+      if (includedMinifigs.length) {
+        nextMetadata.included_minifig_copies = includedMinifigs.map(m => ({
+          owned_copy_id: m.ownedCopyId,
+          catalog_item_id: m.catalogItemId,
+          name: m.name,
+        }))
       }
 
       const { error } = await supabase
@@ -6381,8 +6820,17 @@ function App() {
     const iYear     = col(['release_year','year'])
     const iCardNum  = col(['card_number','number'])
     const iImgUrl   = col(['image_url','img_url','image','photo_url','photo'])
-    const iRarity      = col(['rarity','rarity_name'])
-    const iTreatments  = col(['card_treatments','card_treatment','treatments','treatment'])
+    const iRarity         = col(['rarity','rarity_name'])
+    const iTreatments     = col(['card_treatments','card_treatment','treatments','treatment'])
+    const iTeam           = col(['factions','faction','team','team_name','teams','affiliation'])
+    const iParentSet      = col(['parent_set','parent_set_number','parent_set_bricklink_id'])
+    const iLegoSetNumber  = col(['lego_set_number','set_number','set_num','lego_number','set_id'])
+    const iFranchise      = col(['franchise','franchise_name','series','theme'])
+    const iBrandName      = col(['brand','brand_name','manufacturer'])
+    const iCollectibleSet = col(['collectible_set','collectible_set_name','set_name','collection','wave'])
+    const iMinifigCode    = col(['minifig_code','code','internal_code'])
+    const iSpecies        = col(['species','species_name','race'])
+    const iRetailPrice    = col(['retail_price','msrp','rrp','retail','price'])
     return lines.slice(1).filter(l => l.trim()).map((line, idx) => {
       const f = parseRow(line)
       const g = (i) => (i >= 0 ? (f[i] || '') : '')
@@ -6391,6 +6839,10 @@ function App() {
         status: 'pending',
         subject_name: g(iSubject),
         subjectObj: null,
+        franchise_name: g(iFranchise),
+        brand_name: g(iBrandName),
+        collectible_set_name: g(iCollectibleSet),
+        minifig_code: g(iMinifigCode),
         card_number: g(iCard !== iCardNum ? iCard : iCard),
         bricklink_id: g(iBl),
         rebrickable_fig_id: g(iRb),
@@ -6404,8 +6856,15 @@ function App() {
         print_type_name: g(iPrintType),
         card_type_ids: [],
         card_treatment_names: g(iTreatments),
+        team_names: g(iTeam),
+        team_ids: [],
         rarity_id: '',
         rarity_name: g(iRarity),
+        species_id: '',
+        species_name: g(iSpecies),
+        retail_price: g(iRetailPrice),
+        parent_set_bricklink_id: g(iParentSet),
+        lego_set_number: g(iLegoSetNumber),
         image_url: g(iImgUrl),
         image_file: null,
         image_preview: '',
@@ -6425,21 +6884,30 @@ function App() {
     }
     updateBulkRow(bulkImportIdx, { status: 'approved', errorMsg: '' })
     const next = bulkImportRows.findIndex((r, i) => i > bulkImportIdx && r.status === 'pending')
-    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }
+    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]); setBulkImportTeamSearch('') }
   }
 
   const bulkImportSkip = () => {
     updateBulkRow(bulkImportIdx, { status: 'skipped' })
     const next = bulkImportRows.findIndex((r, i) => i > bulkImportIdx && r.status === 'pending')
-    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }
+    if (next >= 0) { setBulkImportIdx(next); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]); setBulkImportTeamSearch('') }
   }
 
   const handleBulkImportFile = (file) => {
     if (!file) return
     const defaultSubsetId = catalogAdminSubsetId
+    const isXlsx = /\.xlsx?$/i.test(file.name)
     const reader = new FileReader()
     reader.onload = async (e) => {
-      let rows = parseBulkImportCsv(e.target.result).map(r => ({
+      let csvText
+      if (isXlsx) {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        csvText = XLSX.utils.sheet_to_csv(ws)
+      } else {
+        csvText = e.target.result
+      }
+      let rows = parseBulkImportCsv(csvText).map(r => ({
         ...r,
         subcollectble_set_id: defaultSubsetId || '',
       }))
@@ -6477,6 +6945,16 @@ function App() {
           return ids.length ? { ...r, card_type_ids: [...new Set([...(r.card_type_ids || []), ...ids])] } : r
         })
       }
+      // Auto-match teams by name against loaded catalogAdminTeams
+      if (catalogAdminTeams.length > 0) {
+        const teamByName = new Map(catalogAdminTeams.map(t => [t.name.toLowerCase(), t.id]))
+        rows = rows.map(r => {
+          if (!r.team_names) return r
+          const ids = r.team_names.split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean)
+            .map(n => teamByName.get(n)).filter(Boolean)
+          return ids.length ? { ...r, team_ids: [...new Set([...(r.team_ids || []), ...ids])] } : r
+        })
+      }
       // Auto-match and auto-create print types from CSV print_type column
       const ptNames = [...new Set(rows.map(r => r.print_type_name).filter(Boolean))]
       if (ptNames.length > 0) {
@@ -6501,6 +6979,74 @@ function App() {
           return id ? { ...r, print_type_id: id } : r
         })
       }
+      // Check for existing items that might be duplicates
+      if (catalogAdminFranchiseId) {
+        const matchedSubjectIds = [...new Set(rows.map(r => r.subjectObj?.id).filter(Boolean))]
+        if (matchedSubjectIds.length > 0) {
+          const { data: existingItems } = await supabase
+            .from('items')
+            .select('item_id, subject_id, card_number')
+            .eq('collectible_set_id', catalogAdminFranchiseId)
+            .in('subject_id', matchedSubjectIds)
+          if (existingItems?.length) {
+            const existingByKey = new Map()
+            for (const item of existingItems) {
+              existingByKey.set(`${item.subject_id}:${item.card_number || ''}`, item)
+            }
+            rows = rows.map(r => {
+              if (!r.subjectObj?.id) return r
+              const key = `${r.subjectObj.id}:${r.card_number?.trim() || ''}`
+              const match = existingByKey.get(key)
+              return match ? { ...r, existingMatch: match } : r
+            })
+          }
+        }
+      }
+      // Building Blocks: flag sets already in the catalog (by lego_set_number +
+      // description) so they show a ⚠ during review, before Save. Variants share
+      // a number but differ by description, so the key includes both. Chunked to
+      // keep the URL small for large imports.
+      if (selectedCatalogAdminCategoryName === 'Building Blocks') {
+        const setNums = [...new Set(rows.map(r => r.lego_set_number?.trim()).filter(Boolean))]
+        if (setNums.length > 0) {
+          const existingByKey = new Map()
+          for (let i = 0; i < setNums.length; i += 300) {
+            const { data: existingSets } = await supabase
+              .from('items').select('item_id, lego_set_number, description')
+              .in('lego_set_number', setNums.slice(i, i + 300))
+            for (const item of existingSets || [])
+              existingByKey.set(`${item.lego_set_number}||${(item.description || '').trim().toLowerCase()}`, item)
+          }
+          if (existingByKey.size > 0) {
+            rows = rows.map(r => {
+              const sn = r.lego_set_number?.trim()
+              if (!sn) return r
+              const match = existingByKey.get(`${sn}||${(r.description || '').trim().toLowerCase()}`)
+              return match ? { ...r, existingMatch: match } : r
+            })
+          }
+        }
+        // Flag minifigs already in the catalog by Rebrickable fig-num (chunked).
+        const figNums = [...new Set(rows.map(r => r.rebrickable_fig_id?.trim()).filter(Boolean))]
+        if (figNums.length > 0) {
+          const existingByFig = new Map()
+          for (let i = 0; i < figNums.length; i += 300) {
+            const { data: existingFigs } = await supabase
+              .from('items').select('item_id, rebrickable_fig_id')
+              .in('rebrickable_fig_id', figNums.slice(i, i + 300))
+            for (const item of existingFigs || [])
+              existingByFig.set(item.rebrickable_fig_id, item)
+          }
+          if (existingByFig.size > 0) {
+            rows = rows.map(r => {
+              if (r.existingMatch) return r
+              const fig = r.rebrickable_fig_id?.trim()
+              const match = fig ? existingByFig.get(fig) : null
+              return match ? { ...r, existingMatch: match } : r
+            })
+          }
+        }
+      }
       setBulkImportRows(rows)
       setBulkImportIdx(0)
       setBulkImportSubjectSearch('')
@@ -6508,7 +7054,11 @@ function App() {
       setBulkImportSaveError('')
       setBulkImportSaveProgress(0)
     }
-    reader.readAsText(file)
+    if (isXlsx) {
+      reader.readAsArrayBuffer(file)
+    } else {
+      reader.readAsText(file)
+    }
   }
 
   const getBulkSubjectType = () => {
@@ -6540,16 +7090,199 @@ function App() {
     setBulkImportSaveError('')
     setBulkImportSaveProgress(0)
     let saved = 0
+    const isLegoCategory = selectedCatalogAdminCategoryName === 'Building Blocks'
+    const bricklinkItemCache = new Map() // bricklink_id → item_id for items created this batch
+    // Caches to avoid redundant DB lookups/creates within this save batch
+    const franchiseIdCache     = new Map() // name_lc → franchise_id
+    const brandIdCache         = new Map() // `${franchise_id}::${name_lc}` → brand_id
+    const collectibleSetIdCache = new Map() // `${franchise_id}::${brand_id}::${name_lc}` → collectible_set_id
+    const franchiseLegoAbbrCache = new Map() // franchise_id → lego_abbreviation
+    const mintedCodeCounters  = new Map() // prefix → last minted NN (in-memory, seeded from DB on first use)
+
+    const mintMinifigCode = async (franchiseId, collectibleSetName, characterName) => {
+      let themeAbbrev = franchiseLegoAbbrCache.get(franchiseId) ?? null
+      if (themeAbbrev === null && franchiseId) {
+        const { data: fr } = await supabase.from('franchises').select('lego_abbreviation').eq('franchise_id', franchiseId).maybeSingle()
+        themeAbbrev = fr?.lego_abbreviation ?? ''
+        franchiseLegoAbbrCache.set(franchiseId, themeAbbrev)
+      }
+      if (!themeAbbrev) return null
+      const colSetLower = (collectibleSetName || '').toLowerCase().trim()
+      const propEntry = colSetLower
+        ? legoPropertyRegistry.find(p =>
+            p.full_name.toLowerCase() === colSetLower ||
+            p.full_name.toLowerCase().includes(colSetLower) ||
+            colSetLower.includes(p.full_name.toLowerCase()))
+        : null
+      if (!propEntry) return null
+      const shorthand = deriveMinifigShorthand(characterName)
+      if (!shorthand) return null
+      const prefix = `${themeAbbrev}-${propEntry.abbreviation}-${shorthand}`
+      let maxNN = mintedCodeCounters.has(prefix) ? mintedCodeCounters.get(prefix) : null
+      if (maxNN === null) {
+        const { data: codeRows } = await supabase.from('items').select('minifig_code').like('minifig_code', `${prefix}-%`).not('minifig_code', 'is', null)
+        const nums = (codeRows || []).map(r => { const m = r.minifig_code?.match(/-(\d+)$/); return m ? parseInt(m[1], 10) : 0 })
+        maxNN = nums.length ? Math.max(...nums) : 0
+      }
+      const nextNN = maxNN + 1
+      mintedCodeCounters.set(prefix, nextNN)
+      return `${prefix}-${String(nextNN).padStart(2, '0')}`
+    }
+
+    const resolveOrCreateFranchise = async (name) => {
+      const key = name.trim().toLowerCase()
+      if (franchiseIdCache.has(key)) return franchiseIdCache.get(key)
+      const { data: found } = await supabase.from('franchises').select('franchise_id').ilike('name', name.trim()).limit(1).maybeSingle()
+      let id = found?.franchise_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('franchises').insert({ name: name.trim() }).select('franchise_id').single()
+        id = created?.franchise_id || null
+      }
+      if (id && catalogAdminSubcategoryId) {
+        await supabase.from('franchise_subcategory').upsert({ franchise_id: id, subcategory_id: catalogAdminSubcategoryId }, { onConflict: 'franchise_id,subcategory_id', ignoreDuplicates: true })
+      }
+      if (id) franchiseIdCache.set(key, id)
+      return id
+    }
+
+    const resolveOrCreateBrand = async (name, franchiseId) => {
+      const key = `${franchiseId}::${name.trim().toLowerCase()}`
+      if (brandIdCache.has(key)) return brandIdCache.get(key)
+      // Look for existing brand linked to this franchise
+      const { data: bfRows } = await supabase.from('brand_franchise').select('brand_id').eq('franchise_id', franchiseId)
+      const linkedIds = (bfRows || []).map(r => r.brand_id)
+      let id = null
+      if (linkedIds.length > 0) {
+        const { data: found } = await supabase.from('brands').select('brand_id').ilike('name', name.trim()).in('brand_id', linkedIds).limit(1).maybeSingle()
+        id = found?.brand_id || null
+      }
+      if (!id) {
+        // Brand might exist but not linked to this franchise yet
+        const { data: anyBrand } = await supabase.from('brands').select('brand_id').ilike('name', name.trim()).limit(1).maybeSingle()
+        id = anyBrand?.brand_id || null
+        if (!id) {
+          const { data: created } = await supabase.from('brands').insert({ name: name.trim() }).select('brand_id').single()
+          id = created?.brand_id || null
+        }
+        if (id) await supabase.from('brand_franchise').upsert({ brand_id: id, franchise_id: franchiseId }, { onConflict: 'brand_id,franchise_id', ignoreDuplicates: true })
+      }
+      if (id) brandIdCache.set(key, id)
+      return id
+    }
+
+    const resolveOrCreateCollectibleSet = async (name, franchiseId, brandId) => {
+      const key = `${franchiseId || ''}::${brandId || ''}::${name.trim().toLowerCase()}`
+      if (collectibleSetIdCache.has(key)) return collectibleSetIdCache.get(key)
+      let q = supabase.from('collectible_sets').select('collectible_set_id').ilike('name', name.trim())
+      if (brandId) q = q.eq('brand_id', brandId)
+      else if (franchiseId) q = q.eq('franchise_id', franchiseId)
+      const { data: found } = await q.limit(1).maybeSingle()
+      let id = found?.collectible_set_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('collectible_sets').insert({ name: name.trim(), brand_id: brandId || null, franchise_id: franchiseId || null }).select('collectible_set_id').single()
+        id = created?.collectible_set_id || null
+      }
+      if (id) collectibleSetIdCache.set(key, id)
+      return id
+    }
+
     for (const row of toSave) {
+      // ── Resolve franchise / brand / collectible set per row ────────────────
+      let rowFranchiseId     = null
+      let rowBrandId         = null
+      let rowCollectibleSetId = null
+      if (row.franchise_name?.trim()) rowFranchiseId = await resolveOrCreateFranchise(row.franchise_name)
+      if (row.brand_name?.trim() && rowFranchiseId) rowBrandId = await resolveOrCreateBrand(row.brand_name, rowFranchiseId)
+      if (row.collectible_set_name?.trim()) rowCollectibleSetId = await resolveOrCreateCollectibleSet(row.collectible_set_name, rowFranchiseId, rowBrandId)
+      // ── Building Blocks: resolve parent set by BrickLink ID or set number ───
+      const resolveParentSetItemId = async (ref) => {
+        if (!ref?.trim()) return null
+        const r = ref.trim()
+        // Try bricklink_id first (e.g. "75357-1")
+        const { data: byBl } = await supabase.from('items').select('item_id').eq('bricklink_id', r).maybeSingle()
+        if (byBl?.item_id) return byBl.item_id
+        // Try lego_set_number (e.g. "75357" without variant suffix)
+        const setNum = r.replace(/-\d+$/, '')
+        const { data: bySn } = await supabase.from('items').select('item_id').eq('lego_set_number', setNum).maybeSingle()
+        return bySn?.item_id || null
+      }
+      // ── Building Blocks: reuse existing minifig by bricklink_id OR fig-num ──
+      // Minifigs are identified by their Rebrickable fig-num (the spec's dedupe
+      // key); many also carry a bricklink code. Match on either so a re-import —
+      // or the same fig arriving from a different source — is skipped, never
+      // duplicated.
+      const blId = row.bricklink_id?.trim() || null
+      const rbId = row.rebrickable_fig_id?.trim() || null
+      if (isLegoCategory && (blId || rbId)) {
+        let existingId = (blId && bricklinkItemCache.get(blId)) || null
+        let matchKey   = blId
+        if (!existingId && blId) {
+          const { data: existing } = await supabase.from('items').select('item_id').eq('bricklink_id', blId).maybeSingle()
+          existingId = existing?.item_id || null
+        }
+        if (!existingId && rbId) {
+          const { data: existingRb } = await supabase.from('items').select('item_id').eq('rebrickable_fig_id', rbId).maybeSingle()
+          if (existingRb?.item_id) { existingId = existingRb.item_id; matchKey = rbId }
+        }
+        if (existingId) {
+          if (row.parent_set_bricklink_id?.trim()) {
+            const parentId = await resolveParentSetItemId(row.parent_set_bricklink_id)
+            if (parentId) {
+              await supabase.from('set_minifigs').upsert(
+                { set_item_id: parentId, minifig_item_id: existingId, quantity: 1 },
+                { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true }
+              )
+            }
+          }
+          updateBulkRow(row._origIdx, { status: 'skipped', errorMsg: `Already in catalog (${matchKey})` })
+          saved++
+          setBulkImportSaveProgress(saved)
+          continue
+        }
+      }
+      // ── Building Blocks: skip a SET that already exists ───────────────────
+      // Sets are keyed by lego_set_number (they usually have no bricklink_id, so
+      // the check above never catches them). Variants share a number but differ
+      // by description ("Variant: Black Box" vs "Blue Box"), so match on both.
+      // Without this, re-running an interrupted import duplicates every set that
+      // was already saved.
+      const rowSetNum = isLegoCategory ? (row.lego_set_number?.trim() || null) : null
+      if (rowSetNum) {
+        const rowDesc = (row.description?.trim() || '').toLowerCase()
+        const { data: existingSets } = await supabase
+          .from('items').select('item_id, description').eq('lego_set_number', rowSetNum)
+        const dup = (existingSets || []).find(s => (s.description?.trim() || '').toLowerCase() === rowDesc)
+        if (dup) {
+          // Backfill retail price onto an already-imported set when the CSV supplies one.
+          const rp = row.retail_price
+          if (rp !== '' && rp != null && Number.isFinite(Number(rp))) {
+            await supabase.from('items').update({ retail_price: Number(rp) }).eq('item_id', dup.item_id)
+          }
+          updateBulkRow(row._origIdx, { status: 'skipped', errorMsg: `Already in catalog (set ${rowSetNum})` })
+          saved++
+          setBulkImportSaveProgress(saved)
+          continue
+        }
+      }
+      // ── Mint minifig code — only for minifig items, not sets ──────────────
+      // Sets have numeric BrickLink IDs (e.g. "75357-1") or an explicit lego_set_number.
+      // Minifig BrickLink IDs start with letters (e.g. "sw0001", "col001").
+      let mintedCode = row.minifig_code?.trim() || null
+      const rowIsSet = !!(row.lego_set_number?.trim() || (blId && /^\d/.test(blId)))
+      if (isLegoCategory && !mintedCode && !rowIsSet && rowFranchiseId) {
+        const charName = row.subjectObj?.name || row.subject_name?.trim() || ''
+        mintedCode = await mintMinifigCode(rowFranchiseId, row.collectible_set_name, charName) || null
+      }
+      // ── Create new item ────────────────────────────────────────────────────
       const { data: created, error } = await supabase.from('items').insert({
         category_id:          catalogAdminCategoryId        || null,
         subcategory_id:       catalogAdminSubcategoryId      || null,
-        franchise_id:         catalogAdminRealFranchiseId    || null,
-        brand_id:             catalogAdminBrandId            || null,
-        collectible_set_id:   catalogAdminFranchiseId        || null,
+        franchise_id:         rowFranchiseId                || null,
+        brand_id:             rowBrandId                    || null,
+        collectible_set_id:   rowCollectibleSetId           || null,
         subcollectble_set_id: row.subcollectble_set_id       || null,
         print_type_id:        row.print_type_id              || null,
-        bricklink_id:         row.bricklink_id?.trim()       || null,
+        bricklink_id:         blId                           || null,
         rebrickable_fig_id:   row.rebrickable_fig_id?.trim() || null,
         piece_count:          row.piece_count !== '' ? Number(row.piece_count) : null,
         print_count:          row.print_count !== '' ? Number(row.print_count) : null,
@@ -6558,11 +7291,15 @@ function App() {
         card_number:          row.card_number?.trim()        || null,
         release_year:         row.release_year !== '' ? Number(row.release_year) : null,
         rarity_id:            row.rarity_id                  || null,
+        minifig_code:         mintedCode,
+        lego_set_number:      row.lego_set_number?.trim()    || null,
+        retail_price:         row.retail_price !== '' && row.retail_price != null && Number.isFinite(Number(row.retail_price)) ? Number(row.retail_price) : null,
       }).select('item_id').single()
       if (error) {
         updateBulkRow(row._origIdx, { status: 'error', errorMsg: error.message })
         continue
       }
+      if (isLegoCategory && blId) bricklinkItemCache.set(blId, created.item_id)
       if (!row.subjectObj?.id && !row.subject_name?.trim()) {
         updateBulkRow(row._origIdx, { status: 'error', errorMsg: 'No subject — cannot save.' })
         continue
@@ -6585,9 +7322,9 @@ function App() {
             .single()
           subjectId = newSub?.subject_id || null
         }
-        if (subjectId && catalogAdminRealFranchiseId) {
+        if (subjectId && rowFranchiseId) {
           await supabase.from('subject_franchise').upsert(
-            { subject_id: subjectId, franchise_id: catalogAdminRealFranchiseId },
+            { subject_id: subjectId, franchise_id: rowFranchiseId },
             { onConflict: 'subject_id,franchise_id' }
           )
         }
@@ -6595,10 +7332,28 @@ function App() {
       if (subjectId) {
         await supabase.from('items').update({ subject_id: subjectId }).eq('item_id', created.item_id)
         await supabase.from('item_subjects').insert({ item_id: created.item_id, subject_id: subjectId })
+        if (row.species_id) {
+          await supabase.from('subjects').update({ species_id: row.species_id }).eq('subject_id', subjectId)
+        }
       }
       if (row.card_type_ids?.length > 0) {
         const { error: ctErr } = await supabase.from('item_card_types').insert(row.card_type_ids.map(ctid => ({ item_id: created.item_id, card_type_id: ctid })))
         if (ctErr) console.error('item_card_types insert error (bulk):', ctErr)
+      }
+      if (row.team_ids?.length > 0) {
+        const { error: tmErr } = await supabase.from('item_teams').insert(row.team_ids.map(tid => ({ item_id: created.item_id, team_id: tid })))
+        if (tmErr) console.error('item_teams insert error (bulk):', tmErr)
+      }
+      if (row.parent_set_bricklink_id?.trim() && selectedCatalogAdminCategoryName === 'Building Blocks') {
+        const parentSetId = await resolveParentSetItemId(row.parent_set_bricklink_id)
+        if (parentSetId) {
+          await supabase.from('set_minifigs').upsert(
+            { set_item_id: parentSetId, minifig_item_id: created.item_id, quantity: 1 },
+            { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true }
+          )
+        } else {
+          console.warn(`bulk import: parent set not found for "${row.parent_set_bricklink_id.trim()}"`)
+        }
       }
       if (row.image_file) {
         const ext = row.image_file.name.split('.').pop()
@@ -9190,19 +9945,43 @@ function App() {
   const handleRemoveCollectionItem = async (item, mode) => {
     if (!currentUser?.id) return
     setRemoveConfirmItemId('')
+
+    // Resolve which set copy ids we're removing (fetch ids first so we can also
+    // clean up the minifigs that came with them).
+    let setCopyIds = []
     if (mode === 'all') {
-      await supabase.from('owned_copies').delete().eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
+      const { data } = await supabase.from('owned_copies').select('id')
+        .eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
+      setCopyIds = (data || []).map(r => r.id)
     } else {
-      const { data: copies } = await supabase
-        .from('owned_copies')
+      const { data } = await supabase.from('owned_copies').select('id')
+        .eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
+        .order('created_at', { ascending: true }).limit(1)
+      setCopyIds = data?.[0]?.id ? [data[0].id] : []
+    }
+    if (!setCopyIds.length) return
+
+    // For a LEGO set, find the minifig copies that came WITH these set copies
+    // (provenance: metadata.from_set.set_owned_copy_id) and offer to remove them.
+    let figCopyIds = []
+    if (item.categoryName === 'Building Blocks') {
+      const { data: figCopies } = await supabase.from('owned_copies')
         .select('id')
         .eq('user_id', currentUser.id)
-        .eq('catalog_item_id', item.id)
-        .order('created_at', { ascending: true })
-        .limit(1)
-      if (copies?.[0]?.id) {
-        await supabase.from('owned_copies').delete().eq('id', copies[0].id)
-      }
+        .in('metadata->from_set->>set_owned_copy_id', setCopyIds)
+      figCopyIds = (figCopies || []).map(r => r.id)
+    }
+
+    let alsoRemoveFigs = false
+    if (figCopyIds.length) {
+      alsoRemoveFigs = window.confirm(
+        `Also remove the ${figCopyIds.length} connected minifig${figCopyIds.length > 1 ? 's' : ''} that came with this set?`,
+      )
+    }
+
+    await supabase.from('owned_copies').delete().in('id', setCopyIds)
+    if (alsoRemoveFigs && figCopyIds.length) {
+      await supabase.from('owned_copies').delete().in('id', figCopyIds)
     }
     setCollectionReloadToken((t) => t + 1)
   }
@@ -9419,6 +10198,11 @@ function App() {
       }
     }
 
+    if (collectionFilterSubtheme && (item.subtheme || '') !== collectionFilterSubtheme) return false
+    if (collectionFilterFaction && !(Array.isArray(item.teams) && item.teams.includes(collectionFilterFaction))) return false
+    if (collectionFilterSpecies && (item.species || '') !== collectionFilterSpecies) return false
+    if (collectionFilterCondition && !(Array.isArray(item.conditions) && item.conditions.includes(collectionFilterCondition))) return false
+
     if (!normalizedCollectionSearch) {
       return true
     }
@@ -9436,7 +10220,29 @@ function App() {
       .toLowerCase()
 
     return searchText.includes(normalizedCollectionSearch)
+  }).sort((a, b) => {
+    switch (collectionSortKey) {
+      case 'name':        return (a.name || '').localeCompare(b.name || '')
+      case 'value_desc':  return Number(b.currentMarketValue || 0) - Number(a.currentMarketValue || 0)
+      case 'value_asc':   return Number(a.currentMarketValue || 0) - Number(b.currentMarketValue || 0)
+      case 'quantity':    return Number(b.totalQuantity || 0) - Number(a.totalQuantity || 0)
+      case 'recent':
+      default:            return (b.latestAddedAt || '').localeCompare(a.latestAddedAt || '')
+    }
   })
+
+  // Distinct filter options present in the collection (drives the dropdowns).
+  const collectionFilterOptions = (() => {
+    const subthemes = new Set(), factions = new Set(), species = new Set(), conditions = new Set()
+    for (const item of collectionItems) {
+      if (item.subtheme) subthemes.add(item.subtheme)
+      if (Array.isArray(item.teams)) item.teams.forEach(t => factions.add(t))
+      if (item.species) species.add(item.species)
+      if (Array.isArray(item.conditions)) item.conditions.forEach(c => conditions.add(c))
+    }
+    const sorted = (s) => [...s].sort((a, b) => a.localeCompare(b))
+    return { subthemes: sorted(subthemes), factions: sorted(factions), species: sorted(species), conditions: sorted(conditions) }
+  })()
 
   const filteredCollectionItemIds = new Set(filteredCollectionItems.map((item) => item.id))
   const filteredInventoryRows = collectionInventoryRows.filter((row) => filteredCollectionItemIds.has(row.catalogItemId))
@@ -9507,6 +10313,14 @@ function App() {
     (selectedCollectionCopyRow?.gradingCompany
       ? `${selectedCollectionCopyRow.gradingCompany}${selectedCollectionCopyRow.grade ? ` ${selectedCollectionCopyRow.grade}` : ''}`
       : '')
+  // Editable condition scale for this owned copy, based on its category/brand.
+  const selectedCopyIsLego = selectedCollectionCopyRow?.categoryName === 'Building Blocks'
+  const selectedCopyIsLegoSet = selectedCopyIsLego && selectedCollectionCopyRow?.brandName === 'Sets'
+  const selectedCopyConditionOptions = CARD_CONDITION_CATEGORIES.has(selectedCollectionCopyRow?.categoryName || '')
+    ? CARD_CONDITION_SCALE
+    : selectedCopyIsLego
+      ? (selectedCopyIsLegoSet ? LEGO_SET_CONDITION_SCALE : LEGO_MINIFIG_CONDITION_SCALE)
+      : []
   const selectedCollectionCopyCollection = Array.isArray(selectedCollectionCopyRow?.collectionNames) && selectedCollectionCopyRow.collectionNames.length > 0
     ? selectedCollectionCopyRow.collectionNames.join(', ')
     : 'Personal Collection'
@@ -9550,6 +10364,52 @@ function App() {
       Number.isFinite(Number(currentSalePrice)) ? String(Number(currentSalePrice)) : '',
     )
   }, [selectedCollectionItemCopyRows, selectedCollectionCopyIndex, selectedCollectionCopyRow?.salePrice])
+
+  // Sell flow: for a LEGO set copy, load the connected minifigs the user actually
+  // owns (available copies), so listing can offer to bundle them in.
+  useEffect(() => {
+    const copy = selectedCollectionCopyRow
+    if (!currentUser?.id || !copy?.id || copy.categoryName !== 'Building Blocks') {
+      setSellConnectedMinifigs([]); setSellMinifigInclusion({}); return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data: sm } = await supabase
+        .from('set_minifigs').select('minifig_item_id').eq('set_item_id', copy.catalogItemId)
+      const figIds = (sm || []).map(r => r.minifig_item_id)
+      if (!figIds.length) { if (!cancelled) { setSellConnectedMinifigs([]); setSellMinifigInclusion({}) } return }
+      // Owned copies of those minifigs; keep only ones still available (a null
+      // sale_status means available, so filter in JS to avoid NULL-in-set pitfalls).
+      const { data: ownedRaw } = await supabase
+        .from('owned_copies')
+        .select('id, catalog_item_id, condition, sale_status')
+        .eq('user_id', currentUser.id)
+        .in('catalog_item_id', figIds)
+      const owned = (ownedRaw || []).filter(o => !['listed', 'sold'].includes(o.sale_status))
+      if (!owned.length) { if (!cancelled) { setSellConnectedMinifigs([]); setSellMinifigInclusion({}) } return }
+      // Resolve names.
+      const ownedFigIds = [...new Set(owned.map(o => o.catalog_item_id))]
+      const { data: figItems } = await supabase
+        .from('items').select('item_id, description, subject_id').in('item_id', ownedFigIds)
+      const subjIds = [...new Set((figItems || []).map(f => f.subject_id).filter(Boolean))]
+      const { data: subs } = subjIds.length
+        ? await supabase.from('subjects').select('subject_id, subject_name').in('subject_id', subjIds)
+        : { data: [] }
+      const subjName = Object.fromEntries((subs || []).map(s => [s.subject_id, s.subject_name]))
+      const nameByItem = Object.fromEntries((figItems || []).map(f => [f.item_id, subjName[f.subject_id] || f.description || 'Minifig']))
+      const list = owned.map(o => ({
+        ownedCopyId: o.id,
+        catalogItemId: o.catalog_item_id,
+        name: nameByItem[o.catalog_item_id] || 'Minifig',
+        condition: o.condition || '',
+      })).sort((a, b) => a.name.localeCompare(b.name))
+      if (!cancelled) {
+        setSellConnectedMinifigs(list)
+        setSellMinifigInclusion(Object.fromEntries(list.map(m => [m.ownedCopyId, true])))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [currentUser?.id, selectedCollectionCopyRow?.id, selectedCollectionCopyRow?.catalogItemId, selectedCollectionCopyRow?.categoryName])
 
   const collectibleSetById = collectibleSets.reduce((accumulator, item) => {
     if (item?.id) {
@@ -9677,17 +10537,24 @@ function App() {
       const setEntries = collectibleSetEntriesBySetId[setRecord.id] || []
       const normalizedSetName = (setRecord.set_name || '').trim().toLowerCase()
       const normalizedCategoryName = (setRecord.category_name || '').trim().toLowerCase()
-      const fallbackOwnedItems = collectionItems.filter(
-        (item) =>
+      // Match owned items to this set primarily by collectible_set_id (robust —
+      // works for LEGO and anything without a metadata.set text). Fall back to a
+      // set-name match only for owned items that carry no collectible_set_id.
+      const ownedInSet = collectionItems.filter((item) => {
+        const csid = item.catalogItem?.collectible_set_id
+        if (csid) return csid === setRecord.id
+        return (
+          !!normalizedSetName &&
           (item.setName || '').trim().toLowerCase() === normalizedSetName &&
-          (!normalizedCategoryName || (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName),
-      )
+          (!normalizedCategoryName || (item.categoryName || '').trim().toLowerCase() === normalizedCategoryName)
+        )
+      })
       const linkedEntries = setEntries.filter(e => e.catalog_item_id)
       const totalItems = linkedEntries.length > 0 ? linkedEntries.length : Number(setRecord.total_items || 0)
       const ownedEntries = linkedEntries.filter(
         (entry) => ownedCatalogItemIds.has(entry.catalog_item_id),
       )
-      const ownedCount = ownedEntries.length > 0 ? ownedEntries.length : fallbackOwnedItems.length
+      const ownedCount = ownedEntries.length > 0 ? ownedEntries.length : ownedInSet.length
 
       if (ownedCount <= 0) {
         return null
@@ -9698,7 +10565,7 @@ function App() {
             const ownedItem = ownedItemsByCatalogId[entry.catalog_item_id]
             return total + Number(ownedItem?.currentMarketValue || 0)
           }, 0)
-        : fallbackOwnedItems.reduce((total, ownedItem) => total + Number(ownedItem?.currentMarketValue || 0), 0)
+        : ownedInSet.reduce((total, ownedItem) => total + Number(ownedItem?.currentMarketValue || 0), 0)
       const completionPercent = totalItems > 0 ? (ownedCount / totalItems) * 100 : 0
       const missingCount = totalItems > 0 ? Math.max(totalItems - ownedCount, 0) : 0
       const estimatedRemainingCost = Number.isFinite(Number(setRecord.total_estimated_value))
@@ -9957,13 +10824,16 @@ function App() {
 
   useEffect(() => {
     setCollectionOverviewPage(1)
-  }, [activeCollectionFilter, activeStorageFilter, collectionSearchQuery])
+  }, [activeCollectionFilter, activeStorageFilter, collectionSearchQuery, collectionFilterSubtheme, collectionFilterFaction, collectionFilterSpecies, collectionFilterCondition, collectionSortKey])
 
   useEffect(() => {
     if (collectionOverviewPage > collectionOverviewTotalPages) {
       setCollectionOverviewPage(collectionOverviewTotalPages)
     }
   }, [collectionOverviewPage, collectionOverviewTotalPages])
+
+  // Keep the "go to page" input in sync when the page changes via buttons/filters.
+  useEffect(() => { setCollectionOverviewPageInput(String(collectionOverviewPage)) }, [collectionOverviewPage])
 
   useEffect(() => {
     if (!selectedCollectionItemDetailsId) {
@@ -10521,6 +11391,42 @@ function App() {
                       onChange={(event) => setCollectionSearchQuery(event.target.value)}
                       placeholder="Search by item, collection, location, set, or category"
                     />
+                    <div className="collection-filter-row">
+                      {collectionFilterOptions.subthemes.length > 0 && (
+                        <select className="collection-filter-select" value={collectionFilterSubtheme} onChange={(e) => setCollectionFilterSubtheme(e.target.value)} aria-label="Filter by set">
+                          <option value="">All sets</option>
+                          {collectionFilterOptions.subthemes.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      )}
+                      {collectionFilterOptions.factions.length > 0 && (
+                        <select className="collection-filter-select" value={collectionFilterFaction} onChange={(e) => setCollectionFilterFaction(e.target.value)} aria-label="Filter by faction">
+                          <option value="">All factions</option>
+                          {collectionFilterOptions.factions.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      )}
+                      {collectionFilterOptions.species.length > 0 && (
+                        <select className="collection-filter-select" value={collectionFilterSpecies} onChange={(e) => setCollectionFilterSpecies(e.target.value)} aria-label="Filter by species">
+                          <option value="">All species</option>
+                          {collectionFilterOptions.species.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      )}
+                      {collectionFilterOptions.conditions.length > 0 && (
+                        <select className="collection-filter-select" value={collectionFilterCondition} onChange={(e) => setCollectionFilterCondition(e.target.value)} aria-label="Filter by condition">
+                          <option value="">All conditions</option>
+                          {collectionFilterOptions.conditions.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      )}
+                      <select className="collection-filter-select" value={collectionSortKey} onChange={(e) => setCollectionSortKey(e.target.value)} aria-label="Sort">
+                        <option value="recent">Sort: Recently added</option>
+                        <option value="name">Sort: Name (A–Z)</option>
+                        <option value="value_desc">Sort: Value (high→low)</option>
+                        <option value="value_asc">Sort: Value (low→high)</option>
+                        <option value="quantity">Sort: Quantity</option>
+                      </select>
+                      {(collectionFilterSubtheme || collectionFilterFaction || collectionFilterSpecies || collectionFilterCondition) && (
+                        <button type="button" className="catalog-action-pill" onClick={() => { setCollectionFilterSubtheme(''); setCollectionFilterFaction(''); setCollectionFilterSpecies(''); setCollectionFilterCondition('') }}>Clear filters</button>
+                      )}
+                    </div>
                     <div className="collection-tab-row" role="tablist" aria-label="Collection views">
                       <button
                         type="button"
@@ -10809,6 +11715,9 @@ function App() {
                                       franchise_id:       r.franchise_id,
                                       collectible_set_id: r.collectible_set_id,
                                       brand_id:           r.brand_id,
+                                      categoryName:       na(r.category),
+                                      subcategoryName:    na(r.subcategory),
+                                      brandName:          na(r.brand),
                                       card_number:        r.card_number !== 'N/A' ? r.card_number : null,
                                       print_count:        r.print_count,
                                       metadata:           { image_url: entry.imageUrl, set: na(r.collectible_set) },
@@ -11200,7 +12109,27 @@ function App() {
                           >
                             Previous
                           </button>
-                          <span className="catalog-pagination-page">Page {collectionOverviewPage} / {collectionOverviewTotalPages}</span>
+                          <span className="catalog-pagination-page">
+                            Page{' '}
+                            <input
+                              type="number"
+                              className="catalog-pagination-input"
+                              min={1}
+                              max={collectionOverviewTotalPages}
+                              value={collectionOverviewPageInput}
+                              onChange={(e) => setCollectionOverviewPageInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                              onBlur={() => {
+                                const n = parseInt(collectionOverviewPageInput, 10)
+                                if (!Number.isFinite(n)) { setCollectionOverviewPageInput(String(collectionOverviewPage)); return }
+                                const clamped = Math.min(collectionOverviewTotalPages, Math.max(1, n))
+                                setCollectionOverviewPage(clamped)
+                                setCollectionOverviewPageInput(String(clamped))
+                              }}
+                              aria-label="Go to page"
+                            />
+                            {' '}/ {collectionOverviewTotalPages}
+                          </span>
                           <button
                             type="button"
                             className="catalog-pagination-btn"
@@ -11326,6 +12255,18 @@ function App() {
                             <div>
                               <p className="owned-copy-eyebrow">Condition</p>
                               <h2>{selectedCollectionCopyCondition || 'Condition Not Set'}</h2>
+                              {selectedCopyConditionOptions.length > 0 && (
+                                <select
+                                  className="collection-filter-select"
+                                  style={{ marginTop: 6, maxWidth: 260 }}
+                                  value={selectedCollectionCopyRow.condition || ''}
+                                  disabled={isSavingCopyCondition}
+                                  onChange={(event) => handleUpdateCollectionCopyCondition(event.target.value)}
+                                >
+                                  <option value="">— Set condition —</option>
+                                  {selectedCopyConditionOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                              )}
                               <p className="collection-muted">
                                 {selectedCollectionCopyRow.certNumber ? `Cert #${selectedCollectionCopyRow.certNumber}` : 'Uncertified copy'}
                                 {selectedCollectionCopyRow.acquisitionType
@@ -11452,6 +12393,25 @@ function App() {
                                   {requirement.complete ? '✓' : '✗'} {requirement.label}
                                 </p>
                               ))}
+                            </div>
+                          ) : null}
+
+                          {sellConnectedMinifigs.length > 0 ? (
+                            <div className="collection-minifig-checklist">
+                              <label>Include minifigs you own with this set?</label>
+                              <div className="collection-minifig-rows">
+                                {sellConnectedMinifigs.map(m => (
+                                  <label key={m.ownedCopyId} className="collection-minifig-check">
+                                    <input
+                                      type="checkbox"
+                                      checked={sellMinifigInclusion[m.ownedCopyId] ?? true}
+                                      onChange={e => setSellMinifigInclusion(prev => ({ ...prev, [m.ownedCopyId]: e.target.checked }))}
+                                    />
+                                    <span>{m.name}{m.condition ? ` · ${m.condition}` : ''}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <p className="catalog-admin-hint" style={{ marginTop: 4 }}>Only minifigs connected to this set that you own are shown.</p>
                             </div>
                           ) : null}
 
@@ -11612,7 +12572,7 @@ function App() {
                                 className="catalog-action-pill"
                                 onClick={() => {
                                   setSelectedCatalogItem(item)
-                                  handleOpenAddToCollectionModal()
+                                  handleOpenAddToCollectionModal(item.id)
                                 }}
                               >
                                 Collect
@@ -12331,10 +13291,10 @@ function App() {
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     if (quickAddMode) {
-                                      performQuickAdd(item.id)
+                                      performQuickAdd(item)
                                     } else {
                                       setSelectedCatalogItem({ ...item, categoryName: catalogCategoryById[item.category_id] || '', subcategoryName: catalogSubcategoryById[item.subcategory_id] || '', setName: item._set_name || '', brandName: item._brand_name || '', imageUrl: item.metadata?.image_url || '' })
-                                      handleOpenAddToCollectionModal()
+                                      handleOpenAddToCollectionModal(item.id)
                                     }
                                   }}
                                 >
@@ -12389,7 +13349,27 @@ function App() {
                       >
                         Previous
                       </button>
-                      <span className="catalog-pagination-page">Page {catalogPage} / {catalogTotalPages}</span>
+                      <span className="catalog-pagination-page">
+                        Page{' '}
+                        <input
+                          type="number"
+                          className="catalog-pagination-input"
+                          min={1}
+                          max={catalogTotalPages}
+                          value={catalogPageInput}
+                          onChange={(e) => setCatalogPageInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                          onBlur={() => {
+                            const n = parseInt(catalogPageInput, 10)
+                            if (!Number.isFinite(n)) { setCatalogPageInput(String(catalogPage)); return }
+                            const clamped = Math.min(catalogTotalPages, Math.max(1, n))
+                            setCatalogPage(clamped)
+                            setCatalogPageInput(String(clamped))
+                          }}
+                          aria-label="Go to page"
+                        />
+                        {' '}/ {catalogTotalPages}
+                      </span>
                       <button
                         type="button"
                         className="catalog-pagination-btn"
@@ -12741,7 +13721,7 @@ function App() {
                       {bulkImportRows.length === 0 ? (
                         /* Step 1: pick set + upload CSV */
                         <div className="bulk-import-step1">
-                          <p className="catalog-admin-section-title">1. Select the Collectible Set</p>
+                          <p className="catalog-admin-section-title">1. Select Category &amp; Subcategory</p>
                           <div className="catalog-admin-two-col">
                             <div>
                               <label>Category</label>
@@ -12750,58 +13730,48 @@ function App() {
                                 {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             </div>
-                            {(() => { const _bi = getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || ''); return (<>
                             <div>
-                              <label>{_bi.subcategory}</label>
-                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); if (!_bi.hideFranchise) setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
+                              <label>Subcategory</label>
+                              <select value={catalogAdminSubcategoryId} onChange={e => setCatalogAdminSubcategoryId(e.target.value)} disabled={!catalogAdminCategoryId}>
                                 <option value="">Select subcategory…</option>
                                 {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                               </select>
                             </div>
-                            {!_bi.hideFranchise && (<div>
-                              <label>{_bi.franchise}</label>
-                              <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
-                                <option value="">None</option>
-                                {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                              </select>
-                            </div>)}
-                            <div>
-                              <label>{_bi.brand}</label>
-                              <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
-                                <option value="">None</option>
-                                {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label>{_bi.collectibleSet}</label>
-                              <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
-                                <option value="">None</option>
-                                {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </div>
-                            {catalogAdminSubsets.length > 0 && (
-                              <div>
-                                <label>{_bi.subset} <span className="catalog-admin-hint">(default for all rows)</span></label>
-                                <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
-                                  <option value="">None</option>
-                                  {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                </select>
-                              </div>
-                            )}
-                            </>) })()}
                           </div>
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV</p>
-                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, card_number, print_count, piece_count, release_year, description, upc, bricklink_id, rebrickable_fig_id, card_treatments, rarity</code></p>
+                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV or Excel</p>
+                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, franchise, brand, collectible_set, card_number, team, print_count, piece_count, release_year, description, upc, bricklink_id, rebrickable_fig_id, card_treatments, rarity, parent_set</code></p>
+                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Franchise, brand, and collectible set will be created automatically if they don't exist yet.</p>
                           <label className="bulk-import-upload-area">
-                            <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={e => handleBulkImportFile(e.target.files?.[0])} />
+                            <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style={{ display: 'none' }} onChange={e => handleBulkImportFile(e.target.files?.[0])} />
                             <span className="bulk-import-upload-icon">&#8679;</span>
-                            <span>Click to choose CSV file</span>
+                            <span>Click to choose CSV or Excel file</span>
                           </label>
                         </div>
                       ) : (
                         /* Step 2: review queue */
                         (() => {
                           const cur = bulkImportRows[bulkImportIdx] || {}
+                          const _legoPreviewCode = (() => {
+                            if (selectedCatalogAdminCategoryName !== 'Building Blocks') return ''
+                            // Sets don't get minifig codes — detect by lego_set_number or numeric BrickLink ID
+                            const curBlId = cur.bricklink_id?.trim() || ''
+                            if (cur.lego_set_number?.trim() || (curBlId && /^\d/.test(curBlId))) return ''
+                            if (cur.minifig_code) return cur.minifig_code
+                            const charName = cur.subjectObj?.name || cur.subject_name || ''
+                            const shorthand = deriveMinifigShorthand(charName)
+                            if (!shorthand) return ''
+                            const colSetLower = (cur.collectible_set_name || '').toLowerCase().trim()
+                            const propEntry = colSetLower
+                              ? legoPropertyRegistry.find(p =>
+                                  p.full_name.toLowerCase() === colSetLower ||
+                                  p.full_name.toLowerCase().includes(colSetLower) ||
+                                  colSetLower.includes(p.full_name.toLowerCase()))
+                              : null
+                            const themeAbbrev = propEntry?.theme_abbreviation || ''
+                            const propAbbrev  = propEntry?.abbreviation || ''
+                            if (!themeAbbrev || !propAbbrev) return `??-??-${shorthand}-??`
+                            return `${themeAbbrev}-${propAbbrev}-${shorthand}-??`
+                          })()
                           const approvedCount = bulkImportRows.filter(r => r.status === 'approved').length
                           const savedCount    = bulkImportRows.filter(r => r.status === 'saved').length
                           const skippedCount  = bulkImportRows.filter(r => r.status === 'skipped').length
@@ -12823,7 +13793,7 @@ function App() {
                                     type="button"
                                     className="catalog-action-pill"
                                     disabled={bulkImportIsSaving}
-                                    onClick={() => setBulkImportRows(rows => rows.map(r => r.status === 'pending' ? { ...r, status: 'approved' } : r))}
+                                    onClick={() => setBulkImportRows(rows => rows.map(r => r.status === 'pending' ? { ...r, status: r.existingMatch ? 'skipped' : 'approved' } : r))}
                                   >
                                     Approve All
                                   </button>
@@ -12856,7 +13826,7 @@ function App() {
                                       onClick={() => { setBulkImportIdx(i); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}
                                     >
                                       <span className="bulk-import-row-icon">
-                                        {row.status === 'pending'  ? '○' :
+                                        {row.status === 'pending'  ? (row.existingMatch ? '⚠' : '○') :
                                          row.status === 'approved' ? '✓' :
                                          row.status === 'skipped'  ? '–' :
                                          row.status === 'saved'    ? '✅' : '✗'}
@@ -12871,7 +13841,30 @@ function App() {
                                   ) : (
                                     <>
                                       <p className="bulk-import-editor-rowlabel">Row {bulkImportIdx + 1} of {bulkImportRows.length}</p>
+                                      {cur.existingMatch && (
+                                        <div style={{ margin: '0 0 10px 0', padding: '8px 12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6, fontSize: '0.8rem', color: '#856404' }}>
+                                          ⚠ Already in the catalog{cur.existingMatch.lego_set_number ? ` — set ${cur.existingMatch.lego_set_number}` : cur.existingMatch.rebrickable_fig_id ? ` — ${cur.existingMatch.rebrickable_fig_id}` : cur.existingMatch.card_number ? ` — card #${cur.existingMatch.card_number}` : ''}. It will be skipped on save unless you edit it.
+                                        </div>
+                                      )}
                                       <div className="bulk-import-editor-fields">
+                                        <div className="bulk-import-editor-field">
+                                          <label>Franchise</label>
+                                          <input type="text" value={cur.franchise_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { franchise_name: e.target.value })} placeholder="e.g. Star Wars" />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Brand</label>
+                                          <input type="text" value={cur.brand_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { brand_name: e.target.value })} placeholder="e.g. LEGO" />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
+                                          <label>Collectible Set</label>
+                                          <input type="text" value={cur.collectible_set_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { collectible_set_name: e.target.value })} placeholder="e.g. UCS Millennium Falcon" />
+                                        </div>
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && _legoPreviewCode && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Minifig Code <span className="catalog-admin-hint">{cur.minifig_code ? '(from CSV)' : '(preview — # assigned on save)'}</span></label>
+                                            <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.9rem' }}>{_legoPreviewCode}</span>
+                                          </div>
+                                        )}
                                         <div className="bulk-import-editor-field">
                                           <label>Subject</label>
                                           {cur.subjectObj ? (
@@ -12914,6 +13907,15 @@ function App() {
                                             </div>
                                           )}
                                         </div>
+                                        {bulkImportSpeciesList.length > 0 && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Species</label>
+                                            <select value={cur.species_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { species_id: e.target.value })}>
+                                              <option value="">Unknown</option>
+                                              {bulkImportSpeciesList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                            </select>
+                                          </div>
+                                        )}
                                         <div className="bulk-import-editor-field">
                                           <label>Subset</label>
                                           <select value={cur.subcollectble_set_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subcollectble_set_id: e.target.value })}>
@@ -12945,7 +13947,7 @@ function App() {
                                             <button type="button" className="catalog-admin-create-inline-link" style={{ marginTop: 2 }} onClick={() => setBulkImportCreatingPrintType(true)}>＋ New print type</button>
                                           )}
                                         </div>
-                                        {catalogRarities.length > 0 && (
+                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogRarities.length > 0 && (
                                           <div className="bulk-import-editor-field">
                                             <label>Rarity</label>
                                             <select value={cur.rarity_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rarity_id: e.target.value })}>
@@ -12973,10 +13975,12 @@ function App() {
                                             <input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} />
                                           </div>
                                         )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>Card Number</label>
-                                          <input type="text" value={cur.card_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { card_number: e.target.value })} />
-                                        </div>
+                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Card Number</label>
+                                            <input type="text" value={cur.card_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { card_number: e.target.value })} />
+                                          </div>
+                                        )}
                                         <div className="bulk-import-editor-field">
                                           <label>Release Year</label>
                                           <input type="number" min="1932" max="2100" value={cur.release_year || ''} onChange={e => updateBulkRow(bulkImportIdx, { release_year: e.target.value })} />
@@ -12985,7 +13989,7 @@ function App() {
                                           <label>UPC</label>
                                           <input type="text" value={cur.upc || ''} onChange={e => updateBulkRow(bulkImportIdx, { upc: e.target.value })} />
                                         </div>
-                                        {catalogAllCardTypes.filter(ct => ct.name !== 'Normal').length > 0 && (
+                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAllCardTypes.filter(ct => ct.name !== 'Normal').length > 0 && (
                                           <div className="bulk-import-editor-field bulk-import-editor-field--wide">
                                             <label>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></label>
                                             <div className="catalog-admin-team-list">
@@ -13000,6 +14004,60 @@ function App() {
                                                 </label>
                                               ))}
                                             </div>
+                                          </div>
+                                        )}
+                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                          <label>Factions / Affiliation</label>
+                                          {(cur.team_ids || []).length > 0 && (
+                                            <div className="catalog-admin-subject-tags" style={{ marginBottom: 4 }}>
+                                              {(cur.team_ids || []).map(tid => {
+                                                const tm = catalogAdminTeams.find(t => t.id === tid)
+                                                if (!tm) return null
+                                                return (
+                                                  <span key={tid} className="catalog-admin-subject-tag">
+                                                    <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{tm.name}</span>
+                                                    <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => updateBulkRow(bulkImportIdx, { team_ids: (cur.team_ids || []).filter(id => id !== tid) })}>✕</button>
+                                                  </span>
+                                                )
+                                              })}
+                                            </div>
+                                          )}
+                                          <div className="catalog-admin-subject-search-wrap">
+                                            <input
+                                              className="catalog-admin-inline-input"
+                                              style={{ width: '100%' }}
+                                              placeholder="Search factions…"
+                                              value={bulkImportTeamSearch}
+                                              onChange={e => setBulkImportTeamSearch(e.target.value)}
+                                              autoComplete="off"
+                                            />
+                                            {bulkImportTeamSearch.trim().length > 0 && (() => {
+                                              const q = bulkImportTeamSearch.trim().toLowerCase()
+                                              const selected = new Set(cur.team_ids || [])
+                                              const results = catalogAdminTeams.filter(t => !selected.has(t.id) && t.name.toLowerCase().includes(q))
+                                              if (!results.length) return null
+                                              return (
+                                                <div className="catalog-admin-subject-results">
+                                                  {results.map(t => (
+                                                    <button key={t.id} type="button" className="catalog-admin-subject-result" onClick={() => { updateBulkRow(bulkImportIdx, { team_ids: [...(cur.team_ids || []), t.id] }); setBulkImportTeamSearch('') }}>
+                                                      <span style={{ textTransform: 'uppercase' }}>{t.name}</span>
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              )
+                                            })()}
+                                          </div>
+                                        </div>
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>LEGO Set Number <span className="catalog-admin-hint">(e.g. 75357 — no variant suffix)</span></label>
+                                            <input type="text" value={cur.lego_set_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { lego_set_number: e.target.value })} placeholder="e.g. 75357" />
+                                          </div>
+                                        )}
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Parent Set <span className="catalog-admin-hint">(BrickLink ID or set number of the set this minifig comes in)</span></label>
+                                            <input type="text" value={cur.parent_set_bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { parent_set_bricklink_id: e.target.value })} placeholder="e.g. 75357-1 or 75357" />
                                           </div>
                                         )}
                                         <div className="bulk-import-editor-field bulk-import-editor-field--wide">
@@ -13613,7 +14671,7 @@ function App() {
                     <button
                       type="button"
                       className="catalog-detail-btn catalog-detail-btn-collect"
-                      onClick={() => quickAddMode ? performQuickAdd(selectedCatalogItem.id) : handleOpenAddToCollectionModal()}
+                      onClick={() => quickAddMode ? performQuickAdd(selectedCatalogItem) : handleOpenAddToCollectionModal(selectedCatalogItem?.id)}
                     >
                       {quickAddMode ? (quickAddMode === 'gift' ? 'Collect (Gift)' : 'Collect (Purchase)') : 'Add to My Collection'}
                     </button>
@@ -13957,8 +15015,8 @@ function App() {
                       {isCardConditionCategory ? null : conditionOptions.length > 0 ? (
                         <>
                           <label htmlFor="catalog-detail-condition" className="catalog-detail-label">
-                            {catalogMarketVariants.length > 0 ? 'Condition' : 'Market Variant'}
-                            {catalogMarketVariants.length > 0 && (
+                            {(catalogMarketVariants.length > 0 || isLegoConditionCategory) ? 'Condition' : 'Market Variant'}
+                            {catalogMarketVariants.length > 0 && !isLegoConditionCategory && (
                               <span title="Damaged = missing accessories or visible damage" style={{ cursor: 'help', marginLeft: 4, fontWeight: 'normal' }}>ⓘ</span>
                             )}
                           </label>
@@ -13972,6 +15030,70 @@ function App() {
                               <option key={condition} value={condition}>{condition}</option>
                             ))}
                           </select>
+                          {/* ── LEGO condition sub-fields ─────────────────────── */}
+                          {isLegoConditionCategory && selectedCondition ? (() => {
+                            const isSealed = selectedCondition.includes('Sealed')
+                            const isIncomplete = selectedCondition.includes('Incomplete')
+                            const setLego = (patch) => setCatalogDetailLegoCond(prev => ({ ...prev, ...patch }))
+                            const lc = catalogDetailLegoCond
+                            return (
+                              <div className="catalog-detail-lego-cond">
+                                {isSealed && isLegoSet ? (
+                                  <>
+                                    <label className="catalog-detail-label" htmlFor="lego-box-grade">Box condition</label>
+                                    <select id="lego-box-grade" value={lc.boxGrade || ''} onChange={e => setLego({ boxGrade: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      {LEGO_SET_BOX_GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+                                    </select>
+                                  </>
+                                ) : null}
+                                {isIncomplete ? (
+                                  <>
+                                    <label className="catalog-detail-label" htmlFor="lego-completeness">Completeness (%)</label>
+                                    <input id="lego-completeness" type="number" min={0} max={99} placeholder="e.g. 85"
+                                      value={lc.completenessPct ?? ''} onChange={e => setLego({ completenessPct: e.target.value })} />
+                                  </>
+                                ) : null}
+                                {isLegoSet ? (
+                                  <>
+                                    <label className="catalog-detail-label" htmlFor="lego-instructions">Instructions</label>
+                                    <select id="lego-instructions" value={lc.instructions || ''} onChange={e => setLego({ instructions: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      {LEGO_PRESENCE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                    <label className="catalog-detail-label" htmlFor="lego-box">Original box</label>
+                                    <select id="lego-box" value={lc.box || ''} onChange={e => setLego({ box: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      {LEGO_PRESENCE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                                    </select>
+                                    <label className="catalog-detail-label" htmlFor="lego-minifigs">Minifigs present</label>
+                                    <select id="lego-minifigs" value={lc.minifigs || ''} onChange={e => setLego({ minifigs: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      <option value="All">All present</option>
+                                      <option value="Some">Some present</option>
+                                      <option value="None">None</option>
+                                    </select>
+                                  </>
+                                ) : null}
+                                {isLegoMinifig ? (
+                                  <>
+                                    <label className="catalog-detail-label" htmlFor="lego-accessories">All accessories</label>
+                                    <select id="lego-accessories" value={lc.accessories || ''} onChange={e => setLego({ accessories: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      <option value="Yes">Yes — complete</option>
+                                      <option value="No">No — missing parts</option>
+                                    </select>
+                                    <label className="catalog-detail-label" htmlFor="lego-polybag">Assembly</label>
+                                    <select id="lego-polybag" value={lc.assembly || ''} onChange={e => setLego({ assembly: e.target.value })}>
+                                      <option value="">— Select —</option>
+                                      <option value="Sealed polybag">Sealed in polybag</option>
+                                      <option value="Assembled">Assembled</option>
+                                    </select>
+                                  </>
+                                ) : null}
+                              </div>
+                            )
+                          })() : null}
                         </>
                       ) : null}
 
@@ -14352,6 +15474,30 @@ function App() {
                   )}
                 </section>
 
+                {/* ── Minifigures in this set ── */}
+                {catalogDetailSetMinifigs.length > 0 && (
+                  <section className="catalog-card catalog-detail-section">
+                    <h3>Minifigures in this set ({catalogDetailSetMinifigs.length})</h3>
+                    <div className="catalog-detail-minifig-list">
+                      {catalogDetailSetMinifigs.map(m => (
+                        <button
+                          key={m.item_id}
+                          type="button"
+                          className="catalog-detail-minifig-row"
+                          onClick={() => openCatalogItemById(m.item_id)}
+                        >
+                          <span className="catalog-detail-minifig-name">
+                            {m.name}
+                            {m.variant ? <span className="catalog-detail-minifig-variant"> — {m.variant}</span> : null}
+                            {m.quantity > 1 ? <span className="catalog-detail-minifig-qty"> ×{m.quantity}</span> : null}
+                          </span>
+                          {(m.code || m.figNum) ? <span className="catalog-detail-minifig-fig">{m.code || m.figNum}</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* ── Item images ── */}
                 {(catalogItemImages.length > 0 || isPlatformAdmin) && (
                   <section className="catalog-card catalog-detail-section catalog-detail-images-section">
@@ -14434,12 +15580,34 @@ function App() {
                           ] : []),
                           { label: 'Card Number',   value: d.card_number,         onClick: null },
                           { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
-                          ...(d.bricklink_id?.toLowerCase().startsWith('col') ? [
-                            { label: 'BrickLink ID',   value: d.bricklink_id ?? 'N/A',       onClick: null },
-                            { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
-                          ] : []),
-                        ]
-                        return rows.map(({ label, value, onClick, subjects }) => (
+                          ...(d.category === 'Building Blocks' ? (() => {
+                            const lego = catalogDetailLego || {}
+                            const pc  = lego.piece_count ?? d.piece_count
+                            const bl  = lego.bricklink_id ?? d.bricklink_id
+                            const rb  = lego.rebrickable_fig_id ?? d.rebrickable_fig_id
+                            const upc = lego.upc ?? d.upc
+                            const retail = lego.retail_price
+                            return [
+                              lego.lego_set_number && { label: 'Set Number',    value: lego.lego_set_number, onClick: null },
+                              lego.minifig_code    && { label: 'Minifig Code',   value: lego.minifig_code,    onClick: null },
+                              (retail != null && retail !== '') && { label: 'Retail Price', value: formatUsd(Number(retail)), onClick: null },
+                              (pc != null && pc !== '') && { label: 'Piece Count', value: pc,     onClick: null },
+                              bl  && { label: 'BrickLink ID',   value: bl,  onClick: null },
+                              rb  && { label: 'Rebrickable ID', value: rb,  onClick: null },
+                              upc && { label: 'UPC',            value: upc, onClick: null },
+                            ].filter(Boolean)
+                          })() : [
+                            ...(d.bricklink_id?.toLowerCase().startsWith('col') ? [
+                              { label: 'BrickLink ID',   value: d.bricklink_id ?? 'N/A',       onClick: null },
+                              { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
+                            ] : []),
+                          ]),
+                        ].filter(Boolean)
+                        const CARD_ONLY = new Set(['Card Number', 'Print Count', 'Print Type', 'Subset'])
+                        const visibleRows = d.category === 'Building Blocks'
+                          ? rows.filter(r => !CARD_ONLY.has(r.label))
+                          : rows
+                        return visibleRows.map(({ label, value, onClick, subjects }) => (
                           <div key={label} className="catalog-detail-info-cell">
                             <span className="catalog-detail-info-label">{label}</span>
                             {subjects && subjects.length > 0 ? (
@@ -15877,7 +17045,7 @@ function App() {
                 className="cs-popup-btn cs-popup-btn-collect"
                 onClick={() => {
                   setSelectedCatalogItem(completionSheetPopup.catalogItemObj)
-                  handleOpenAddToCollectionModal()
+                  handleOpenAddToCollectionModal(completionSheetPopup.catalogItemObj.id)
                   setCompletionSheetPopup(null)
                 }}
               >
@@ -16003,6 +17171,30 @@ function App() {
                     </p>
                   ) : null}
                 </>
+              ) : null}
+
+              {isLegoSet && catalogDetailSetMinifigs.length > 0 ? (
+                <div className="collection-minifig-checklist">
+                  <label>Minifigures included</label>
+                  {(selectedCondition || '').includes('Sealed') ? (
+                    <p className="auth-banner">
+                      Sealed set — all {catalogDetailSetMinifigs.length} minifigs auto-included as New / Sealed (MISB).
+                    </p>
+                  ) : (
+                    <div className="collection-minifig-rows">
+                      {catalogDetailSetMinifigs.map(m => (
+                        <label key={m.item_id} className="collection-minifig-check">
+                          <input
+                            type="checkbox"
+                            checked={collectionMinifigInclusion[m.item_id] ?? true}
+                            onChange={e => setCollectionMinifigInclusion(prev => ({ ...prev, [m.item_id]: e.target.checked }))}
+                          />
+                          <span>{m.name}{m.quantity > 1 ? ` ×${m.quantity}` : ''}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : null}
 
               {collectionPurchaseError ? <p className="auth-error">{collectionPurchaseError}</p> : null}
