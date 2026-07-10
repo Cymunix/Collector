@@ -1715,6 +1715,8 @@ function App() {
   const [catalogSets, setCatalogSets] = useState([])
   const [catalogSubsets, setCatalogSubsets] = useState([])
   const [catalogPrintTypes, setCatalogPrintTypes] = useState([])
+  const [catalogCategoryIdsWithItems, setCatalogCategoryIdsWithItems] = useState([])
+  const [catalogSubcategoryIdsWithItems, setCatalogSubcategoryIdsWithItems] = useState([])
   const [isCatalogLoading, setIsCatalogLoading] = useState(false)
   const [catalogLoadError, setCatalogLoadError] = useState('')
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
@@ -2085,7 +2087,9 @@ function App() {
     lookup[brand.id] = brand.name
     return lookup
   }, {})
-  const catalogCategoryOptions = catalogCategories.map((category) => category.name)
+  const catalogCategoryOptions = catalogCategories
+    .filter((category) => catalogCategoryIdsWithItems.includes(category.id))
+    .map((category) => category.name)
   const selectedCatalogCategoryRecord =
     catalogCategory === 'all' ? null : catalogCategories.find((category) => category.name === catalogCategory) || null
   const catalogSubcategoryOptions = catalogSubcategories
@@ -2094,6 +2098,7 @@ function App() {
         return false
       }
       return subcategory.category_id === selectedCatalogCategoryRecord.id
+        && catalogSubcategoryIdsWithItems.includes(subcategory.id)
     })
     .map((subcategory) => subcategory.name)
   const selectedCatalogSubcategoryRecord =
@@ -2853,15 +2858,69 @@ function App() {
     })
   }, [currentScreen, catalogReloadToken])
 
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    supabase
+      .from('items')
+      .select('category_id')
+      .not('category_id', 'is', null)
+      .limit(7000)
+      .then(({ data }) => {
+        setCatalogCategoryIdsWithItems([
+          ...new Set((data || []).map((row) => row.category_id).filter(Boolean)),
+        ])
+      })
+  }, [currentScreen, catalogReloadToken])
+
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const categoryId = selectedCatalogCategoryRecord?.id || ''
+    if (!categoryId) {
+      setCatalogSubcategoryIdsWithItems([])
+      return
+    }
+    supabase
+      .from('items')
+      .select('subcategory_id')
+      .eq('category_id', categoryId)
+      .not('subcategory_id', 'is', null)
+      .limit(7000)
+      .then(({ data }) => {
+        setCatalogSubcategoryIdsWithItems([
+          ...new Set((data || []).map((row) => row.subcategory_id).filter(Boolean)),
+        ])
+      })
+  }, [currentScreen, selectedCatalogCategoryRecord])
+
   // Effect B: franchise cascade from the selected subcategory's actual items.
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const subcategoryId = selectedCatalogSubcategoryRecord?.id || ''
+    const categoryId = selectedCatalogCategoryRecord?.id || ''
     const subcategoryChanged = subcategoryId !== catalogLastSubcategoryRef.current
     catalogLastSubcategoryRef.current = subcategoryId
     if (!subcategoryId) {
-      supabase.from('franchises').select('franchise_id, name').order('name')
-        .then(({ data }) => setCatalogFranchiseBrands((data || []).map(r => ({ id: r.franchise_id, name: r.name }))))
+      let franchiseItemsQuery = supabase
+        .from('items')
+        .select('franchise_id')
+        .not('franchise_id', 'is', null)
+      if (categoryId) franchiseItemsQuery = franchiseItemsQuery.eq('category_id', categoryId)
+
+      franchiseItemsQuery.then(({ data: itemRows }) => {
+        const ids = [...new Set((itemRows || []).map((row) => row.franchise_id).filter(Boolean))]
+        if (!ids.length) { setCatalogFranchiseBrands([]); return }
+        supabase.from('franchises').select('franchise_id, name').in('franchise_id', ids).order('name')
+          .then(({ data }) => {
+            const byName = new Map()
+            for (const row of data || []) {
+              if (!row?.franchise_id || !row?.name) continue
+              if (!byName.has(row.name)) {
+                byName.set(row.name, { id: row.franchise_id, name: row.name })
+              }
+            }
+            setCatalogFranchiseBrands([...byName.values()])
+          })
+      })
       return
     }
     if (subcategoryChanged) {
@@ -2887,7 +2946,7 @@ function App() {
             setCatalogFranchiseBrands([...byName.values()])
           })
       })
-  }, [currentScreen, selectedCatalogSubcategoryRecord])
+  }, [currentScreen, selectedCatalogCategoryRecord, selectedCatalogSubcategoryRecord])
 
   // Effect C: team + set cascade from franchise (set also depends on brand)
   useEffect(() => {
@@ -2913,8 +2972,45 @@ function App() {
     setCatalogTeams([])
     setCatalogSets([])
     setCatalogFranchiseLinkedBrands([])
-    supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
-      .then(({ data }) => setCatalogTeams((data || []).map(r => ({ id: r.team_id, name: r.name }))))
+
+    ;(async () => {
+      let teamItemsQuery = supabase
+        .from('items')
+        .select('item_id')
+        .eq('franchise_id', franchiseId)
+      if (selectedCatalogCategoryRecord?.id) {
+        teamItemsQuery = teamItemsQuery.eq('category_id', selectedCatalogCategoryRecord.id)
+      }
+      if (selectedCatalogSubcategoryRecord?.id) {
+        teamItemsQuery = teamItemsQuery.eq('subcategory_id', selectedCatalogSubcategoryRecord.id)
+      }
+      if (catalogBrandId) {
+        teamItemsQuery = teamItemsQuery.eq('brand_id', catalogBrandId)
+      }
+
+      const { data: scopedItemRows } = await teamItemsQuery.limit(6000)
+      const scopedItemIds = [...new Set((scopedItemRows || []).map((row) => row.item_id).filter(Boolean))]
+      if (!scopedItemIds.length) {
+        setCatalogTeams([])
+      } else {
+        const { data: itemTeamRows } = await supabase
+          .from('item_teams')
+          .select('team_id')
+          .in('item_id', scopedItemIds)
+          .limit(7000)
+        const teamIds = [...new Set((itemTeamRows || []).map((row) => row.team_id).filter(Boolean))]
+        if (!teamIds.length) {
+          setCatalogTeams([])
+        } else {
+          const { data: teamRows } = await supabase
+            .from('teams')
+            .select('team_id, name')
+            .in('team_id', teamIds)
+            .order('name')
+          setCatalogTeams((teamRows || []).map((row) => ({ id: row.team_id, name: row.name })))
+        }
+      }
+    })()
 
     if (franchiseId) {
       let brandQuery = supabase
@@ -2951,9 +3047,34 @@ function App() {
       }
     }
 
-    let setQ = supabase.from('collectible_sets').select('collectible_set_id, name').eq('franchise_id', franchiseId).order('name')
-    if (catalogBrandId) setQ = setQ.eq('brand_id', catalogBrandId)
-    setQ.then(({ data }) => setCatalogSets((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
+    let setItemsQuery = supabase
+      .from('items')
+      .select('collectible_set_id')
+      .eq('franchise_id', franchiseId)
+      .not('collectible_set_id', 'is', null)
+    if (selectedCatalogCategoryRecord?.id) {
+      setItemsQuery = setItemsQuery.eq('category_id', selectedCatalogCategoryRecord.id)
+    }
+    if (selectedCatalogSubcategoryRecord?.id) {
+      setItemsQuery = setItemsQuery.eq('subcategory_id', selectedCatalogSubcategoryRecord.id)
+    }
+    if (catalogBrandId) {
+      setItemsQuery = setItemsQuery.eq('brand_id', catalogBrandId)
+    }
+
+    setItemsQuery.limit(7000).then(async ({ data: setItemRows }) => {
+      const setIds = [...new Set((setItemRows || []).map((row) => row.collectible_set_id).filter(Boolean))]
+      if (!setIds.length) {
+        setCatalogSets([])
+        return
+      }
+      const { data: setRows } = await supabase
+        .from('collectible_sets')
+        .select('collectible_set_id, name')
+        .in('collectible_set_id', setIds)
+        .order('name')
+      setCatalogSets((setRows || []).map((row) => ({ id: row.collectible_set_id, name: row.name })))
+    })
   }, [currentScreen, selectedCatalogFranchiseRecord, selectedCatalogCategoryRecord, selectedCatalogSubcategoryRecord, catalogBrandId, catalogBrands])
 
   // Effect D: subcollectible set cascade from collectible set
@@ -2967,8 +3088,25 @@ function App() {
       return
     }
     if (setChanged) { setCatalogSubsetId(''); setCatalogPrintTypeId('') }
-    supabase.from('subcollectible_sets').select('subcollectble_set_id, name').eq('collectible_set_id', catalogSetId).order('name')
-      .then(({ data }) => setCatalogSubsets((data || []).map(r => ({ id: r.subcollectble_set_id, name: r.name }))))
+    supabase
+      .from('items')
+      .select('subcollectble_set_id')
+      .eq('collectible_set_id', catalogSetId)
+      .not('subcollectble_set_id', 'is', null)
+      .limit(7000)
+      .then(async ({ data: subsetItemRows }) => {
+        const subsetIds = [...new Set((subsetItemRows || []).map((row) => row.subcollectble_set_id).filter(Boolean))]
+        if (!subsetIds.length) {
+          setCatalogSubsets([])
+          return
+        }
+        const { data: subsetRows } = await supabase
+          .from('subcollectible_sets')
+          .select('subcollectble_set_id, name')
+          .in('subcollectble_set_id', subsetIds)
+          .order('name')
+        setCatalogSubsets((subsetRows || []).map((row) => ({ id: row.subcollectble_set_id, name: row.name })))
+      })
   }, [currentScreen, catalogSetId])
 
   // Effect E: print type cascade from subcollectible set
@@ -2982,8 +3120,25 @@ function App() {
       return
     }
     if (subsetChanged) setCatalogPrintTypeId('')
-    supabase.from('print_types').select('print_type_id, name').eq('subcollectble_set_id', catalogSubsetId).order('name')
-      .then(({ data }) => setCatalogPrintTypes((data || []).map(r => ({ id: r.print_type_id, name: r.name }))))
+    supabase
+      .from('items')
+      .select('print_type_id')
+      .eq('subcollectble_set_id', catalogSubsetId)
+      .not('print_type_id', 'is', null)
+      .limit(7000)
+      .then(async ({ data: printTypeItemRows }) => {
+        const printTypeIds = [...new Set((printTypeItemRows || []).map((row) => row.print_type_id).filter(Boolean))]
+        if (!printTypeIds.length) {
+          setCatalogPrintTypes([])
+          return
+        }
+        const { data: printTypeRows } = await supabase
+          .from('print_types')
+          .select('print_type_id, name')
+          .in('print_type_id', printTypeIds)
+          .order('name')
+        setCatalogPrintTypes((printTypeRows || []).map((row) => ({ id: row.print_type_id, name: row.name })))
+      })
   }, [currentScreen, catalogSubsetId])
 
   // Effect F: subject typeahead search (category-scoped when a category is selected)
@@ -3299,8 +3454,40 @@ function App() {
       }
       // M2M: team — pre-query item_ids from item_teams
       if (catalogTeamId) {
-        const { data: teamRows } = await supabase.from('item_teams').select('item_id').eq('team_id', catalogTeamId)
-        const teamItemIds = (teamRows || []).map(r => r.item_id)
+        let teamRows = []
+        let teamQueryError = null
+        const teamFilterCandidates = [catalogTeamId]
+        const numericTeamId = Number(catalogTeamId)
+        if (!Number.isNaN(numericTeamId) && String(numericTeamId) === String(catalogTeamId)) {
+          teamFilterCandidates.push(numericTeamId)
+        }
+
+        for (const candidate of teamFilterCandidates) {
+          const { data, error } = await supabase
+            .from('item_teams')
+            .select('item_id')
+            .eq('team_id', candidate)
+
+          if (error) {
+            teamQueryError = error
+            continue
+          }
+          if ((data || []).length > 0) {
+            teamRows = data
+            teamQueryError = null
+            break
+          }
+        }
+
+        if (teamQueryError) {
+          setCatalogLoadError(teamQueryError.message || 'Could not load team filter results.')
+          setCatalogItems([])
+          setCatalogTotalItemCount(0)
+          setIsCatalogLoading(false)
+          return
+        }
+
+        const teamItemIds = [...new Set((teamRows || []).map(r => r.item_id).filter(Boolean))]
         if (!teamItemIds.length) {
           setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return
         }
@@ -3487,13 +3674,47 @@ function App() {
     if (catalogFranchise !== 'all' && !catalogFranchiseOptions.some((franchise) => franchise.id === catalogFranchise || franchise.name === catalogFranchise)) {
       setCatalogFranchise('all')
     }
+    if (catalogBrandId && !catalogFranchiseLinkedBrands.some((brand) => brand.id === catalogBrandId)) {
+      setCatalogBrandId('')
+    }
+    if (catalogTeamId && !catalogTeams.some((team) => team.id === catalogTeamId)) {
+      setCatalogTeamId('')
+    }
+    if (catalogSetId && !catalogSets.some((setRow) => setRow.id === catalogSetId)) {
+      setCatalogSetId('')
+    }
+    if (catalogSubsetId && !catalogSubsets.some((subset) => subset.id === catalogSubsetId)) {
+      setCatalogSubsetId('')
+    }
+    if (catalogPrintTypeId && catalogPrintTypeId !== '__none__' && !catalogPrintTypes.some((printType) => printType.id === catalogPrintTypeId)) {
+      setCatalogPrintTypeId('')
+    }
     if (catalogCardTypeIds.length > 0 && !CARD_CONDITION_CATEGORIES.has(catalogCategory)) {
       setCatalogCardTypeIds([])
     }
     if (catalogRarityId && catalogSubcategory !== 'Magic: The Gathering') {
       setCatalogRarityId('')
     }
-  }, [catalogCategory, catalogCategoryOptions, catalogFranchise, catalogFranchiseOptions, catalogSubcategory, catalogSubcategoryOptions, catalogCardTypeIds, catalogRarityId])
+  }, [
+    catalogBrandId,
+    catalogCardTypeIds,
+    catalogCategory,
+    catalogCategoryOptions,
+    catalogFranchise,
+    catalogFranchiseLinkedBrands,
+    catalogFranchiseOptions,
+    catalogPrintTypeId,
+    catalogPrintTypes,
+    catalogRarityId,
+    catalogSetId,
+    catalogSets,
+    catalogSubcategory,
+    catalogSubcategoryOptions,
+    catalogSubsetId,
+    catalogSubsets,
+    catalogTeamId,
+    catalogTeams,
+  ])
 
   useEffect(() => {
     setCatalogPage(1)
