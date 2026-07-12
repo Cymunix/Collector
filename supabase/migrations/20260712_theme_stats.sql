@@ -15,10 +15,14 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 WITH theme_items AS (
-  SELECT i.item_id, i.name, i.release_year, i.market_price, i.image_path,
+  -- items has no name column; derive a display name from the linked subject.
+  SELECT i.item_id,
+         COALESCE(s.subject_name, i.description, i.lego_set_number, 'Item') AS name,
+         i.release_year, i.market_price, i.image_path,
          b.name AS brand_name
   FROM public.items i
-  LEFT JOIN public.brands b ON b.brand_id = i.brand_id
+  LEFT JOIN public.brands   b ON b.brand_id   = i.brand_id
+  LEFT JOIN public.subjects s ON s.subject_id = i.subject_id
   WHERE i.franchise_id = p_franchise_id
 ),
 owners AS (
