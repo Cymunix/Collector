@@ -1894,6 +1894,9 @@ function App() {
   const [completionNavSubcategory, setCompletionNavSubcategory] = useState('')
   const [completionNavFranchise, setCompletionNavFranchise] = useState('')
   const [completionNavBrand, setCompletionNavBrand] = useState('')
+  // LEGO faceted drill below the item type: Subtheme (subset) → Product Line.
+  const [completionNavSubtheme, setCompletionNavSubtheme] = useState('')
+  const [completionNavProductLine, setCompletionNavProductLine] = useState('')
   const [trackedCollectionGoals, setTrackedCollectionGoals] = useState([])
   const [goalReloadToken, setGoalReloadToken] = useState(0)
   const [activeCollectionFilter, setActiveCollectionFilter] = useState('all')
@@ -5600,40 +5603,61 @@ function App() {
       if (!bbCat) { if (!cancelled) setCompletionLegoSets([]); return }
       const brandNameById = {}
       for (const b of (brandRows || [])) if (!brandNameById[b.brand_id]) brandNameById[b.brand_id] = b.name
-      // All LEGO items (any item type), so we can build Sets / Minifigs / Misc cards.
+      // All LEGO items with their facets: subtheme (subset_id) is single; product
+      // lines are many-to-many (item_product_lines).
       const items = await loadAllPaged(() =>
-        supabase.from('items').select('item_id, brand_id, franchise_id').eq('category_id', bbCat.category_id))
+        supabase.from('items').select('item_id, brand_id, franchise_id, subset_id').eq('category_id', bbCat.category_id))
       const itemBrand = (i) => brandNameById[i.brand_id] || ''
+      const itemIdList = items.map(i => i.item_id)
+      const chunkedIn = async (table, col, sel, ids) => {
+        const out = []
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data } = await supabase.from(table).select(sel).in(col, ids.slice(i, i + 200))
+          if (data) out.push(...data)
+        }
+        return out
+      }
       const franchiseIds = [...new Set(items.map(s => s.franchise_id).filter(Boolean))]
-      const franchises = []
-      for (let i = 0; i < franchiseIds.length; i += 200) {
-        const { data } = await supabase.from('franchises').select('franchise_id, name').in('franchise_id', franchiseIds.slice(i, i + 200))
-        if (data) franchises.push(...data)
-      }
+      const subsetIds = [...new Set(items.map(s => s.subset_id).filter(Boolean))]
+      const [franchises, subsets, iplRows] = await Promise.all([
+        franchiseIds.length ? chunkedIn('franchises', 'franchise_id', 'franchise_id, name', franchiseIds) : [],
+        subsetIds.length ? chunkedIn('subsets', 'subset_id', 'subset_id, name', subsetIds) : [],
+        itemIdList.length ? chunkedIn('item_product_lines', 'item_id', 'item_id, product_lines(name)', itemIdList) : [],
+      ])
       const franchiseName = Object.fromEntries(franchises.map(f => [f.franchise_id, f.name]))
-      const themeName = (fid) => franchiseName[fid] || 'Unknown Theme'
-      // One card per theme × item type. Each card's items ARE that type's items
-      // (Sets = the set items themselves), so the chain ends at the orange cards
-      // — no per-set minifig sub-drill.
-      const groupByFranchise = (arr) => {
-        const m = {}
-        for (const it of arr) { const f = it.franchise_id || '__none__'; (m[f] ||= []).push(it) }
-        return m
+      const subsetName = Object.fromEntries(subsets.map(s => [s.subset_id, s.name]))
+      const productLinesByItem = {}
+      for (const r of iplRows) {
+        const nm = r.product_lines?.name
+        if (nm) (productLinesByItem[r.item_id] ||= []).push(nm)
       }
-      const cards = []
-      for (const [brand, title] of [['Sets', 'All Sets'], ['Minifigs', 'All Minifigs'], ['Miscellaneous', 'All Miscellaneous']]) {
-        const groups = groupByFranchise(items.filter(i => itemBrand(i) === brand))
-        for (const [fid, arr] of Object.entries(groups)) {
-          cards.push({
-            id: `${brand.toLowerCase()}-${fid}`,
-            title,
-            franchiseName: fid === '__none__' ? 'Unknown Theme' : themeName(fid),
-            brandName: brand,
-            subthemeName: '',
-            itemIds: arr.map(i => i.item_id),
-          })
+      const themeName = (fid) => (fid ? franchiseName[fid] : '') || 'Unknown Theme'
+      // Leaf collection per (theme × item type × subtheme × product line). An item
+      // with several product lines appears under each; with none, under '' (so the
+      // orange cards land at whatever facet is deepest for that theme).
+      const leaf = new Map()
+      for (const it of items) {
+        const theme = themeName(it.franchise_id)
+        const brand = itemBrand(it)
+        if (!brand) continue
+        const subtheme = it.subset_id ? (subsetName[it.subset_id] || '') : ''
+        const pls = (productLinesByItem[it.item_id] || [])
+        const plKeys = pls.length ? pls : ['']
+        for (const pl of plKeys) {
+          const key = `${theme}|||${brand}|||${subtheme}|||${pl}`
+          if (!leaf.has(key)) leaf.set(key, { theme, brand, subtheme, productLine: pl, itemIds: new Set() })
+          leaf.get(key).itemIds.add(it.item_id)
         }
       }
+      const cards = [...leaf.entries()].map(([key, g]) => ({
+        id: key,
+        title: g.productLine || g.subtheme || `All ${g.brand}`,
+        franchiseName: g.theme,
+        brandName: g.brand,
+        subthemeName: g.subtheme,
+        productLineName: g.productLine,
+        itemIds: [...g.itemIds],
+      }))
       if (!cancelled) setCompletionLegoSets(cards)
     }
     load()
@@ -11832,7 +11856,8 @@ function App() {
         breakdown: {},
         _isLego: true,
         _itemIds: s.itemIds,
-        _subtheme: s.subthemeName,
+        _subtheme: s.subthemeName || '',
+        _productLine: s.productLineName || '',
       }
     })
     .sort((left, right) => {
@@ -11868,6 +11893,28 @@ function App() {
   const completionBrandSetCards = startedSetCards.filter(
     c => c.categoryName === completionNavCategory && c.subcategoryName === completionNavSubcategory && c.franchiseName === completionNavFranchise && c.brandName === completionNavBrand,
   )
+  // LEGO faceted drill below the item type. Subtheme, then Product Line; the orange
+  // leaf shows at whichever facet is deepest for this scope.
+  const completionIsLego = completionNavCategory === 'Building Blocks'
+  const completionSubthemes = completionIsLego
+    ? [...new Set(completionBrandSetCards.map(c => c._subtheme).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    : []
+  const completionAfterSubtheme = completionSubthemes.length
+    ? completionBrandSetCards.filter(c => c._subtheme === completionNavSubtheme)
+    : completionBrandSetCards
+  const completionProductLines = completionIsLego
+    ? [...new Set(completionAfterSubtheme.map(c => c._productLine).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    : []
+  const completionAfterProductLine = completionProductLines.length
+    ? completionAfterSubtheme.filter(c => c._productLine === completionNavProductLine)
+    : completionAfterSubtheme
+  // Which facet level should render right now (once the item type is chosen).
+  const completionFacetStage = !completionNavBrand
+    ? 'none'
+    : (completionSubthemes.length && !completionNavSubtheme) ? 'subtheme'
+    : (completionProductLines.length && !completionNavProductLine) ? 'productLine'
+    : 'leaf'
+  const completionLegoLeafCard = completionAfterProductLine.length === 1 ? completionAfterProductLine[0] : null
   const completionCategoryContextCards = completionNavCategory ? startedSetCards.filter(c => c.categoryName === completionNavCategory) : []
   const completionCategoryRollup = rollupCards(completionCategoryContextCards)
   const selectedCompletionSet = startedSetCards.find((setCard) => setCard.id === selectedCompletionSetId) || null
@@ -12082,14 +12129,27 @@ function App() {
     return () => { cancelled = true }
   }, [selectedCompletionSetId, completionLegoSets])
 
-  // Dead-end skip: if an item type resolves to a single card (e.g. a theme's
-  // "All Minifigs"), open it straight to the orange item cards.
+  // Dead-end skip: collapse single-value facet levels so the orange item cards
+  // appear at whichever facet is actually the last one for this scope.
   useEffect(() => {
     if (!completionNavBrand || selectedCompletionSetId) return
-    if (completionBrandSetCards.length === 1) {
-      setSelectedCompletionSetId(completionBrandSetCards[0].id)
+    if (completionFacetStage === 'subtheme' && completionSubthemes.length === 1) {
+      setCompletionNavSubtheme(completionSubthemes[0])
+    } else if (completionFacetStage === 'productLine' && completionProductLines.length === 1) {
+      setCompletionNavProductLine(completionProductLines[0])
+    } else if (completionFacetStage === 'leaf' && completionLegoLeafCard) {
+      setSelectedCompletionSetId(completionLegoLeafCard.id)
     }
-  }, [completionNavBrand, completionBrandSetCards, selectedCompletionSetId])
+  }, [completionNavBrand, selectedCompletionSetId, completionFacetStage, completionSubthemes, completionProductLines, completionLegoLeafCard])
+
+  // Clear stale facet selections when the scope changes (self-correcting so we
+  // don't have to reset them at every nav control).
+  useEffect(() => {
+    if (completionNavSubtheme && !completionSubthemes.includes(completionNavSubtheme)) setCompletionNavSubtheme('')
+  }, [completionNavSubtheme, completionSubthemes])
+  useEffect(() => {
+    if (completionNavProductLine && !completionProductLines.includes(completionNavProductLine)) setCompletionNavProductLine('')
+  }, [completionNavProductLine, completionProductLines])
 
   useEffect(() => {
     setCollectionOverviewPage(1)
@@ -12924,6 +12984,21 @@ function App() {
                             <div className="completion-set-sheet">
                               <div className="completion-sheet-header">
                                 {(() => {
+                                  // Back goes to the deepest branching level above the orange leaf.
+                                  if (completionIsLego && selectedCompletionSet?._isLego) {
+                                    let label, onBack
+                                    if (completionProductLines.length > 1) {
+                                      label = completionNavSubtheme || completionNavBrand
+                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine('') }
+                                    } else if (completionSubthemes.length > 1) {
+                                      label = completionNavBrand
+                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine(''); setCompletionNavSubtheme('') }
+                                    } else {
+                                      label = completionNavFranchise || 'Back'
+                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine(''); setCompletionNavSubtheme(''); setCompletionNavBrand('') }
+                                    }
+                                    return <button type="button" className="catalog-action-pill" onClick={onBack}>← {label}</button>
+                                  }
                                   const soleCard = completionBrandSetCards.length === 1 && completionBrandSetCards[0]?.id === selectedCompletionSetId
                                   return (
                                     <button type="button" className="catalog-action-pill" onClick={() => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); if (soleCard) setCompletionNavBrand('') }}>
@@ -13037,13 +13112,45 @@ function App() {
                               )}
                             </div>
                           ) : null
+                        ) : completionNavBrand && completionIsLego && completionFacetStage === 'subtheme' ? (
+                          /* LEGO facet: Subtheme blocks */
+                          <section className="completion-block-grid">
+                            {completionSubthemes.map((st) => {
+                              const r = rollupCards(completionBrandSetCards.filter(c => c._subtheme === st))
+                              return (
+                                <article key={st} className="catalog-card completion-nav-block" role="button" tabIndex={0}
+                                  onClick={() => { setCompletionNavProductLine(''); setCompletionNavSubtheme(st) }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavProductLine(''); setCompletionNavSubtheme(st) } }}>
+                                  <div className="completion-nav-block-head"><strong>{st}</strong><span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span></div>
+                                  <div className="collection-allocation-bar-track"><div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} /></div>
+                                  <div className="completion-nav-block-meta"><span>{r.ownedCount} / {r.totalItems}</span></div>
+                                </article>
+                              )
+                            })}
+                          </section>
+                        ) : completionNavBrand && completionIsLego && completionFacetStage === 'productLine' ? (
+                          /* LEGO facet: Product Line blocks */
+                          <section className="completion-block-grid">
+                            {completionProductLines.map((pl) => {
+                              const r = rollupCards(completionAfterSubtheme.filter(c => c._productLine === pl))
+                              return (
+                                <article key={pl} className="catalog-card completion-nav-block" role="button" tabIndex={0}
+                                  onClick={() => setCompletionNavProductLine(pl)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavProductLine(pl) } }}>
+                                  <div className="completion-nav-block-head"><strong>{pl}</strong><span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span></div>
+                                  <div className="collection-allocation-bar-track"><div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} /></div>
+                                  <div className="completion-nav-block-meta"><span>{r.ownedCount} / {r.totalItems}</span></div>
+                                </article>
+                              )
+                            })}
+                          </section>
                         ) : completionNavBrand ? (
-                          /* Set list — brand is selected */
-                          completionBrandSetCards.length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">No sets started for this brand yet.</article>
+                          /* Leaf collection cards (single one auto-opens to the orange items) */
+                          (completionIsLego ? completionAfterProductLine : completionBrandSetCards).length === 0 ? (
+                            <article className="catalog-card catalog-loading-panel">No items here yet.</article>
                           ) : (
                             <section className="collection-goal-grid" aria-label="Sets">
-                              {completionBrandSetCards.map((setCard) => (
+                              {(completionIsLego ? completionAfterProductLine : completionBrandSetCards).map((setCard) => (
                                 <article
                                   key={`started-set-${setCard.id}`}
                                   className="catalog-card collection-goal-card"
@@ -13066,7 +13173,7 @@ function App() {
                                       e.stopPropagation()
                                       setSelectedCompletionSetId(setCard.id)
                                     }}>
-                                      View Set
+                                      View
                                     </button>
                                   </div>
                                   <div className="collection-goal-progress-row">
@@ -13079,15 +13186,7 @@ function App() {
                                   <div className="collection-goal-metrics">
                                     <span>Missing: {setCard.missingCount}</span>
                                     <span>Owned Value: {formatUsd(setCard.ownedValue)}</span>
-                                    <span>Estimated Completion Cost: {setCard.estimatedRemainingCost == null ? 'N/A' : formatUsd(setCard.estimatedRemainingCost)}</span>
                                   </div>
-                                  {Object.keys(setCard.breakdown || {}).length > 0 ? (
-                                    <div className="collection-goal-breakdown">
-                                      {Object.entries(setCard.breakdown).map(([label, value]) => (
-                                        <span key={`goal-breakdown-${setCard.id}-${label}`}>{label}: {value}</span>
-                                      ))}
-                                    </div>
-                                  ) : null}
                                 </article>
                               ))}
                             </section>
