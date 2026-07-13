@@ -13,6 +13,9 @@
   grid-template-columns: auto auto 1fr auto;
   align-items: center;
   gap: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 45;
 }
 
 .brand {
@@ -1949,6 +1952,16 @@ h1 {
   margin-bottom: 16px;
 }
 
+/* Single sticky container holding the catalog head + quick-add bar, so they
+   pin together below the blue header with no chance of overlapping each other. */
+.catalog-sticky-top {
+  position: sticky;
+  top: var(--sticky-topbar-h, 64px);
+  z-index: 40;
+  background: var(--surface);
+  padding-top: 8px;
+}
+
 .catalog-subtitle {
   margin-bottom: 0;
 }
@@ -2207,6 +2220,17 @@ h1 {
 
 .catalog-filters {
   padding: 14px;
+}
+
+/* Keep Filters (left) and Context (right) pinned while the middle list scrolls.
+   Offset below the full stack of sticky bars (header + catalog head + quick-add). */
+.catalog-filters,
+.catalog-context {
+  position: sticky;
+  top: calc(var(--sticky-cols-top, 200px) + 10px);
+  align-self: start;
+  max-height: calc(100vh - var(--sticky-cols-top, 200px) - 24px);
+  overflow-y: auto;
 }
 
 .catalog-card-head {
@@ -5957,6 +5981,15 @@ h2 {
 
   .catalog-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* Stacked single-column layout — don't pin the side panels or the top bars. */
+  .catalog-filters,
+  .catalog-context,
+  .catalog-sticky-top {
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 
   .catalog-results-grid {

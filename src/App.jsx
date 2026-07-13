@@ -1887,6 +1887,8 @@ function App() {
   const [selectedCompletionSetId, setSelectedCompletionSetId] = useState('')
   const [completionNavSubset, setCompletionNavSubset] = useState('')
   const [completionSetAllItems, setCompletionSetAllItems] = useState([])
+  // LEGO completion: every LEGO set (item, brand "Sets") + its minifigs (set_minifigs).
+  const [completionLegoSets, setCompletionLegoSets] = useState([])
   const [completionSheetPopup, setCompletionSheetPopup] = useState(null)
   const [completionNavCategory, setCompletionNavCategory] = useState('')
   const [completionNavSubcategory, setCompletionNavSubcategory] = useState('')
@@ -2987,13 +2989,14 @@ function App() {
             id: row.franchise_id,
             name: row.name,
             description: row.description || '',
+            logo_url: row.logo_url || '',
           })
         }
       }
       setCatalogFranchiseBrands([...byName.values()])
     }
     const loadCatalogFranchiseOptions = (ids) => {
-      supabase.from('franchises').select('franchise_id, name, description').in('franchise_id', ids).order('name')
+      supabase.from('franchises').select('franchise_id, name, description, logo_url').in('franchise_id', ids).order('name')
         .then(({ data, error }) => {
           if (!error) {
             setCatalogFranchiseOptionsFromRows(data)
@@ -4172,9 +4175,11 @@ function App() {
   useEffect(() => {
     if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminBrands([]); return }
     // LEGO items are branded only Sets / Minifigs / Miscellaneous — independent of
-    // theme. Override the franchise-based brand list with this fixed set.
+    // theme. Override the franchise-based brand list with this fixed set. Trigger on
+    // the Building Blocks category so it works even for a brand-new franchise (which
+    // has no brand_franchise links yet) or before the subcategory name resolves.
     const subName = (catalogAdminSubcategories.find(s => s.id === catalogAdminSubcategoryId)?.name || '').toLowerCase()
-    if (subName === 'lego') {
+    if (selectedCatalogAdminCategoryName === 'Building Blocks' || subName === 'lego') {
       supabase.from('brands').select('brand_id, name').in('name', LEGO_BRAND_NAMES)
         .then(({ data }) => {
           const byName = {}
@@ -4197,7 +4202,7 @@ function App() {
             setCatalogAdminBrandId(prev => list.some(b => b.id === prev) ? prev : '')
           })
       })
-  }, [currentScreen, isPlatformAdmin, catalogAdminRealFranchiseId, catalogAdminSubcategoryId, catalogAdminSubcategories])
+  }, [currentScreen, isPlatformAdmin, catalogAdminRealFranchiseId, catalogAdminSubcategoryId, catalogAdminSubcategories, selectedCatalogAdminCategoryName])
 
   // Faceted classification: Subtheme (subset) options depend on Theme (franchise).
   useEffect(() => {
@@ -4387,6 +4392,44 @@ function App() {
       return id ? { ...r, species_id: id } : r
     }))
   }, [bulkImportSpeciesList])
+
+  // Faceted classification in bulk import — mirrors the Single Item cascade.
+  // Resolve the current row's Theme into catalogAdminRealFranchiseId so the
+  // Subtheme / Product Line / Team option lists load exactly like Single Item.
+  const bulkCurrentRow = bulkImportRows[bulkImportIdx]
+  useEffect(() => {
+    if (!bulkImportMode) return
+    const franchiseName = bulkCurrentRow?.franchise_name?.trim()
+    if (!franchiseName) { setCatalogAdminRealFranchiseId(prev => prev ? '' : prev); return }
+    let cancelled = false
+    supabase.from('franchises').select('franchise_id').ilike('name', franchiseName).limit(1).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setCatalogAdminRealFranchiseId(data?.franchise_id || '') })
+    return () => { cancelled = true }
+  }, [bulkImportMode, bulkImportIdx, bulkCurrentRow?.franchise_name])
+
+  // Subtheme options (catalogAdminSubsetsList) are scoped to the current row's
+  // Theme via catalogAdminRealFranchiseId; match the row's CSV subtheme name.
+  useEffect(() => {
+    if (!bulkImportMode || !bulkCurrentRow) return
+    if (bulkCurrentRow.subset_id || !bulkCurrentRow.subtheme_name?.trim() || !catalogAdminSubsetsList.length) return
+    const id = catalogAdminSubsetsList.find(s => s.name.trim().toLowerCase() === bulkCurrentRow.subtheme_name.trim().toLowerCase())?.id
+    if (id) updateBulkRow(bulkImportIdx, { subset_id: id })
+  }, [catalogAdminSubsetsList, bulkImportIdx, bulkImportMode])
+
+  // Keep the shared Product Line list (catalogAdminSubsetSel) pointed at the row.
+  useEffect(() => {
+    if (!bulkImportMode) return
+    setCatalogAdminSubsetSel(bulkCurrentRow?.subset_id || '')
+  }, [bulkImportMode, bulkImportIdx, bulkCurrentRow?.subset_id])
+
+  // Match the row's CSV product_line names (semicolon-separated) to loaded ids.
+  useEffect(() => {
+    if (!bulkImportMode || !bulkCurrentRow?.product_line_names?.trim() || !catalogAdminProductLinesList.length) return
+    const want = bulkCurrentRow.product_line_names.split(';').map(s => s.trim().toLowerCase()).filter(Boolean)
+    const ids = catalogAdminProductLinesList.filter(p => want.includes(p.name.trim().toLowerCase())).map(p => p.id)
+    const merged = [...new Set([...(bulkCurrentRow.product_line_ids || []), ...ids])]
+    if (merged.length !== (bulkCurrentRow.product_line_ids || []).length) updateBulkRow(bulkImportIdx, { product_line_ids: merged })
+  }, [catalogAdminProductLinesList, bulkImportIdx, bulkImportMode])
 
   useEffect(() => {
     const q = catalogAdminSubjectSearch.trim()
@@ -4973,6 +5016,25 @@ function App() {
     return () => { cancelled = true }
   }, [catalogThemeFranchiseId])
 
+  // Measure the stacked sticky bars (blue header → catalog head → quick-add) so
+  // each one — and the pinned side panels — offsets correctly below the ones above.
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const root = document.documentElement
+    const setVars = () => {
+      const h = (sel) => { const el = document.querySelector(sel); return el ? el.offsetHeight : 0 }
+      const topbarH    = h('.topbar')
+      const stickyTopH = h('.catalog-sticky-top')
+      root.style.setProperty('--sticky-topbar-h', `${Math.round(topbarH)}px`)
+      root.style.setProperty('--sticky-cols-top', `${Math.round(topbarH + stickyTopH)}px`)
+    }
+    setVars()
+    const ro = new ResizeObserver(setVars)
+    for (const sel of ['.topbar', '.catalog-sticky-top']) { const el = document.querySelector(sel); if (el) ro.observe(el) }
+    window.addEventListener('resize', setVars)
+    return () => { ro.disconnect(); window.removeEventListener('resize', setVars) }
+  }, [currentScreen, catalogViewMode, currentUser, quickAddMode])
+
   useEffect(() => {
     if (currentScreen !== 'collection' && currentScreen !== 'collection_item') {
       return
@@ -5513,6 +5575,74 @@ function App() {
       isCancelled = true
     }
   }, [currentUser?.id, goalReloadToken])
+
+  // Load every LEGO set (item with brand "Sets" under Building Blocks) plus the
+  // minifigs linked to it via set_minifigs. Completion = minifigs owned / total.
+  // Shows all themes/sets regardless of ownership.
+  useEffect(() => {
+    if (currentScreen !== 'completion') return
+    let cancelled = false
+    const loadAllPaged = async (build) => {
+      const out = []
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await build().range(from, from + 999)
+        if (error || !data?.length) break
+        out.push(...data)
+        if (data.length < 1000) break
+      }
+      return out
+    }
+    const load = async () => {
+      const [{ data: bbCat }, { data: setsBrand }] = await Promise.all([
+        supabase.from('categories').select('category_id').ilike('name', 'Building Blocks').maybeSingle(),
+        supabase.from('brands').select('brand_id').eq('name', 'Sets').limit(1).maybeSingle(),
+      ])
+      if (!bbCat) { if (!cancelled) setCompletionLegoSets([]); return }
+      const setItems = await loadAllPaged(() => {
+        let q = supabase.from('items').select('item_id, franchise_id, subset_id, lego_set_number, description, subject_id').eq('category_id', bbCat.category_id)
+        if (setsBrand?.brand_id) q = q.eq('brand_id', setsBrand.brand_id)
+        return q
+      })
+      const setIds = setItems.map(s => s.item_id)
+      const links = []
+      for (let i = 0; i < setIds.length; i += 150) {
+        const { data } = await supabase.from('set_minifigs').select('set_item_id, minifig_item_id').in('set_item_id', setIds.slice(i, i + 150))
+        if (data) links.push(...data)
+      }
+      const minifigsBySet = {}
+      for (const l of links) { (minifigsBySet[l.set_item_id] ||= []).push(l.minifig_item_id) }
+      const subjectIds = [...new Set(setItems.map(s => s.subject_id).filter(Boolean))]
+      const franchiseIds = [...new Set(setItems.map(s => s.franchise_id).filter(Boolean))]
+      const subsetIds = [...new Set(setItems.map(s => s.subset_id).filter(Boolean))]
+      const chunkedIn = async (table, col, sel, ids) => {
+        const out = []
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data } = await supabase.from(table).select(sel).in(col, ids.slice(i, i + 200))
+          if (data) out.push(...data)
+        }
+        return out
+      }
+      const [subjects, franchises, subsets] = await Promise.all([
+        subjectIds.length ? chunkedIn('subjects', 'subject_id', 'subject_id, subject_name', subjectIds) : [],
+        franchiseIds.length ? chunkedIn('franchises', 'franchise_id', 'franchise_id, name', franchiseIds) : [],
+        subsetIds.length ? chunkedIn('subsets', 'subset_id', 'subset_id, name', subsetIds) : [],
+      ])
+      const subjectName = Object.fromEntries(subjects.map(s => [s.subject_id, s.subject_name]))
+      const franchiseName = Object.fromEntries(franchises.map(f => [f.franchise_id, f.name]))
+      const subsetName = Object.fromEntries(subsets.map(s => [s.subset_id, s.name]))
+      const sets = setItems.map(s => ({
+        id: s.item_id,
+        title: subjectName[s.subject_id] || s.description || (s.lego_set_number ? `Set ${s.lego_set_number}` : 'Set'),
+        legoSetNumber: s.lego_set_number || '',
+        franchiseName: franchiseName[s.franchise_id] || 'Unknown Theme',
+        subthemeName: subsetName[s.subset_id] || '',
+        minifigItemIds: minifigsBySet[s.item_id] || [],
+      }))
+      if (!cancelled) setCompletionLegoSets(sets)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [currentScreen, goalReloadToken])
 
   useEffect(() => {
     if (activeCollectionFilter === 'all') {
@@ -7409,7 +7539,7 @@ function App() {
       supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
-      supabase.from('items').select('rarity_id, mtg_card_type_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
+      supabase.from('items').select('rarity_id, mtg_card_type_id, retail_price, market_price').eq('item_id', selectedCatalogItem.id).maybeSingle(),
       franchiseId
         ? supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
         : Promise.resolve({ data: [] }),
@@ -7424,6 +7554,11 @@ function App() {
     setCatalogItemEditCardTypeIds((itemCardTypes || []).map(r => r.card_type_id))
     setCatalogItemEditMtgCardTypeId(itemMtgMeta?.mtg_card_type_id || '')
     setCatalogItemEditRarityId(itemMtgMeta?.rarity_id || '')
+    setCatalogItemEditValues(v => ({
+      ...v,
+      retail_price: itemMtgMeta?.retail_price ?? '',
+      market_price: itemMtgMeta?.market_price ?? '',
+    }))
     setCatalogItemEditSubjectIds((itemSubjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
     setCatalogItemEditSubjectSearch('')
     setCatalogItemEditSubjectResults([])
@@ -7454,6 +7589,8 @@ function App() {
         release_year:         v.release_year !== '' && v.release_year != null ? Number(v.release_year) : null,
         upc:                  v.upc?.trim()                   || null,
         piece_count:          v.piece_count !== '' && v.piece_count != null ? Number(v.piece_count) : null,
+        retail_price:         v.retail_price !== '' && v.retail_price != null && Number.isFinite(Number(v.retail_price)) ? Number(v.retail_price) : null,
+        market_price:         v.market_price !== '' && v.market_price != null && Number.isFinite(Number(v.market_price)) ? Number(v.market_price) : null,
         ...(catalogRarities.length > 0 ? { rarity_id: catalogItemEditRarityId || null } : {}),
         ...(catalogItemIsMtg ? {
           mtg_card_type_id: catalogItemEditMtgCardTypeId || null,
@@ -7525,6 +7662,9 @@ function App() {
         _details:    updatedDetails,
       }
     })
+    // Immediately reflect the saved retail price in the LEGO detail block.
+    const savedRetail = v.retail_price !== '' && v.retail_price != null && Number.isFinite(Number(v.retail_price)) ? Number(v.retail_price) : null
+    setCatalogDetailLego(prev => ({ ...(prev || {}), retail_price: savedRetail }))
     setCatalogReloadToken(t => t + 1)
     setIsCatalogItemEditMode(false)
     setIsSavingCatalogItem(false)
@@ -7736,9 +7876,11 @@ function App() {
       fields.push(cur.trim())
       return fields
     }
-    const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_'))
+    // Normalize headers: lowercase, spaces→_, and strip parentheses so a header
+    // like "subject(s)" becomes "subjects".
+    const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_').replace(/[()]/g, ''))
     const col = (names) => { for (const n of names) { const i = headers.indexOf(n); if (i >= 0) return i } return -1 }
-    const iSubject  = col(['subject_name','name','character','subject','minifig_name','fig_name'])
+    const iSubject  = col(['subject_name','name','character','subject','subjects','minifig_name','fig_name'])
     const iCard     = col(['card_number','number','card_num','num'])
     const iBl       = col(['bricklink_id','bricklink','bl_id','catalog_code'])
     const iRb       = col(['rebrickable_fig_id','rebrickable_id','rebrickable','rb_id','fig_num'])
@@ -7752,12 +7894,14 @@ function App() {
     const iImgUrl   = col(['image_url','img_url','image','photo_url','photo'])
     const iRarity         = col(['rarity','rarity_name'])
     const iTreatments     = col(['card_treatments','card_treatment','treatments','treatment'])
-    const iTeam           = col(['factions','faction','team','team_name','teams','affiliation'])
+    const iTeam           = col(['factions','faction','team','team_name','teams','affiliation','team_affiliation'])
     const iParentSet      = col(['parent_set','parent_set_number','parent_set_bricklink_id'])
     const iLegoSetNumber  = col(['lego_set_number','set_number','set_num','lego_number','set_id'])
     const iFranchise      = col(['franchise','franchise_name','series','theme'])
     const iBrandName      = col(['brand','brand_name','manufacturer'])
-    const iCollectibleSet = col(['collectible_set','collectible_set_name','set_name','collection','wave'])
+    const iCollectibleSet = col(['collectible_set','collectible_set_name','set_name','collection','wave','packaging'])
+    const iSubtheme       = col(['subtheme','sub_theme','subset','subset_name'])
+    const iProductLine    = col(['product_line','product_lines','productline'])
     const iMinifigCode    = col(['minifig_code','code','internal_code'])
     const iSpecies        = col(['species','species_name','race'])
     const iRetailPrice    = col(['retail_price','msrp','rrp','retail','price'])
@@ -7772,6 +7916,10 @@ function App() {
         franchise_name: g(iFranchise),
         brand_name: g(iBrandName),
         collectible_set_name: g(iCollectibleSet),
+        subtheme_name: g(iSubtheme),
+        subset_id: '',
+        product_line_names: g(iProductLine),
+        product_line_ids: [],
         minifig_code: g(iMinifigCode),
         card_number: g(iCard !== iCardNum ? iCard : iCard),
         bricklink_id: g(iBl),
@@ -7991,9 +8139,14 @@ function App() {
     }
   }
 
-  const getBulkSubjectType = () => {
+  const getBulkSubjectType = (row) => {
     const catName  = (selectedCatalogAdminCategoryName || '').toLowerCase()
     const subName  = (catalogAdminSubcategories.find(s => s.id === catalogAdminSubcategoryId)?.name || '').toLowerCase()
+    if (catName.includes('building blocks')) {
+      const blId = row?.bricklink_id?.trim() || ''
+      const isSet = !!(row?.lego_set_number?.trim() || (blId && /^\d/.test(blId)) || (row?.brand_name || '').toLowerCase() === 'sets')
+      return isSet ? 'set' : 'character'
+    }
     if (subName.includes('sport') || catName.includes('sport')) return 'player'
     if (catName.includes('comic') || subName.includes('comic')) return 'comic'
     if (catName.includes('music')) return 'artist'
@@ -8026,6 +8179,8 @@ function App() {
     const franchiseIdCache     = new Map() // name_lc → franchise_id
     const brandIdCache         = new Map() // `${franchise_id}::${name_lc}` → brand_id
     const collectibleSetIdCache = new Map() // `${franchise_id}::${brand_id}::${name_lc}` → collectible_set_id
+    const subsetIdCache        = new Map() // `${franchise_id}::${name_lc}` → subset_id
+    const productLineIdCache   = new Map() // `${subset_id}::${name_lc}` → product_line_id
     const franchiseLegoAbbrCache = new Map() // franchise_id → lego_abbreviation
     const mintedCodeCounters  = new Map() // prefix → last minted NN (in-memory, seeded from DB on first use)
 
@@ -8075,7 +8230,17 @@ function App() {
       return id
     }
 
-    const resolveOrCreateBrand = async (name, franchiseId) => {
+    const resolveOrCreateBrand = async (rawName, franchiseId) => {
+      // Canonicalize LEGO brand synonyms so imports reuse the canonical brand
+      // (e.g. "Minifigures"/"Minifigure"/"Minifig" → "Minifigs") instead of
+      // creating a near-duplicate.
+      let name = rawName
+      if (isLegoCategory) {
+        const lc = (rawName || '').trim().toLowerCase()
+        if (/^minifig(ure)?s?$/.test(lc)) name = 'Minifigs'
+        else if (/^sets?$/.test(lc)) name = 'Sets'
+        else if (/^(misc|miscellaneous)$/.test(lc)) name = 'Miscellaneous'
+      }
       const key = `${franchiseId}::${name.trim().toLowerCase()}`
       if (brandIdCache.has(key)) return brandIdCache.get(key)
       // Look for existing brand linked to this franchise
@@ -8101,18 +8266,54 @@ function App() {
     }
 
     const resolveOrCreateCollectibleSet = async (name, franchiseId, brandId) => {
-      const key = `${franchiseId || ''}::${brandId || ''}::${name.trim().toLowerCase()}`
+      // For LEGO, collectible_set is repurposed as global PACKAGING (Box / Polybag
+      // / Blister pack) — brand/franchise agnostic. Resolve & create it globally
+      // (brand_id null) so we reuse the seeded rows instead of forking a per-brand
+      // duplicate ("Box" listed twice).
+      const scopeBrand     = isLegoCategory ? null : (brandId || null)
+      const scopeFranchise = isLegoCategory ? null : (franchiseId || null)
+      const key = `${scopeFranchise || ''}::${scopeBrand || ''}::${name.trim().toLowerCase()}`
       if (collectibleSetIdCache.has(key)) return collectibleSetIdCache.get(key)
       let q = supabase.from('collectible_sets').select('collectible_set_id').ilike('name', name.trim())
-      if (brandId) q = q.eq('brand_id', brandId)
-      else if (franchiseId) q = q.eq('franchise_id', franchiseId)
+      if (isLegoCategory) q = q.is('brand_id', null)
+      else if (scopeBrand) q = q.eq('brand_id', scopeBrand)
+      else if (scopeFranchise) q = q.eq('franchise_id', scopeFranchise)
       const { data: found } = await q.limit(1).maybeSingle()
       let id = found?.collectible_set_id || null
       if (!id) {
-        const { data: created } = await supabase.from('collectible_sets').insert({ name: name.trim(), brand_id: brandId || null, franchise_id: franchiseId || null }).select('collectible_set_id').single()
+        const { data: created } = await supabase.from('collectible_sets').insert({ name: name.trim(), brand_id: scopeBrand, franchise_id: scopeFranchise }).select('collectible_set_id').single()
         id = created?.collectible_set_id || null
       }
       if (id) collectibleSetIdCache.set(key, id)
+      return id
+    }
+
+    // Faceted classification (mirrors Single Item): Subtheme = subsets (scoped to
+    // the Theme), Product Line = product_lines (scoped to the Subtheme, m2m).
+    const resolveOrCreateSubset = async (name, franchiseId) => {
+      if (!name?.trim() || !franchiseId) return null
+      const key = `${franchiseId}::${name.trim().toLowerCase()}`
+      if (subsetIdCache.has(key)) return subsetIdCache.get(key)
+      const { data: found } = await supabase.from('subsets').select('subset_id').eq('franchise_id', franchiseId).ilike('name', name.trim()).limit(1).maybeSingle()
+      let id = found?.subset_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('subsets').insert({ name: name.trim(), franchise_id: franchiseId }).select('subset_id').single()
+        id = created?.subset_id || null
+      }
+      if (id) subsetIdCache.set(key, id)
+      return id
+    }
+    const resolveOrCreateProductLine = async (name, subsetId) => {
+      if (!name?.trim() || !subsetId) return null
+      const key = `${subsetId}::${name.trim().toLowerCase()}`
+      if (productLineIdCache.has(key)) return productLineIdCache.get(key)
+      const { data: found } = await supabase.from('product_lines').select('product_line_id').eq('subset_id', subsetId).ilike('name', name.trim()).limit(1).maybeSingle()
+      let id = found?.product_line_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('product_lines').insert({ name: name.trim(), subset_id: subsetId }).select('product_line_id').single()
+        id = created?.product_line_id || null
+      }
+      if (id) productLineIdCache.set(key, id)
       return id
     }
 
@@ -8121,9 +8322,15 @@ function App() {
       let rowFranchiseId     = null
       let rowBrandId         = null
       let rowCollectibleSetId = null
+      let rowSubsetId        = null
       if (row.franchise_name?.trim()) rowFranchiseId = await resolveOrCreateFranchise(row.franchise_name)
       if (row.brand_name?.trim() && rowFranchiseId) rowBrandId = await resolveOrCreateBrand(row.brand_name, rowFranchiseId)
-      if (row.collectible_set_name?.trim()) rowCollectibleSetId = await resolveOrCreateCollectibleSet(row.collectible_set_name, rowFranchiseId, rowBrandId)
+      // Minifigs don't have packaging — skip resolving a collectible_set for them.
+      const rowBlIdForPkg = row.bricklink_id?.trim() || ''
+      const rowIsMinifig = isLegoCategory && !(row.lego_set_number?.trim() || (rowBlIdForPkg && /^\d/.test(rowBlIdForPkg)) || /^sets?$/i.test((row.brand_name || '').trim()))
+      if (row.collectible_set_name?.trim() && !rowIsMinifig) rowCollectibleSetId = await resolveOrCreateCollectibleSet(row.collectible_set_name, rowFranchiseId, rowBrandId)
+      // ── Faceted: Subtheme (subset) — picked id, else resolve the CSV name ──
+      rowSubsetId = row.subset_id || (row.subtheme_name?.trim() ? await resolveOrCreateSubset(row.subtheme_name, rowFranchiseId) : null)
       // ── Building Blocks: resolve parent set by BrickLink ID or set number ───
       const resolveParentSetItemId = async (ref) => {
         if (!ref?.trim()) return null
@@ -8211,6 +8418,7 @@ function App() {
         brand_id:             rowBrandId                    || null,
         collectible_set_id:   rowCollectibleSetId           || null,
         subcollectble_set_id: row.subcollectble_set_id       || null,
+        subset_id:            rowSubsetId                    || null,
         print_type_id:        row.print_type_id              || null,
         bricklink_id:         blId                           || null,
         rebrickable_fig_id:   row.rebrickable_fig_id?.trim() || null,
@@ -8247,7 +8455,7 @@ function App() {
         if (!subjectId) {
           const { data: newSub } = await supabase
             .from('subjects')
-            .insert({ subject_name: trimmedName, subject_type: getBulkSubjectType() })
+            .insert({ subject_name: trimmedName, subject_type: getBulkSubjectType(row) })
             .select('subject_id')
             .single()
           subjectId = newSub?.subject_id || null
@@ -8273,6 +8481,21 @@ function App() {
       if (row.team_ids?.length > 0) {
         const { error: tmErr } = await supabase.from('item_teams').insert(row.team_ids.map(tid => ({ item_id: created.item_id, team_id: tid })))
         if (tmErr) console.error('item_teams insert error (bulk):', tmErr)
+      }
+      // ── Faceted: Product Lines (m2m) — picked ids + any CSV names to resolve ──
+      if (rowSubsetId) {
+        const plIds = new Set(row.product_line_ids || [])
+        if (row.product_line_names?.trim()) {
+          for (const nm of row.product_line_names.split(';').map(s => s.trim()).filter(Boolean)) {
+            const plId = await resolveOrCreateProductLine(nm, rowSubsetId)
+            if (plId) plIds.add(plId)
+          }
+        }
+        if (plIds.size > 0) {
+          const { error: plErr } = await supabase.from('item_product_lines')
+            .insert([...plIds].map(plid => ({ item_id: created.item_id, product_line_id: plid })))
+          if (plErr) console.error('item_product_lines insert error (bulk):', plErr)
+        }
       }
       if (row.parent_set_bricklink_id?.trim() && selectedCatalogAdminCategoryName === 'Building Blocks') {
         const parentSetId = await resolveParentSetItemId(row.parent_set_bricklink_id)
@@ -11522,8 +11745,11 @@ function App() {
     accumulator[entry.collectible_set_id].push(entry)
     return accumulator
   }, {})
-  const startedSetCards = collectibleSets
+  const nonLegoSetCards = collectibleSets
     .map((setRecord) => {
+      // LEGO completion is driven by set_minifigs (below), not collectible_sets
+      // (which now hold packaging like Box/Polybag). Skip Building Blocks here.
+      if ((setRecord.category_name || '') === 'Building Blocks') return null
       const setEntries = collectibleSetEntriesBySetId[setRecord.id] || []
       const normalizedSetName = (setRecord.set_name || '').trim().toLowerCase()
       const normalizedCategoryName = (setRecord.category_name || '').trim().toLowerCase()
@@ -11586,6 +11812,39 @@ function App() {
       }
       return (left.title || '').localeCompare(right.title || '')
     })
+  // LEGO set cards: one per set item, completion = owned minifigs / total minifigs.
+  // Shown for every set (including 0% owned) so all themes/sets are visible.
+  const legoSetCards = completionLegoSets
+    .map((s) => {
+      const total = s.minifigItemIds.length
+      const ownedCount = s.minifigItemIds.filter((id) => ownedCatalogItemIds.has(id)).length
+      const ownedValue = s.minifigItemIds.reduce((sum, id) => sum + Number(ownedItemsByCatalogId[id]?.currentMarketValue || 0), 0)
+      return {
+        id: s.id,
+        title: s.legoSetNumber ? `${s.title} (${s.legoSetNumber})` : s.title,
+        categoryName: 'Building Blocks',
+        subcategoryName: 'LEGO',
+        franchiseName: s.franchiseName,
+        brandName: 'Sets',
+        setName: s.title,
+        ownedCount,
+        totalItems: total,
+        completionPercent: total > 0 ? (ownedCount / total) * 100 : 0,
+        missingCount: Math.max(total - ownedCount, 0),
+        ownedValue,
+        estimatedRemainingCost: null,
+        breakdown: {},
+        _isLego: true,
+        _minifigIds: s.minifigItemIds,
+        _subtheme: s.subthemeName,
+      }
+    })
+    .sort((left, right) => {
+      if (right.completionPercent !== left.completionPercent) return right.completionPercent - left.completionPercent
+      return (left.title || '').localeCompare(right.title || '')
+    })
+  const startedSetCards = [...legoSetCards, ...nonLegoSetCards]
+  const completionLabels = getCategoryLabels(completionNavCategory)
   const rollupCards = (cards) => {
     const owned = cards.reduce((s, c) => s + c.ownedCount, 0)
     const total = cards.reduce((s, c) => s + c.totalItems, 0)
@@ -11779,6 +12038,42 @@ function App() {
     }
     setCompletionNavSubset('')
     let cancelled = false
+    const na = (v) => (v && v !== 'N/A' ? v : '')
+    const toDisplay = (r) => {
+      const fp = r.front_image_path
+      const imageUrl = fp
+        ? fp.startsWith('http')
+          ? fp
+          : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || ''
+        : ''
+      const subjectName = na(r.subject)
+      const setName     = na(r.collectible_set)
+      const printType   = na(r.print_type)
+      const cardNum     = r.card_number && r.card_number !== 'N/A' ? `#${r.card_number}` : ''
+      const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
+      return {
+        item_id:  r.item_id,
+        name:     subjectName || nameParts.join(' — ') || r.description || 'Unknown',
+        imageUrl,
+        raw:      r,
+      }
+    }
+    // LEGO set: the "items" are its minifigs (set_minifigs), not items sharing a
+    // collectible_set_id (which is now packaging).
+    const legoCard = completionLegoSets.find((s) => s.id === selectedCompletionSetId)
+    if (legoCard) {
+      const ids = legoCard.minifigItemIds
+      if (!ids.length) { setCompletionSetAllItems([]); return () => { cancelled = true } }
+      ;(async () => {
+        const all = []
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data } = await supabase.from('item_details').select('*').in('item_id', ids.slice(i, i + 200))
+          if (data) all.push(...data)
+        }
+        if (!cancelled) setCompletionSetAllItems(all.map(toDisplay).sort((a, b) => (a.name || '').localeCompare(b.name || '')))
+      })()
+      return () => { cancelled = true }
+    }
     supabase
       .from('item_details')
       .select('*')
@@ -11786,31 +12081,10 @@ function App() {
       .order('card_number', { ascending: true, nullsFirst: false })
       .then(({ data }) => {
         if (cancelled) return
-        const na = (v) => (v && v !== 'N/A' ? v : '')
-        setCompletionSetAllItems(
-          (data || []).map((r) => {
-            const fp = r.front_image_path
-            const imageUrl = fp
-              ? fp.startsWith('http')
-                ? fp
-                : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || ''
-              : ''
-            const subjectName = na(r.subject)
-            const setName     = na(r.collectible_set)
-            const printType   = na(r.print_type)
-            const cardNum     = r.card_number && r.card_number !== 'N/A' ? `#${r.card_number}` : ''
-            const nameParts   = [subjectName, setName, printType, cardNum].filter(Boolean)
-            return {
-              item_id:  r.item_id,
-              name:     subjectName || nameParts.join(' — ') || r.description || 'Unknown',
-              imageUrl,
-              raw:      r,
-            }
-          }),
-        )
+        setCompletionSetAllItems((data || []).map(toDisplay))
       })
     return () => { cancelled = true }
-  }, [selectedCompletionSetId])
+  }, [selectedCompletionSetId, completionLegoSets])
 
   useEffect(() => {
     setCollectionOverviewPage(1)
@@ -12216,37 +12490,37 @@ function App() {
                         ))}
                       </select>
 
-                      <label className="completion-filter-label">Subcategory</label>
+                      <label className="completion-filter-label">{completionLabels.subcategory}</label>
                       <select
                         value={completionNavSubcategory}
                         disabled={!completionNavCategory}
                         onChange={(e) => { setCompletionNavSubcategory(e.target.value); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
                       >
-                        <option value="">All subcategories</option>
+                        <option value="">All {completionLabels.subcategory.toLowerCase()}s</option>
                         {Object.keys(completionSubcategoryGroups).sort((a, b) => a.localeCompare(b)).map(sub => (
                           <option key={sub} value={sub}>{sub}</option>
                         ))}
                       </select>
 
-                      <label className="completion-filter-label">Franchise</label>
+                      <label className="completion-filter-label">{completionLabels.franchise}</label>
                       <select
                         value={completionNavFranchise}
                         disabled={!completionNavSubcategory}
                         onChange={(e) => { setCompletionNavFranchise(e.target.value); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
                       >
-                        <option value="">All franchises</option>
+                        <option value="">All {completionLabels.franchise.toLowerCase()}s</option>
                         {Object.keys(completionFranchiseGroups).sort((a, b) => a.localeCompare(b)).map(fr => (
                           <option key={fr} value={fr}>{fr}</option>
                         ))}
                       </select>
 
-                      <label className="completion-filter-label">Brand</label>
+                      <label className="completion-filter-label">{completionLabels.brand}</label>
                       <select
                         value={completionNavBrand}
                         disabled={!completionNavFranchise}
                         onChange={(e) => { setCompletionNavBrand(e.target.value); setSelectedCompletionSetId('') }}
                       >
-                        <option value="">All brands</option>
+                        <option value="">All {completionLabels.brand.toLowerCase()}s</option>
                         {Object.keys(completionBrandGroups).sort((a, b) => a.localeCompare(b)).map(brand => (
                           <option key={brand} value={brand}>{brand}</option>
                         ))}
@@ -12834,7 +13108,7 @@ function App() {
                                     </div>
                                     <div className="completion-nav-block-meta">
                                       <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
                                     </div>
                                   </article>
                                 )
@@ -12867,7 +13141,7 @@ function App() {
                                     </div>
                                     <div className="completion-nav-block-meta">
                                       <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
                                     </div>
                                   </article>
                                 )
@@ -12900,7 +13174,7 @@ function App() {
                                     </div>
                                     <div className="completion-nav-block-meta">
                                       <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
                                     </div>
                                   </article>
                                 )
@@ -12935,7 +13209,7 @@ function App() {
                                     </div>
                                     <div className="completion-nav-block-meta">
                                       <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'} started</span>
+                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
                                     </div>
                                   </article>
                                 )
@@ -13626,6 +13900,7 @@ function App() {
           </section>
         ) : currentScreen === 'catalog' ? (
           <section className="catalog-screen" aria-label="Catalog">
+            <div className="catalog-sticky-top">
             <div className="catalog-head">
               <div>
                 <h1>{t('catalogPageTitle')}</h1>
@@ -13765,6 +14040,7 @@ function App() {
                 )}
               </div>
             )}
+            </div>
 
             <div className={`catalog-layout${catalogViewMode === 'list' ? ' catalog-layout-list-mode' : ''}`}>
               <aside className="catalog-card catalog-filters" aria-label="Catalog filters">
@@ -14951,6 +15227,11 @@ function App() {
                         /* Step 2: review queue */
                         (() => {
                           const cur = bulkImportRows[bulkImportIdx] || {}
+                          const bulkLabels = getCategoryLabels(selectedCatalogAdminCategoryName)
+                          // A LEGO row is a minifig (no packaging) unless it's a set —
+                          // identified by a set number, numeric BrickLink id, or "Sets" brand.
+                          const bulkRowIsSet = !!(cur.lego_set_number?.trim() || (cur.bricklink_id?.trim() && /^\d/.test(cur.bricklink_id.trim())) || /^sets?$/i.test((cur.brand_name || '').trim()))
+                          const bulkIsMinifig = selectedCatalogAdminCategoryName === 'Building Blocks' && !bulkRowIsSet
                           const _legoPreviewCode = (() => {
                             if (selectedCatalogAdminCategoryName !== 'Building Blocks') return ''
                             // Sets don't get minifig codes — detect by lego_set_number or numeric BrickLink ID
@@ -15048,17 +15329,19 @@ function App() {
                                       )}
                                       <div className="bulk-import-editor-fields">
                                         <div className="bulk-import-editor-field">
-                                          <label>Franchise</label>
+                                          <label>{bulkLabels.franchise}</label>
                                           <input type="text" value={cur.franchise_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { franchise_name: e.target.value })} placeholder="e.g. Star Wars" />
                                         </div>
                                         <div className="bulk-import-editor-field">
-                                          <label>Brand</label>
+                                          <label>{bulkLabels.brand}</label>
                                           <input type="text" value={cur.brand_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { brand_name: e.target.value })} placeholder="e.g. LEGO" />
                                         </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>Collectible Set</label>
-                                          <input type="text" value={cur.collectible_set_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { collectible_set_name: e.target.value })} placeholder="e.g. UCS Millennium Falcon" />
-                                        </div>
+                                        {!bulkIsMinifig && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>{bulkLabels.collectibleSet}</label>
+                                            <input type="text" value={cur.collectible_set_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { collectible_set_name: e.target.value })} placeholder={selectedCatalogAdminCategoryName === 'Building Blocks' ? 'e.g. Box / Polybag' : 'e.g. UCS Millennium Falcon'} />
+                                          </div>
+                                        )}
                                         {selectedCatalogAdminCategoryName === 'Building Blocks' && _legoPreviewCode && (
                                           <div className="bulk-import-editor-field">
                                             <label>Minifig Code <span className="catalog-admin-hint">{cur.minifig_code ? '(from CSV)' : '(preview — # assigned on save)'}</span></label>
@@ -15066,7 +15349,7 @@ function App() {
                                           </div>
                                         )}
                                         <div className="bulk-import-editor-field">
-                                          <label>Subject</label>
+                                          <label>{bulkLabels.subject}</label>
                                           {cur.subjectObj ? (
                                             <div className="catalog-admin-subject-tags">
                                               <span className="catalog-admin-subject-tag">
@@ -15116,13 +15399,45 @@ function App() {
                                             </select>
                                           </div>
                                         )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>Subset</label>
-                                          <select value={cur.subcollectble_set_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subcollectble_set_id: e.target.value })}>
-                                            <option value="">None</option>
-                                            {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                          </select>
-                                        </div>
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' ? (
+                                          <>
+                                            <div className="bulk-import-editor-field">
+                                              <label>{bulkLabels.subset} {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(match a theme first)</span>}</label>
+                                              <select value={cur.subset_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subset_id: e.target.value, product_line_ids: [] })} disabled={!catalogAdminRealFranchiseId}>
+                                                <option value="">None</option>
+                                                {catalogAdminSubsetsList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                              </select>
+                                              {!cur.subset_id && cur.subtheme_name?.trim() && <span className="catalog-admin-hint">CSV: “{cur.subtheme_name}” — will create on save</span>}
+                                            </div>
+                                            <div className="bulk-import-editor-field">
+                                              <label>{bulkLabels.productLine}</label>
+                                              {cur.subset_id ? (
+                                                catalogAdminProductLinesList.length > 0 ? (
+                                                  <div className="catalog-admin-team-list">
+                                                    {catalogAdminProductLinesList.map(p => {
+                                                      const checked = (cur.product_line_ids || []).includes(p.id)
+                                                      return (
+                                                        <label key={p.id} className="catalog-admin-team-checkbox">
+                                                          <input type="checkbox" checked={checked} onChange={() => updateBulkRow(bulkImportIdx, { product_line_ids: checked ? (cur.product_line_ids || []).filter(id => id !== p.id) : [...(cur.product_line_ids || []), p.id] })} />
+                                                          <span>{p.name}</span>
+                                                        </label>
+                                                      )
+                                                    })}
+                                                  </div>
+                                                ) : <span className="catalog-admin-hint">No product lines yet for this {bulkLabels.subset.toLowerCase()}.</span>
+                                              ) : <span className="catalog-admin-hint">Select a {bulkLabels.subset.toLowerCase()} first.</span>}
+                                              {cur.product_line_names?.trim() && <span className="catalog-admin-hint">CSV: “{cur.product_line_names}” — matched/created on save</span>}
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <div className="bulk-import-editor-field">
+                                            <label>{bulkLabels.subset}</label>
+                                            <select value={cur.subcollectble_set_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subcollectble_set_id: e.target.value })}>
+                                              <option value="">None</option>
+                                              {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                            </select>
+                                          </div>
+                                        )}
                                         <div className="bulk-import-editor-field">
                                           <label>Print Type</label>
                                           <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
@@ -15374,7 +15689,7 @@ function App() {
                       )}
                       <div>
                         <label htmlFor="cai-brand">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').brand}</label>
-                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }} disabled={selectedCatalogAdminCategoryName !== 'Building Blocks' && !catalogAdminRealFranchiseId}>
+                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminPackagingId(''); setCatalogAdminFormError('') }} disabled={selectedCatalogAdminCategoryName !== 'Building Blocks' && !catalogAdminRealFranchiseId}>
                           <option value="">None</option>
                           {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
@@ -15428,14 +15743,16 @@ function App() {
                               </div>
                             ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'productLine', value: '', subjectType: 'player' })}>+ New Product Line</button>)}
                           </div>
-                          {/* Packaging (repurposed collectible_set) — independent */}
-                          <div>
-                            <label htmlFor="cai-packaging">{getCategoryLabels('Building Blocks').collectibleSet}</label>
-                            <select id="cai-packaging" value={catalogAdminPackagingId} onChange={e => setCatalogAdminPackagingId(e.target.value)}>
-                              <option value="">None</option>
-                              {catalogAdminPackagingList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                          </div>
+                          {/* Packaging (repurposed collectible_set) — sets only; minifigs don't have packaging */}
+                          {catalogAdminBrands.find(b => b.id === catalogAdminBrandId)?.name !== 'Minifigs' && (
+                            <div>
+                              <label htmlFor="cai-packaging">{getCategoryLabels('Building Blocks').collectibleSet}</label>
+                              <select id="cai-packaging" value={catalogAdminPackagingId} onChange={e => setCatalogAdminPackagingId(e.target.value)}>
+                                <option value="">None</option>
+                                {catalogAdminPackagingList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                              </select>
+                            </div>
+                          )}
                         </>
                       ) : (
                         <>
@@ -15999,15 +16316,17 @@ function App() {
                     <div className="catalog-item-edit-grid">
                       {(() => {
                         const editCatLabels = getCategoryLabels(catalogCategories.find(c => c.id === catalogItemEditValues.category_id)?.name || '')
+                        const editBrandName = catalogBrands.find(b => b.id === catalogItemEditValues.brand_id)?.name || ''
+                        const editIsMinifig = editBrandName === 'Minifigs'   // minifigs have no packaging
                         return [
                           ['Category',                    'category_id',          catalogCategories,                false],
                           [editCatLabels.subcategory,     'subcategory_id',       catalogSubcategories,             false],
                           [editCatLabels.franchise,       'franchise_id',         catalogItemEditLookups.franchises, false],
                           [editCatLabels.brand,           'brand_id',             catalogBrands,                    false],
-                          [editCatLabels.collectibleSet,  'collectible_set_id',   catalogItemEditLookups.sets,      false],
+                          !editIsMinifig && [editCatLabels.collectibleSet,  'collectible_set_id',   catalogItemEditLookups.sets,      false],
                           [editCatLabels.subset,          'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
                           ['Print Type',                  'print_type_id',        catalogItemEditLookups.printTypes, false],
-                        ]
+                        ].filter(Boolean)
                       })().map(([label, field, options, upper]) => (
                         <label key={field} className="catalog-item-edit-field">
                           <span>{label}</span>
@@ -16056,6 +16375,14 @@ function App() {
                       <label className="catalog-item-edit-field">
                         <span>Release Year</span>
                         <input type="number" min="1932" max="2100" value={catalogItemEditValues.release_year ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, release_year: e.target.value }))} placeholder="e.g. 2023" />
+                      </label>
+                      <label className="catalog-item-edit-field">
+                        <span>Retail Price</span>
+                        <input type="number" min="0" step="0.01" value={catalogItemEditValues.retail_price ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, retail_price: e.target.value }))} placeholder="e.g. 19.99" />
+                      </label>
+                      <label className="catalog-item-edit-field">
+                        <span>Value (Market Price)</span>
+                        <input type="number" min="0" step="0.01" value={catalogItemEditValues.market_price ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, market_price: e.target.value }))} placeholder="e.g. 24.99" />
                       </label>
                       {catalogRarities.length > 0 && (
                         <label className="catalog-item-edit-field">

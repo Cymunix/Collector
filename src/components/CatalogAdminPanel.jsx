@@ -111,50 +111,94 @@ function SubcategoryTab({ categories }) {
 
 // ── Franchise Tab ─────────────────────────────────────────────────────────────
 function FranchiseTab() {
-  const [name, setName]       = useState('')
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
-  const [success, setSuccess] = useState('')
-  const [items, setItems]     = useState([])
+  const [editingId, setEditingId]     = useState('')   // '' = creating new
+  const [name, setName]               = useState('')
+  const [description, setDescription] = useState('')
+  const [logoUrl, setLogoUrl]         = useState('')
+  const [uploading, setUploading]     = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState('')
+  const [success, setSuccess]         = useState('')
+  const [items, setItems]             = useState([])
 
-  useEffect(() => {
-    supabase.from('franchises').select('franchise_id, name').order('name')
+  const loadList = () => {
+    supabase.from('franchises').select('franchise_id, name, description, logo_url').order('name')
       .then(({ data, error }) => {
         if (error) console.error('franchises load error:', error)
-        setItems((data || []).map(r => ({ id: r.franchise_id, name: r.name })))
+        setItems((data || []).map(r => ({ id: r.franchise_id, name: r.name, description: r.description || '', logo_url: r.logo_url || '' })))
       })
-  }, [])
+  }
+  useEffect(loadList, [])
+
+  const resetForm = () => { setEditingId(''); setName(''); setDescription(''); setLogoUrl(''); setError(''); setSuccess('') }
+  const selectForEdit = (it) => { setEditingId(it.id); setName(it.name); setDescription(it.description); setLogoUrl(it.logo_url); setError(''); setSuccess('') }
+
+  const uploadLogo = async (file) => {
+    if (!file) return
+    setUploading(true); setError('')
+    const ext  = (file.name.split('.').pop() || 'png').toLowerCase()
+    const path = `franchise-logos/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+    const { error: upErr } = await supabase.storage.from('item-images').upload(path, file, { upsert: true, contentType: file.type })
+    if (upErr) { setError(upErr.message || 'Logo upload failed.'); setUploading(false); return }
+    setLogoUrl(supabase.storage.from('item-images').getPublicUrl(path).data?.publicUrl || '')
+    setUploading(false)
+  }
 
   const save = async () => {
     if (!name.trim()) return
     setSaving(true); setError(''); setSuccess('')
-    const { data, error: err } = await supabase.from('franchises')
-      .insert({ name: name.trim() })
-      .select('franchise_id, name')
-      .single()
-    if (err) {
-      console.error('franchises insert error:', err)
-      setError(err.message || 'Could not create franchise.')
-      setSaving(false)
-      return
+    const payload = { name: name.trim(), description: description.trim() || null, logo_url: logoUrl.trim() || null }
+    if (editingId) {
+      const { error: err } = await supabase.from('franchises').update(payload).eq('franchise_id', editingId)
+      if (err) { console.error('franchises update error:', err); setError(err.message || 'Could not update franchise.'); setSaving(false); return }
+      setSuccess(`"${payload.name}" updated.`)
+    } else {
+      const { data, error: err } = await supabase.from('franchises').insert(payload).select('franchise_id').single()
+      if (err) { console.error('franchises insert error:', err); setError(err.message || 'Could not create franchise.'); setSaving(false); return }
+      setEditingId(data.franchise_id)
+      setSuccess(`"${payload.name}" created.`)
     }
-    setItems(prev => [...prev, { id: data.franchise_id, name: data.name }].sort((a, b) => a.name.localeCompare(b.name)))
-    setSuccess(`"${data.name}" created.`)
-    setName('')
+    loadList()
     setSaving(false)
   }
 
   return (
     <div style={s.section}>
       <div style={s.card}>
-        <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 14px', fontSize: '0.9rem' }}>Create Franchise</p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 14px' }}>
+          <p style={{ fontWeight: 700, color: '#17253d', margin: 0, fontSize: '0.9rem' }}>{editingId ? 'Edit Franchise' : 'Create Franchise'}</p>
+          {editingId && <button type="button" style={s.btnSm} onClick={resetForm}>+ New Franchise</button>}
+        </div>
         <FormRow label="Franchise Name">
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. NFL"
-            style={s.fld} onKeyDown={e => e.key === 'Enter' && save()} />
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. NFL" style={s.fld} />
         </FormRow>
+        <div style={{ marginTop: 14 }}>
+          <FormRow label="Description">
+            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Short description shown in the catalog Context panel…"
+              style={{ ...s.fld, minHeight: 84, resize: 'vertical', fontFamily: 'var(--font-ui)' }} />
+          </FormRow>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <FormRow label="Logo / Photo">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {logoUrl
+                ? <img src={logoUrl} alt="Franchise logo" style={{ width: 60, height: 60, objectFit: 'contain', borderRadius: 10, border: '1px solid #dde3ef', background: '#fff', flex: '0 0 auto' }} />
+                : <div style={{ width: 60, height: 60, borderRadius: 10, border: '1px dashed #c3ccdd', background: '#fff', flex: '0 0 auto' }} />}
+              <div style={{ display: 'grid', gap: 8, flex: 1 }}>
+                <label style={{ ...s.btnSm, display: 'inline-block', textAlign: 'center', cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.6 : 1 }}>
+                  {uploading ? 'Uploading…' : (logoUrl ? 'Replace image' : 'Upload image')}
+                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploading}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = '' }} />
+                </label>
+                <input type="text" value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="…or paste an image URL" style={{ ...s.fld, fontSize: '0.8rem' }} />
+                {logoUrl && <button type="button" style={{ ...s.btnSm, justifySelf: 'start' }} onClick={() => setLogoUrl('')}>Remove image</button>}
+              </div>
+            </div>
+          </FormRow>
+        </div>
         <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || saving}>
-            {saving ? 'Saving…' : 'Create Franchise'}
+          <button type="button" style={s.btn} onClick={save} disabled={!name.trim() || saving || uploading}>
+            {saving ? 'Saving…' : (editingId ? 'Save Changes' : 'Create Franchise')}
           </button>
           <Feedback error={error} success={success} />
         </div>
@@ -162,9 +206,20 @@ function FranchiseTab() {
 
       {items.length > 0 && (
         <div style={s.card}>
-          <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 12px', fontSize: '0.9rem' }}>Existing Franchises</p>
+          <p style={{ fontWeight: 700, color: '#17253d', margin: '0 0 12px', fontSize: '0.9rem' }}>Existing Franchises <span style={{ fontWeight: 500, color: '#8292ac' }}>· click to edit</span></p>
           <div style={s.list}>
-            {items.map(i => <div key={i.id} style={s.listRow}>{i.name}</div>)}
+            {items.map(i => (
+              <button key={i.id} type="button" onClick={() => selectForEdit(i)}
+                style={{ ...s.listRow, cursor: 'pointer', textAlign: 'left', gap: 10, background: editingId === i.id ? '#eef2fb' : '#fff', borderColor: editingId === i.id ? '#b9c8e8' : '#e8ecf4' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  {i.logo_url
+                    ? <img src={i.logo_url} alt="" style={{ width: 26, height: 26, objectFit: 'contain', borderRadius: 6, border: '1px solid #e8ecf4', flex: '0 0 auto' }} />
+                    : <span style={{ width: 26, height: 26, borderRadius: 6, background: '#eef2f8', flex: '0 0 auto' }} />}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.name}</span>
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#8292ac', flex: '0 0 auto' }}>{i.description ? '📝' : ''}{i.logo_url ? '🖼️' : ''}</span>
+              </button>
+            ))}
           </div>
         </div>
       )}
