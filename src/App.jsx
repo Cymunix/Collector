@@ -12113,6 +12113,15 @@ function App() {
     return () => { cancelled = true }
   }, [selectedCompletionSetId, completionLegoSets])
 
+  // Dead-end skip: if an item type resolves to a single card (e.g. a theme's
+  // "All Minifigs"), open it straight to the orange item cards.
+  useEffect(() => {
+    if (!completionNavBrand || selectedCompletionSetId) return
+    if (completionBrandSetCards.length === 1) {
+      setSelectedCompletionSetId(completionBrandSetCards[0].id)
+    }
+  }, [completionNavBrand, completionBrandSetCards, selectedCompletionSetId])
+
   useEffect(() => {
     setCollectionOverviewPage(1)
   }, [activeCollectionFilter, activeStorageFilter, collectionSearchQuery, collectionFilterSubtheme, collectionFilterFaction, collectionFilterSpecies, collectionFilterCondition, collectionSortKey])
@@ -12945,9 +12954,14 @@ function App() {
                           selectedCompletionSet ? (
                             <div className="completion-set-sheet">
                               <div className="completion-sheet-header">
-                                <button type="button" className="catalog-action-pill" onClick={() => { setCompletionNavSubset(''); setSelectedCompletionSetId('') }}>
-                                  ← {completionNavBrand || 'All Sets'}
-                                </button>
+                                {(() => {
+                                  const soleCard = completionBrandSetCards.length === 1 && completionBrandSetCards[0]?.id === selectedCompletionSetId
+                                  return (
+                                    <button type="button" className="catalog-action-pill" onClick={() => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); if (soleCard) setCompletionNavBrand('') }}>
+                                      ← {soleCard ? (completionNavFranchise || 'Back') : (completionNavBrand || 'All Sets')}
+                                    </button>
+                                  )
+                                })()}
                                 <div className="completion-sheet-title">
                                   <h3>{selectedCompletionSet.title}{completionNavSubset ? ` — ${completionSetSubsets.find(s => s.id === completionNavSubset)?.name}` : ''}</h3>
                                   <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
