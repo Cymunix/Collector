@@ -15829,20 +15829,13 @@ function App() {
                               </div>
                             ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subtheme', value: '', subjectType: 'player' })}>+ New Subtheme</button>)}
                           </div>
-                          {/* Product Line — multi-select, depends on Subtheme */}
+                          {/* Product Line — depends on Subtheme */}
                           <div>
-                            <label>{getCategoryLabels('Building Blocks').productLine} {!catalogAdminSubsetSel && <span className="catalog-admin-hint">(select a subtheme first)</span>}</label>
-                            {catalogAdminProductLinesList.length > 0 && (
-                              <div className="catalog-admin-team-list">
-                                {catalogAdminProductLinesList.map(pl => (
-                                  <label key={pl.id} className="catalog-admin-team-checkbox">
-                                    <input type="checkbox" checked={catalogAdminProductLineIds.includes(pl.id)}
-                                      onChange={e => setCatalogAdminProductLineIds(prev => e.target.checked ? [...prev, pl.id] : prev.filter(id => id !== pl.id))} />
-                                    <span>{pl.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            )}
+                            <label htmlFor="cai-productline">{getCategoryLabels('Building Blocks').productLine} {!catalogAdminSubsetSel && <span className="catalog-admin-hint">(select a subtheme first)</span>}</label>
+                            <select id="cai-productline" value={catalogAdminProductLineIds[0] || ''} onChange={e => setCatalogAdminProductLineIds(e.target.value ? [e.target.value] : [])} disabled={!catalogAdminSubsetSel}>
+                              <option value="">None</option>
+                              {catalogAdminProductLinesList.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+                            </select>
                             {catalogAdminSubsetSel && (catalogAdminInlineCreate.field === 'productLine' ? (
                               <div className="catalog-admin-inline-create">
                                 <input autoFocus className="catalog-admin-inline-input" placeholder="Product line name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
