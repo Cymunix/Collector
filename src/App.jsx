@@ -1714,6 +1714,11 @@ function App() {
   const [catalogTeamId, setCatalogTeamId] = useState('')
   const [catalogSetId, setCatalogSetId] = useState('')
   const [catalogSubsetId, setCatalogSubsetId] = useState('')
+  // Faceted (LEGO) filters: Subtheme (subsets) → Product Line (product_lines).
+  const [catalogSubthemeId, setCatalogSubthemeId] = useState('')
+  const [catalogSubthemeOptions, setCatalogSubthemeOptions] = useState([])
+  const [catalogProductLineId, setCatalogProductLineId] = useState('')
+  const [catalogProductLineOptions, setCatalogProductLineOptions] = useState([])
   const [catalogPrintTypeId, setCatalogPrintTypeId] = useState('')
   const [catalogCardTypeIds, setCatalogCardTypeIds] = useState([])
   const [catalogSubjectId, setCatalogSubjectId] = useState('')
@@ -2162,6 +2167,7 @@ function App() {
   const selectedCatalogBulkFranchiseIds = [...new Set(selectedCatalogBulkItems.map((item) => item.franchise_id).filter(Boolean))]
   const selectedCatalogBulkFranchiseId = selectedCatalogBulkFranchiseIds.length === 1 ? selectedCatalogBulkFranchiseIds[0] : ''
   const catalogSearchText = siteSearchQuery.trim()
+  const catalogSidebarLabels = getCategoryLabels(catalogCategory === 'all' ? '' : catalogCategory)
   const catalogActiveContextRows = [
     catalogSearchText ? { label: 'Search', value: catalogSearchText } : null,
     selectedCatalogCategoryRecord ? { label: 'Category', value: selectedCatalogCategoryRecord.name } : null,
@@ -2171,6 +2177,8 @@ function App() {
     catalogTeamId ? { label: 'Team', value: catalogTeams.find((team) => team.id === catalogTeamId)?.name || 'Selected team' } : null,
     catalogSetId ? { label: 'Collectible Set', value: catalogSets.find((setRow) => setRow.id === catalogSetId)?.name || 'Selected set' } : null,
     catalogSubsetId ? { label: 'Subcollectible Set', value: catalogSubsets.find((subset) => subset.id === catalogSubsetId)?.name || 'Selected subset' } : null,
+    catalogSubthemeId ? { label: catalogSidebarLabels.subset, value: catalogSubthemeOptions.find((s) => s.id === catalogSubthemeId)?.name || 'Selected subtheme' } : null,
+    catalogProductLineId ? { label: catalogSidebarLabels.productLine, value: catalogProductLineOptions.find((p) => p.id === catalogProductLineId)?.name || 'Selected product line' } : null,
     catalogPrintTypeId ? {
       label: 'Print Type',
       value: catalogPrintTypeId === '__none__'
@@ -2220,7 +2228,6 @@ function App() {
     catalogCategories.find(c => c.id === selectedCatalogItem?.category_id)?.name ||
     ''
   )
-  const catalogSidebarLabels = getCategoryLabels(catalogCategory === 'all' ? '' : catalogCategory)
   const formatUsd = (value) => {
     const amount = Number(value)
     if (!Number.isFinite(amount)) {
@@ -3211,6 +3218,31 @@ function App() {
       })
   }, [currentScreen, catalogSubsetId])
 
+  // Faceted filter: Subtheme options for the selected Theme (franchise).
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const franchiseId = selectedCatalogFranchiseRecord?.id || ''
+    if (!franchiseId) { setCatalogSubthemeOptions([]); setCatalogSubthemeId(prev => prev ? '' : prev); return }
+    supabase.from('subsets').select('subset_id, name').eq('franchise_id', franchiseId).order('name')
+      .then(({ data }) => {
+        const list = (data || []).map(r => ({ id: r.subset_id, name: r.name }))
+        setCatalogSubthemeOptions(list)
+        setCatalogSubthemeId(prev => list.some(s => s.id === prev) ? prev : '')
+      })
+  }, [currentScreen, selectedCatalogFranchiseRecord?.id])
+
+  // Faceted filter: Product Line options for the selected Subtheme.
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    if (!catalogSubthemeId) { setCatalogProductLineOptions([]); setCatalogProductLineId(prev => prev ? '' : prev); return }
+    supabase.from('product_lines').select('product_line_id, name').eq('subset_id', catalogSubthemeId).order('name')
+      .then(({ data }) => {
+        const list = (data || []).map(r => ({ id: r.product_line_id, name: r.name }))
+        setCatalogProductLineOptions(list)
+        setCatalogProductLineId(prev => list.some(p => p.id === prev) ? prev : '')
+      })
+  }, [currentScreen, catalogSubthemeId])
+
   // Effect F: subject typeahead search (category-scoped when a category is selected)
   useEffect(() => {
     if (currentScreen !== 'catalog') return
@@ -3543,6 +3575,21 @@ function App() {
       if (catalogSubsetId) {
         itemsQuery = itemsQuery.eq('subcollectble_set_id', catalogSubsetId)
       }
+      // Faceted: Subtheme (items.subset_id) — not exposed by item_details, so
+      // pre-query matching item_ids and constrain the main query.
+      if (catalogSubthemeId) {
+        const { data: subRows } = await supabase.from('items').select('item_id').eq('subset_id', catalogSubthemeId)
+        const subIds = (subRows || []).map(r => r.item_id)
+        if (!subIds.length) { setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return }
+        itemsQuery = itemsQuery.in('item_id', subIds)
+      }
+      // Faceted: Product Line (item_product_lines m2m).
+      if (catalogProductLineId) {
+        const { data: plRows } = await supabase.from('item_product_lines').select('item_id').eq('product_line_id', catalogProductLineId)
+        const plIds = (plRows || []).map(r => r.item_id)
+        if (!plIds.length) { setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return }
+        itemsQuery = itemsQuery.in('item_id', plIds)
+      }
       if (catalogPrintTypeId === '__none__') {
         itemsQuery = itemsQuery.is('print_type_id', null)
       } else if (catalogPrintTypeId) {
@@ -3762,6 +3809,8 @@ function App() {
     catalogSubcategory,
     catalogSubjectId,
     catalogSubsetId,
+    catalogSubthemeId,
+    catalogProductLineId,
     catalogTeamId,
     currentScreen,
     selectedCatalogCategoryRecord,
@@ -14167,6 +14216,8 @@ function App() {
                       setCatalogTeamId('')
                       setCatalogSetId('')
                       setCatalogSubsetId('')
+                      setCatalogSubthemeId('')
+                      setCatalogProductLineId('')
                       setCatalogPrintTypeId('')
                       setCatalogCardTypeIds([])
                       setCatalogSubjectId('')
@@ -14398,6 +14449,40 @@ function App() {
                       <option value="">All</option>
                       {catalogSubsets.map((s) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Subtheme (faceted subsets) — cascades from Theme */}
+                {catalogSubthemeOptions.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-subtheme">{catalogSidebarLabels.subset}</label>
+                    <select
+                      id="catalog-subtheme"
+                      value={catalogSubthemeId}
+                      onChange={(event) => setCatalogSubthemeId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogSubthemeOptions.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Product Line (faceted) — cascades from Subtheme */}
+                {catalogProductLineOptions.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-productline">{catalogSidebarLabels.productLine}</label>
+                    <select
+                      id="catalog-productline"
+                      value={catalogProductLineId}
+                      onChange={(event) => setCatalogProductLineId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogProductLineOptions.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
                   </>
