@@ -5580,7 +5580,7 @@ function App() {
   // minifigs linked to it via set_minifigs. Completion = minifigs owned / total.
   // Shows all themes/sets regardless of ownership.
   useEffect(() => {
-    if (currentScreen !== 'completion') return
+    if (collectionViewTab !== 'completion') return
     let cancelled = false
     const loadAllPaged = async (build) => {
       const out = []
@@ -5642,7 +5642,7 @@ function App() {
     }
     load()
     return () => { cancelled = true }
-  }, [currentScreen, goalReloadToken])
+  }, [collectionViewTab, goalReloadToken])
 
   useEffect(() => {
     if (activeCollectionFilter === 'all') {
