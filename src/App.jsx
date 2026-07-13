@@ -5593,16 +5593,18 @@ function App() {
       return out
     }
     const load = async () => {
-      const [{ data: bbCat }, { data: setsBrand }] = await Promise.all([
+      const [{ data: bbCat }, { data: brandRows }] = await Promise.all([
         supabase.from('categories').select('category_id').ilike('name', 'Building Blocks').maybeSingle(),
-        supabase.from('brands').select('brand_id').eq('name', 'Sets').limit(1).maybeSingle(),
+        supabase.from('brands').select('brand_id, name').in('name', ['Sets', 'Minifigs', 'Miscellaneous']),
       ])
       if (!bbCat) { if (!cancelled) setCompletionLegoSets([]); return }
-      const setItems = await loadAllPaged(() => {
-        let q = supabase.from('items').select('item_id, franchise_id, subset_id, lego_set_number, description, subject_id').eq('category_id', bbCat.category_id)
-        if (setsBrand?.brand_id) q = q.eq('brand_id', setsBrand.brand_id)
-        return q
-      })
+      const brandNameById = {}
+      for (const b of (brandRows || [])) if (!brandNameById[b.brand_id]) brandNameById[b.brand_id] = b.name
+      // All LEGO items (any item type), so we can build Sets / Minifigs / Misc cards.
+      const items = await loadAllPaged(() =>
+        supabase.from('items').select('item_id, brand_id, franchise_id, subset_id, lego_set_number, description, subject_id').eq('category_id', bbCat.category_id))
+      const itemBrand = (i) => brandNameById[i.brand_id] || ''
+      const setItems = items.filter(i => itemBrand(i) === 'Sets')
       const setIds = setItems.map(s => s.item_id)
       const links = []
       for (let i = 0; i < setIds.length; i += 150) {
@@ -5611,9 +5613,9 @@ function App() {
       }
       const minifigsBySet = {}
       for (const l of links) { (minifigsBySet[l.set_item_id] ||= []).push(l.minifig_item_id) }
-      const subjectIds = [...new Set(setItems.map(s => s.subject_id).filter(Boolean))]
-      const franchiseIds = [...new Set(setItems.map(s => s.franchise_id).filter(Boolean))]
-      const subsetIds = [...new Set(setItems.map(s => s.subset_id).filter(Boolean))]
+      const subjectIds = [...new Set(items.map(s => s.subject_id).filter(Boolean))]
+      const franchiseIds = [...new Set(items.map(s => s.franchise_id).filter(Boolean))]
+      const subsetIds = [...new Set(items.map(s => s.subset_id).filter(Boolean))]
       const chunkedIn = async (table, col, sel, ids) => {
         const out = []
         for (let i = 0; i < ids.length; i += 200) {
@@ -5630,15 +5632,40 @@ function App() {
       const subjectName = Object.fromEntries(subjects.map(s => [s.subject_id, s.subject_name]))
       const franchiseName = Object.fromEntries(franchises.map(f => [f.franchise_id, f.name]))
       const subsetName = Object.fromEntries(subsets.map(s => [s.subset_id, s.name]))
-      const sets = setItems.map(s => ({
-        id: s.item_id,
-        title: subjectName[s.subject_id] || s.description || (s.lego_set_number ? `Set ${s.lego_set_number}` : 'Set'),
-        legoSetNumber: s.lego_set_number || '',
-        franchiseName: franchiseName[s.franchise_id] || 'Unknown Theme',
-        subthemeName: subsetName[s.subset_id] || '',
-        minifigItemIds: minifigsBySet[s.item_id] || [],
-      }))
-      if (!cancelled) setCompletionLegoSets(sets)
+      const themeName = (fid) => franchiseName[fid] || 'Unknown Theme'
+      const cards = []
+      // Sets: one card per set item — completion = its minifigs owned / total.
+      for (const s of setItems) {
+        const base = subjectName[s.subject_id] || s.description || (s.lego_set_number ? `Set ${s.lego_set_number}` : 'Set')
+        cards.push({
+          id: s.item_id,
+          title: s.lego_set_number ? `${base} (${s.lego_set_number})` : base,
+          franchiseName: themeName(s.franchise_id),
+          brandName: 'Sets',
+          subthemeName: subsetName[s.subset_id] || '',
+          itemIds: minifigsBySet[s.item_id] || [],
+        })
+      }
+      // Minifigs / Miscellaneous: one card per theme — completion = own all of them.
+      const groupByFranchise = (arr) => {
+        const m = {}
+        for (const it of arr) { const f = it.franchise_id || '__none__'; (m[f] ||= []).push(it) }
+        return m
+      }
+      for (const [label, brand] of [['All Minifigs', 'Minifigs'], ['All Miscellaneous', 'Miscellaneous']]) {
+        const groups = groupByFranchise(items.filter(i => itemBrand(i) === brand))
+        for (const [fid, arr] of Object.entries(groups)) {
+          cards.push({
+            id: `${brand.toLowerCase()}-${fid}`,
+            title: label,
+            franchiseName: fid === '__none__' ? 'Unknown Theme' : themeName(fid),
+            brandName: brand,
+            subthemeName: '',
+            itemIds: arr.map(i => i.item_id),
+          })
+        }
+      }
+      if (!cancelled) setCompletionLegoSets(cards)
     }
     load()
     return () => { cancelled = true }
@@ -11816,16 +11843,16 @@ function App() {
   // Shown for every set (including 0% owned) so all themes/sets are visible.
   const legoSetCards = completionLegoSets
     .map((s) => {
-      const total = s.minifigItemIds.length
-      const ownedCount = s.minifigItemIds.filter((id) => ownedCatalogItemIds.has(id)).length
-      const ownedValue = s.minifigItemIds.reduce((sum, id) => sum + Number(ownedItemsByCatalogId[id]?.currentMarketValue || 0), 0)
+      const total = s.itemIds.length
+      const ownedCount = s.itemIds.filter((id) => ownedCatalogItemIds.has(id)).length
+      const ownedValue = s.itemIds.reduce((sum, id) => sum + Number(ownedItemsByCatalogId[id]?.currentMarketValue || 0), 0)
       return {
         id: s.id,
-        title: s.legoSetNumber ? `${s.title} (${s.legoSetNumber})` : s.title,
+        title: s.title,
         categoryName: 'Building Blocks',
         subcategoryName: 'LEGO',
         franchiseName: s.franchiseName,
-        brandName: 'Sets',
+        brandName: s.brandName,
         setName: s.title,
         ownedCount,
         totalItems: total,
@@ -11835,7 +11862,7 @@ function App() {
         estimatedRemainingCost: null,
         breakdown: {},
         _isLego: true,
-        _minifigIds: s.minifigItemIds,
+        _itemIds: s.itemIds,
         _subtheme: s.subthemeName,
       }
     })
@@ -12062,7 +12089,7 @@ function App() {
     // collectible_set_id (which is now packaging).
     const legoCard = completionLegoSets.find((s) => s.id === selectedCompletionSetId)
     if (legoCard) {
-      const ids = legoCard.minifigItemIds
+      const ids = legoCard.itemIds
       if (!ids.length) { setCompletionSetAllItems([]); return () => { cancelled = true } }
       ;(async () => {
         const all = []
