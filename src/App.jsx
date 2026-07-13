@@ -5602,62 +5602,31 @@ function App() {
       for (const b of (brandRows || [])) if (!brandNameById[b.brand_id]) brandNameById[b.brand_id] = b.name
       // All LEGO items (any item type), so we can build Sets / Minifigs / Misc cards.
       const items = await loadAllPaged(() =>
-        supabase.from('items').select('item_id, brand_id, franchise_id, subset_id, lego_set_number, description, subject_id').eq('category_id', bbCat.category_id))
+        supabase.from('items').select('item_id, brand_id, franchise_id').eq('category_id', bbCat.category_id))
       const itemBrand = (i) => brandNameById[i.brand_id] || ''
-      const setItems = items.filter(i => itemBrand(i) === 'Sets')
-      const setIds = setItems.map(s => s.item_id)
-      const links = []
-      for (let i = 0; i < setIds.length; i += 150) {
-        const { data } = await supabase.from('set_minifigs').select('set_item_id, minifig_item_id').in('set_item_id', setIds.slice(i, i + 150))
-        if (data) links.push(...data)
-      }
-      const minifigsBySet = {}
-      for (const l of links) { (minifigsBySet[l.set_item_id] ||= []).push(l.minifig_item_id) }
-      const subjectIds = [...new Set(items.map(s => s.subject_id).filter(Boolean))]
       const franchiseIds = [...new Set(items.map(s => s.franchise_id).filter(Boolean))]
-      const subsetIds = [...new Set(items.map(s => s.subset_id).filter(Boolean))]
-      const chunkedIn = async (table, col, sel, ids) => {
-        const out = []
-        for (let i = 0; i < ids.length; i += 200) {
-          const { data } = await supabase.from(table).select(sel).in(col, ids.slice(i, i + 200))
-          if (data) out.push(...data)
-        }
-        return out
+      const franchises = []
+      for (let i = 0; i < franchiseIds.length; i += 200) {
+        const { data } = await supabase.from('franchises').select('franchise_id, name').in('franchise_id', franchiseIds.slice(i, i + 200))
+        if (data) franchises.push(...data)
       }
-      const [subjects, franchises, subsets] = await Promise.all([
-        subjectIds.length ? chunkedIn('subjects', 'subject_id', 'subject_id, subject_name', subjectIds) : [],
-        franchiseIds.length ? chunkedIn('franchises', 'franchise_id', 'franchise_id, name', franchiseIds) : [],
-        subsetIds.length ? chunkedIn('subsets', 'subset_id', 'subset_id, name', subsetIds) : [],
-      ])
-      const subjectName = Object.fromEntries(subjects.map(s => [s.subject_id, s.subject_name]))
       const franchiseName = Object.fromEntries(franchises.map(f => [f.franchise_id, f.name]))
-      const subsetName = Object.fromEntries(subsets.map(s => [s.subset_id, s.name]))
       const themeName = (fid) => franchiseName[fid] || 'Unknown Theme'
-      const cards = []
-      // Sets: one card per set item — completion = its minifigs owned / total.
-      for (const s of setItems) {
-        const base = subjectName[s.subject_id] || s.description || (s.lego_set_number ? `Set ${s.lego_set_number}` : 'Set')
-        cards.push({
-          id: s.item_id,
-          title: s.lego_set_number ? `${base} (${s.lego_set_number})` : base,
-          franchiseName: themeName(s.franchise_id),
-          brandName: 'Sets',
-          subthemeName: subsetName[s.subset_id] || '',
-          itemIds: minifigsBySet[s.item_id] || [],
-        })
-      }
-      // Minifigs / Miscellaneous: one card per theme — completion = own all of them.
+      // One card per theme × item type. Each card's items ARE that type's items
+      // (Sets = the set items themselves), so the chain ends at the orange cards
+      // — no per-set minifig sub-drill.
       const groupByFranchise = (arr) => {
         const m = {}
         for (const it of arr) { const f = it.franchise_id || '__none__'; (m[f] ||= []).push(it) }
         return m
       }
-      for (const [label, brand] of [['All Minifigs', 'Minifigs'], ['All Miscellaneous', 'Miscellaneous']]) {
+      const cards = []
+      for (const [brand, title] of [['Sets', 'All Sets'], ['Minifigs', 'All Minifigs'], ['Miscellaneous', 'All Miscellaneous']]) {
         const groups = groupByFranchise(items.filter(i => itemBrand(i) === brand))
         for (const [fid, arr] of Object.entries(groups)) {
           cards.push({
             id: `${brand.toLowerCase()}-${fid}`,
-            title: label,
+            title,
             franchiseName: fid === '__none__' ? 'Unknown Theme' : themeName(fid),
             brandName: brand,
             subthemeName: '',
