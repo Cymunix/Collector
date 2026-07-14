@@ -2229,6 +2229,9 @@ h1 {
   position: sticky;
   top: calc(var(--sticky-cols-top, 200px) + 10px);
   align-self: start;
+}
+/* Context can scroll internally if tall; filters show in full (no scrollbar). */
+.catalog-context {
   max-height: calc(100vh - var(--sticky-cols-top, 200px) - 24px);
   overflow-y: auto;
 }
