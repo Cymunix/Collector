@@ -1760,7 +1760,7 @@ function App() {
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
   const [catalogDetailViewTab, setCatalogDetailViewTab] = useState('overview')
   const [catalogItemImages, setCatalogItemImages] = useState([])
-  const [lightboxImage, setLightboxImage] = useState(null)   // full-size image overlay
+  const [lightbox, setLightbox] = useState(null)   // { images: [url], index } — full-size image overlay
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
   const [catalogDetailTeams, setCatalogDetailTeams] = useState([])
   const [catalogDetailCardTypes, setCatalogDetailCardTypes] = useState([])
@@ -4031,13 +4031,29 @@ function App() {
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
 
-  // Close the image lightbox on Escape.
+  // Lightbox keyboard: Escape closes, arrows flip through images.
   useEffect(() => {
-    if (!lightboxImage) return
-    const onKey = (e) => { if (e.key === 'Escape') setLightboxImage(null) }
+    if (!lightbox) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setLightbox(null)
+      else if (e.key === 'ArrowRight') setLightbox(lb => lb && lb.images.length > 1 ? { ...lb, index: (lb.index + 1) % lb.images.length } : lb)
+      else if (e.key === 'ArrowLeft') setLightbox(lb => lb && lb.images.length > 1 ? { ...lb, index: (lb.index - 1 + lb.images.length) % lb.images.length } : lb)
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [lightboxImage])
+  }, [lightbox])
+
+  // Open the lightbox on the clicked image, with all of the item's images loaded
+  // so you can flip through them.
+  const openLightbox = (clickedUrl) => {
+    const urls = [...catalogItemImages]
+      .sort((a, b) => a.position - b.position)
+      .map(img => (img.image_path?.startsWith('http') ? img.image_path : supabase.storage.from('item-images').getPublicUrl(img.image_path).data?.publicUrl))
+      .filter(Boolean)
+    const list = urls.length ? urls : (clickedUrl ? [clickedUrl] : [])
+    if (!list.length) return
+    setLightbox({ images: list, index: Math.max(0, list.indexOf(clickedUrl)) })
+  }
 
   useEffect(() => {
     setCatalogDetailViewTab('overview')
@@ -16912,7 +16928,7 @@ function App() {
                           : supabase.storage.from('item-images').getPublicUrl(frontImg.image_path).data?.publicUrl
                         : null
                       return frontUrl ? (
-                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image catalog-zoomable" onClick={() => setLightboxImage(frontUrl)} />
+                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image catalog-zoomable" onClick={() => openLightbox(frontUrl)} />
                       ) : (
                         <div className="catalog-detail-market-image catalog-item-image-placeholder">N/A</div>
                       )
@@ -17580,7 +17596,7 @@ function App() {
                               src={urlData.publicUrl}
                               alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
                               className="catalog-detail-item-image catalog-zoomable"
-                              onClick={() => setLightboxImage(urlData.publicUrl)}
+                              onClick={() => openLightbox(urlData.publicUrl)}
                             />
                           )
                         })}
@@ -19094,10 +19110,29 @@ function App() {
         </div>
       )}
 
-      {lightboxImage && (
-        <div className="image-lightbox-overlay" onClick={() => setLightboxImage(null)} role="dialog" aria-modal="true" aria-label="Enlarged image">
-          <button type="button" className="image-lightbox-close" onClick={() => setLightboxImage(null)} aria-label="Close">✕</button>
-          <img src={lightboxImage} alt="Enlarged" className="image-lightbox-img" onClick={(e) => e.stopPropagation()} />
+      {lightbox && (
+        <div className="image-lightbox-overlay" onClick={() => setLightbox(null)} role="dialog" aria-modal="true" aria-label="Enlarged image">
+          <button type="button" className="image-lightbox-close" onClick={() => setLightbox(null)} aria-label="Close">✕</button>
+          {lightbox.images.length > 1 && (
+            <button
+              type="button"
+              className="image-lightbox-nav image-lightbox-prev"
+              aria-label="Previous image"
+              onClick={(e) => { e.stopPropagation(); setLightbox(lb => ({ ...lb, index: (lb.index - 1 + lb.images.length) % lb.images.length })) }}
+            >‹</button>
+          )}
+          <img src={lightbox.images[lightbox.index]} alt="Enlarged" className="image-lightbox-img" onClick={(e) => e.stopPropagation()} />
+          {lightbox.images.length > 1 && (
+            <>
+              <button
+                type="button"
+                className="image-lightbox-nav image-lightbox-next"
+                aria-label="Next image"
+                onClick={(e) => { e.stopPropagation(); setLightbox(lb => ({ ...lb, index: (lb.index + 1) % lb.images.length })) }}
+              >›</button>
+              <div className="image-lightbox-counter" onClick={(e) => e.stopPropagation()}>{lightbox.index + 1} / {lightbox.images.length}</div>
+            </>
+          )}
         </div>
       )}
 
