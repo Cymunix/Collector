@@ -1760,6 +1760,7 @@ function App() {
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
   const [catalogDetailViewTab, setCatalogDetailViewTab] = useState('overview')
   const [catalogItemImages, setCatalogItemImages] = useState([])
+  const [lightboxImage, setLightboxImage] = useState(null)   // full-size image overlay
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
   const [catalogDetailTeams, setCatalogDetailTeams] = useState([])
   const [catalogDetailCardTypes, setCatalogDetailCardTypes] = useState([])
@@ -4029,6 +4030,14 @@ function App() {
     load()
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
+
+  // Close the image lightbox on Escape.
+  useEffect(() => {
+    if (!lightboxImage) return
+    const onKey = (e) => { if (e.key === 'Escape') setLightboxImage(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lightboxImage])
 
   useEffect(() => {
     setCatalogDetailViewTab('overview')
@@ -16903,7 +16912,7 @@ function App() {
                           : supabase.storage.from('item-images').getPublicUrl(frontImg.image_path).data?.publicUrl
                         : null
                       return frontUrl ? (
-                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image" />
+                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image catalog-zoomable" onClick={() => setLightboxImage(frontUrl)} />
                       ) : (
                         <div className="catalog-detail-market-image catalog-item-image-placeholder">N/A</div>
                       )
@@ -17570,7 +17579,8 @@ function App() {
                               key={img.item_image_id}
                               src={urlData.publicUrl}
                               alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
-                              className="catalog-detail-item-image"
+                              className="catalog-detail-item-image catalog-zoomable"
+                              onClick={() => setLightboxImage(urlData.publicUrl)}
                             />
                           )
                         })}
@@ -19081,6 +19091,13 @@ function App() {
               </>
             )}
           </section>
+        </div>
+      )}
+
+      {lightboxImage && (
+        <div className="image-lightbox-overlay" onClick={() => setLightboxImage(null)} role="dialog" aria-modal="true" aria-label="Enlarged image">
+          <button type="button" className="image-lightbox-close" onClick={() => setLightboxImage(null)} aria-label="Close">✕</button>
+          <img src={lightboxImage} alt="Enlarged" className="image-lightbox-img" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 

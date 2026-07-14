@@ -5538,6 +5538,45 @@ h2 {
   padding: 20px;
 }
 
+/* Click-to-zoom image lightbox */
+.catalog-zoomable { cursor: zoom-in; }
+.image-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(4, 10, 24, 0.86);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  cursor: zoom-out;
+}
+.image-lightbox-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+.image-lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 1.05rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-lightbox-close:hover { background: rgba(255, 255, 255, 0.26); }
+
 .auth-modal {
   width: min(430px, 100%);
   border-radius: 20px;
