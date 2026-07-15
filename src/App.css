@@ -5552,10 +5552,10 @@ h2 {
   cursor: zoom-out;
 }
 .image-lightbox-img {
-  /* Fixed viewport box + contain lets small images scale UP (not just cap),
-     so clicking always enlarges while keeping aspect ratio. */
-  width: 90vw;
-  height: 88vh;
+  /* Enlarge up to the viewport, but never past the image's own resolution —
+     big images fill the screen; low-res thumbnails stay sharp at native size. */
+  max-width: 92vw;
+  max-height: 90vh;
   object-fit: contain;
   cursor: default;
 }
