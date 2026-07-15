@@ -1719,6 +1719,8 @@ function App() {
   const [catalogSubthemeOptions, setCatalogSubthemeOptions] = useState([])
   const [catalogProductLineId, setCatalogProductLineId] = useState('')
   const [catalogProductLineOptions, setCatalogProductLineOptions] = useState([])
+  const [catalogSeriesId, setCatalogSeriesId] = useState('')
+  const [catalogSeriesOptions, setCatalogSeriesOptions] = useState([])
   const [catalogPrintTypeId, setCatalogPrintTypeId] = useState('')
   const [catalogCardTypeIds, setCatalogCardTypeIds] = useState([])
   const [catalogSubjectId, setCatalogSubjectId] = useState('')
@@ -1975,6 +1977,9 @@ function App() {
   const [catalogAdminProductLinesList, setCatalogAdminProductLinesList] = useState([])
   const [catalogAdminPackagingId, setCatalogAdminPackagingId] = useState('')
   const [catalogAdminPackagingList, setCatalogAdminPackagingList] = useState([])
+  // Series (facet) — branded manufacturer/publisher grouping, scoped to Subcategory.
+  const [catalogAdminSeriesId, setCatalogAdminSeriesId] = useState('')
+  const [catalogAdminSeriesList, setCatalogAdminSeriesList] = useState([])
   const [catalogAdminDynamicFields, setCatalogAdminDynamicFields] = useState({})
   const [catalogAdminVariants, setCatalogAdminVariants] = useState([buildCatalogVariantRow()])
   const [catalogAdminFrontImageFile, setCatalogAdminFrontImageFile] = useState(null)
@@ -3244,6 +3249,19 @@ function App() {
       })
   }, [currentScreen, catalogSubthemeId])
 
+  // Faceted filter: Series options for the selected Subcategory (manufacturer).
+  useEffect(() => {
+    if (currentScreen !== 'catalog') return
+    const subcatId = selectedCatalogSubcategoryRecord?.id || ''
+    if (!subcatId) { setCatalogSeriesOptions([]); setCatalogSeriesId(prev => prev ? '' : prev); return }
+    supabase.from('series').select('series_id, name').eq('subcategory_id', subcatId).order('name')
+      .then(({ data, error }) => {
+        const list = error ? [] : (data || []).map(r => ({ id: r.series_id, name: r.name }))
+        setCatalogSeriesOptions(list)
+        setCatalogSeriesId(prev => list.some(s => s.id === prev) ? prev : '')
+      })
+  }, [currentScreen, selectedCatalogSubcategoryRecord?.id])
+
   // Effect F: subject typeahead search (category-scoped when a category is selected)
   useEffect(() => {
     if (currentScreen !== 'catalog') return
@@ -3591,6 +3609,13 @@ function App() {
         if (!plIds.length) { setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return }
         itemsQuery = itemsQuery.in('item_id', plIds)
       }
+      // Series facet (items.series_id) — not exposed by item_details, pre-query.
+      if (catalogSeriesId) {
+        const { data: seRows } = await supabase.from('items').select('item_id').eq('series_id', catalogSeriesId)
+        const seIds = (seRows || []).map(r => r.item_id)
+        if (!seIds.length) { setCatalogItems([]); setCatalogTotalItemCount(0); setIsCatalogLoading(false); return }
+        itemsQuery = itemsQuery.in('item_id', seIds)
+      }
       if (catalogPrintTypeId === '__none__') {
         itemsQuery = itemsQuery.is('print_type_id', null)
       } else if (catalogPrintTypeId) {
@@ -3812,6 +3837,7 @@ function App() {
     catalogSubsetId,
     catalogSubthemeId,
     catalogProductLineId,
+    catalogSeriesId,
     catalogTeamId,
     currentScreen,
     selectedCatalogCategoryRecord,
@@ -4288,12 +4314,16 @@ function App() {
       .then(({ data }) => setCatalogAdminSubsetsList((data || []).map(r => ({ id: r.subset_id, name: r.name }))))
   }, [currentScreen, isPlatformAdmin, catalogAdminRealFranchiseId])
 
-  // Product Line options depend on the selected Subtheme (subset).
+  // Product Line options: under the selected Subtheme, or — since Subfranchise is
+  // optional — directly under the Theme (franchise) when no Subtheme is chosen.
   useEffect(() => {
-    if (currentScreen !== 'catalog' || !isPlatformAdmin || !catalogAdminSubsetSel) { setCatalogAdminProductLinesList([]); return }
-    supabase.from('product_lines').select('product_line_id, name').eq('subset_id', catalogAdminSubsetSel).order('name')
-      .then(({ data }) => setCatalogAdminProductLinesList((data || []).map(r => ({ id: r.product_line_id, name: r.name }))))
-  }, [currentScreen, isPlatformAdmin, catalogAdminSubsetSel])
+    if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminProductLinesList([]); return }
+    let q = supabase.from('product_lines').select('product_line_id, name').order('name')
+    if (catalogAdminSubsetSel) q = q.eq('subset_id', catalogAdminSubsetSel)
+    else if (catalogAdminRealFranchiseId) q = q.eq('franchise_id', catalogAdminRealFranchiseId).is('subset_id', null)
+    else { setCatalogAdminProductLinesList([]); return }
+    q.then(({ data, error }) => setCatalogAdminProductLinesList(error ? [] : (data || []).map(r => ({ id: r.product_line_id, name: r.name }))))
+  }, [currentScreen, isPlatformAdmin, catalogAdminSubsetSel, catalogAdminRealFranchiseId])
 
   // Packaging (repurposed collectible_sets — global rows, no brand) — independent.
   useEffect(() => {
@@ -4301,6 +4331,15 @@ function App() {
     supabase.from('collectible_sets').select('collectible_set_id, name').is('brand_id', null).order('name')
       .then(({ data }) => setCatalogAdminPackagingList((data || []).map(r => ({ id: r.collectible_set_id, name: r.name }))))
   }, [currentScreen, isPlatformAdmin])
+
+  // Series (facet) — scoped to the selected Subcategory (manufacturer/publisher).
+  useEffect(() => {
+    if (currentScreen !== 'catalog' || !isPlatformAdmin || !catalogAdminSubcategoryId) { setCatalogAdminSeriesList([]); return }
+    supabase.from('series').select('series_id, name').eq('subcategory_id', catalogAdminSubcategoryId).order('name')
+      .then(({ data, error }) => setCatalogAdminSeriesList(error ? [] : (data || []).map(r => ({ id: r.series_id, name: r.name }))))
+  }, [currentScreen, isPlatformAdmin, catalogAdminSubcategoryId])
+  // Clear a stale Series pick when the Subcategory changes.
+  useEffect(() => { setCatalogAdminSeriesId('') }, [catalogAdminSubcategoryId])
 
   useEffect(() => {
     if (currentScreen !== 'catalog' || !isPlatformAdmin) {
@@ -7997,11 +8036,18 @@ function App() {
       setCatalogAdminSubsetsList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
       setCatalogAdminSubsetSel(data.subset_id)
     } else if (field === 'productLine') {
-      const { data, error } = await supabase.from('product_lines').insert({ name, subset_id: catalogAdminSubsetSel }).select('product_line_id').single()
+      // Product Line anchors to the Theme; Subtheme is optional (may be null).
+      const { data, error } = await supabase.from('product_lines').insert({ name, franchise_id: catalogAdminRealFranchiseId, subset_id: catalogAdminSubsetSel || null }).select('product_line_id').single()
       if (error) { fail(error.message); return }
       const item = { id: data.product_line_id, name }
       setCatalogAdminProductLinesList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
-      setCatalogAdminProductLineIds(prev => [...prev, data.product_line_id])
+      setCatalogAdminProductLineIds([data.product_line_id])
+    } else if (field === 'series') {
+      const { data, error } = await supabase.from('series').insert({ name, subcategory_id: catalogAdminSubcategoryId }).select('series_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.series_id, name }
+      setCatalogAdminSeriesList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminSeriesId(data.series_id)
     } else if (field === 'subject') {
       const { data, error } = await supabase.from('subjects').insert({ subject_name: name, subject_type: subjectType, species_id: (subjectType === 'character' && speciesId) ? speciesId : null }).select('subject_id').single()
       if (error) { fail(error.message); return }
@@ -8941,6 +8987,7 @@ function App() {
         brand_id:             catalogAdminBrandId                 || null,
         collectible_set_id:   catalogAdminFranchiseId             || null,
         subcollectble_set_id: catalogAdminSubsetId                || null,
+        series_id:            catalogAdminSeriesId                || null,
         subject_id:           null,
         description:          catalogAdminItemDescription.trim()  || null,
         bricklink_id:         catalogAdminBricklinkId.trim()      || null,
@@ -14321,6 +14368,7 @@ function App() {
                       setCatalogSubsetId('')
                       setCatalogSubthemeId('')
                       setCatalogProductLineId('')
+                      setCatalogSeriesId('')
                       setCatalogPrintTypeId('')
                       setCatalogCardTypeIds([])
                       setCatalogSubjectId('')
@@ -14586,6 +14634,23 @@ function App() {
                       <option value="">All</option>
                       {catalogProductLineOptions.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {/* Series (facet) — scoped to Subcategory */}
+                {catalogSeriesOptions.length > 0 && (
+                  <>
+                    <label htmlFor="catalog-series">Series</label>
+                    <select
+                      id="catalog-series"
+                      value={catalogSeriesId}
+                      onChange={(event) => setCatalogSeriesId(event.target.value)}
+                    >
+                      <option value="">All</option>
+                      {catalogSeriesOptions.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
                   </>
@@ -16017,14 +16082,14 @@ function App() {
                               </div>
                             ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subtheme', value: '', subjectType: 'player' })}>+ New Subtheme</button>)}
                           </div>
-                          {/* Product Line — depends on Subtheme */}
+                          {/* Product Line — under the Theme; Subtheme optional */}
                           <div>
-                            <label htmlFor="cai-productline">{getCategoryLabels('Building Blocks').productLine} {!catalogAdminSubsetSel && <span className="catalog-admin-hint">(select a subtheme first)</span>}</label>
-                            <select id="cai-productline" value={catalogAdminProductLineIds[0] || ''} onChange={e => setCatalogAdminProductLineIds(e.target.value ? [e.target.value] : [])} disabled={!catalogAdminSubsetSel}>
+                            <label htmlFor="cai-productline">{getCategoryLabels('Building Blocks').productLine} {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a theme first)</span>}</label>
+                            <select id="cai-productline" value={catalogAdminProductLineIds[0] || ''} onChange={e => setCatalogAdminProductLineIds(e.target.value ? [e.target.value] : [])} disabled={!catalogAdminRealFranchiseId}>
                               <option value="">None</option>
                               {catalogAdminProductLinesList.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
                             </select>
-                            {catalogAdminSubsetSel && (catalogAdminInlineCreate.field === 'productLine' ? (
+                            {catalogAdminRealFranchiseId && (catalogAdminInlineCreate.field === 'productLine' ? (
                               <div className="catalog-admin-inline-create">
                                 <input autoFocus className="catalog-admin-inline-input" placeholder="Product line name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
                                 <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
@@ -16077,6 +16142,24 @@ function App() {
                         ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subset', value: '', subjectType: 'player' })}>+ New Subset</button>)}
                       </div>
                         </>
+                      )}
+                      {/* Series (facet) — subcategory-scoped, optional, all categories */}
+                      {catalogAdminSubcategoryId && (
+                        <div>
+                          <label htmlFor="cai-series">Series <span className="catalog-admin-hint">(optional)</span></label>
+                          <select id="cai-series" value={catalogAdminSeriesId} onChange={e => setCatalogAdminSeriesId(e.target.value)}>
+                            <option value="">None</option>
+                            {catalogAdminSeriesList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          </select>
+                          {catalogAdminInlineCreate.field === 'series' ? (
+                            <div className="catalog-admin-inline-create">
+                              <input autoFocus className="catalog-admin-inline-input" placeholder="Series name (e.g. UCS, Topps Chrome)" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                              <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
+                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
+                              {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
+                            </div>
+                          ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'series', value: '', subjectType: 'player' })}>+ New Series</button>}
+                        </div>
                       )}
                     </div>
 
