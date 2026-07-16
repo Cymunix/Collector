@@ -1769,7 +1769,7 @@ function App() {
   const [catalogDetailLego, setCatalogDetailLego] = useState(null)
   const [isCatalogItemEditMode, setIsCatalogItemEditMode] = useState(false)
   const [catalogItemEditValues, setCatalogItemEditValues] = useState({})
-  const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [], brands: [], subthemes: [], productLines: [] })
+  const [catalogItemEditLookups, setCatalogItemEditLookups] = useState({ subjects: [], sets: [], subsets: [], teams: [], printTypes: [], cardTypes: [], franchises: [], brands: [], subthemes: [], productLines: [], series: [] })
   const [catalogItemEditTeamIds, setCatalogItemEditTeamIds] = useState([])
   const [catalogItemEditCardTypeIds, setCatalogItemEditCardTypeIds] = useState([])
   const [catalogItemEditSubjectIds, setCatalogItemEditSubjectIds] = useState([])
@@ -4818,23 +4818,46 @@ function App() {
       })
   }, [isCatalogItemEditMode, catalogItemEditValues.franchise_id])
 
-  // Edit panel: Product Line cascade from Subtheme (subset).
+  // Edit panel: Product Line cascade — under the Subtheme, or directly under the
+  // Theme (franchise) when no Subtheme is set, since Subfranchise is optional.
   useEffect(() => {
     if (!isCatalogItemEditMode) return
     const isInitialLoad = catalogEditInitialRef.current
     const subsetId = catalogItemEditValues.subset_id
-    if (!subsetId) {
+    const franchiseId = catalogItemEditValues.franchise_id
+    const apply = ({ data, error }) => {
+      const list = error ? [] : (data || []).map(r => ({ id: r.product_line_id, name: r.name }))
+      setCatalogItemEditLookups(v => ({ ...v, productLines: list }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, product_line_id: list.some(p => p.id === v.product_line_id) ? v.product_line_id : '' }))
+    }
+    let q = supabase.from('product_lines').select('product_line_id, name').order('name')
+    if (subsetId) q = q.eq('subset_id', subsetId)
+    else if (franchiseId) q = q.eq('franchise_id', franchiseId).is('subset_id', null)
+    else {
       setCatalogItemEditLookups(v => ({ ...v, productLines: [] }))
       if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, product_line_id: '' }))
       return
     }
-    supabase.from('product_lines').select('product_line_id, name').eq('subset_id', subsetId).order('name')
-      .then(({ data }) => {
-        const list = (data || []).map(r => ({ id: r.product_line_id, name: r.name }))
-        setCatalogItemEditLookups(v => ({ ...v, productLines: list }))
-        if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, product_line_id: list.some(p => p.id === v.product_line_id) ? v.product_line_id : '' }))
+    q.then(apply)
+  }, [isCatalogItemEditMode, catalogItemEditValues.subset_id, catalogItemEditValues.franchise_id])
+
+  // Edit panel: Series (facet) scoped to the item's Subcategory.
+  useEffect(() => {
+    if (!isCatalogItemEditMode) return
+    const isInitialLoad = catalogEditInitialRef.current
+    const subcategoryId = catalogItemEditValues.subcategory_id
+    if (!subcategoryId) {
+      setCatalogItemEditLookups(v => ({ ...v, series: [] }))
+      if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, series_id: '' }))
+      return
+    }
+    supabase.from('series').select('series_id, name').eq('subcategory_id', subcategoryId).order('name')
+      .then(({ data, error }) => {
+        const list = error ? [] : (data || []).map(r => ({ id: r.series_id, name: r.name }))
+        setCatalogItemEditLookups(v => ({ ...v, series: list }))
+        if (!isInitialLoad) setCatalogItemEditValues(v => ({ ...v, series_id: list.some(s => s.id === v.series_id) ? v.series_id : '' }))
       })
-  }, [isCatalogItemEditMode, catalogItemEditValues.subset_id])
+  }, [isCatalogItemEditMode, catalogItemEditValues.subcategory_id])
 
   // Clear the initial-load guard after a tick so cascade effects all capture it before it's cleared
   useEffect(() => {
@@ -7740,7 +7763,7 @@ function App() {
       supabase.from('item_teams').select('team_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_card_types').select('card_type_id').eq('item_id', selectedCatalogItem.id),
       supabase.from('item_subjects').select('subject_id, subjects(subject_name, subject_type)').eq('item_id', selectedCatalogItem.id),
-      supabase.from('items').select('rarity_id, mtg_card_type_id, retail_price, market_price, subset_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
+      supabase.from('items').select('rarity_id, mtg_card_type_id, retail_price, market_price, subset_id, series_id').eq('item_id', selectedCatalogItem.id).maybeSingle(),
       franchiseId
         ? supabase.from('teams').select('team_id, name').eq('franchise_id', franchiseId).order('name')
         : Promise.resolve({ data: [] }),
@@ -7750,7 +7773,7 @@ function App() {
     const teamsList = (franchiseTeams || []).map(r => ({ id: r.team_id, name: r.name }))
     setCatalogItemEditLookups({
       franchises: [], subjects: [], sets: [], subsets: [], teams: teamsList, printTypes: [],
-      cardTypes: cardTypesList, brands: [], subthemes: [], productLines: [],
+      cardTypes: cardTypesList, brands: [], subthemes: [], productLines: [], series: [],
     })
     setCatalogItemEditTeamIds((itemTeams || []).map(r => r.team_id))
     setCatalogItemEditCardTypeIds((itemCardTypes || []).map(r => r.card_type_id))
@@ -7761,6 +7784,7 @@ function App() {
       retail_price: itemMtgMeta?.retail_price ?? '',
       market_price: itemMtgMeta?.market_price ?? '',
       subset_id: itemMtgMeta?.subset_id || '',
+      series_id: itemMtgMeta?.series_id || '',
       product_line_id: itemProductLines?.[0]?.product_line_id || '',
     }))
     setCatalogItemEditSubjectIds((itemSubjects || []).map(r => ({ id: r.subject_id, name: r.subjects?.subject_name || '', type: r.subjects?.subject_type || '' })))
@@ -7788,6 +7812,7 @@ function App() {
         collectible_set_id:   v.collectible_set_id    || null,
         subcollectble_set_id: v.subcollectble_set_id  || null,
         subset_id:            v.subset_id             || null,
+        series_id:            v.series_id             || null,
         print_type_id:        v.print_type_id         || null,
         bricklink_id:         v.bricklink_id?.trim()         || null,
         rebrickable_fig_id:   v.rebrickable_fig_id?.trim()   || null,
@@ -8120,6 +8145,7 @@ function App() {
     const iCollectibleSet = col(['collectible_set','collectible_set_name','set_name','collection','wave','packaging'])
     const iSubtheme       = col(['subtheme','sub_theme','subset','subset_name'])
     const iProductLine    = col(['product_line','product_lines','productline'])
+    const iSeries         = col(['series','series_name'])
     const iMinifigCode    = col(['minifig_code','code','internal_code'])
     const iSpecies        = col(['species','species_name','race'])
     const iRetailPrice    = col(['retail_price','msrp','rrp','retail','price'])
@@ -8138,6 +8164,7 @@ function App() {
         subset_id: '',
         product_line_names: g(iProductLine),
         product_line_ids: [],
+        series_name: g(iSeries),
         minifig_code: g(iMinifigCode),
         card_number: g(iCard !== iCardNum ? iCard : iCard),
         bricklink_id: g(iBl),
@@ -8521,17 +8548,39 @@ function App() {
       if (id) subsetIdCache.set(key, id)
       return id
     }
-    const resolveOrCreateProductLine = async (name, subsetId) => {
-      if (!name?.trim() || !subsetId) return null
-      const key = `${subsetId}::${name.trim().toLowerCase()}`
+    // Product Line anchors to the Theme; the Subtheme is optional, so a line can
+    // sit directly under the franchise (subset_id null).
+    const resolveOrCreateProductLine = async (name, subsetId, franchiseId) => {
+      if (!name?.trim() || (!subsetId && !franchiseId)) return null
+      const key = `${subsetId || 'F:' + franchiseId}::${name.trim().toLowerCase()}`
       if (productLineIdCache.has(key)) return productLineIdCache.get(key)
-      const { data: found } = await supabase.from('product_lines').select('product_line_id').eq('subset_id', subsetId).ilike('name', name.trim()).limit(1).maybeSingle()
+      let q = supabase.from('product_lines').select('product_line_id').ilike('name', name.trim())
+      if (subsetId) q = q.eq('subset_id', subsetId)
+      else q = q.eq('franchise_id', franchiseId).is('subset_id', null)
+      const { data: found } = await q.limit(1).maybeSingle()
       let id = found?.product_line_id || null
       if (!id) {
-        const { data: created } = await supabase.from('product_lines').insert({ name: name.trim(), subset_id: subsetId }).select('product_line_id').single()
+        const { data: created } = await supabase.from('product_lines')
+          .insert({ name: name.trim(), subset_id: subsetId || null, franchise_id: franchiseId || null })
+          .select('product_line_id').single()
         id = created?.product_line_id || null
       }
       if (id) productLineIdCache.set(key, id)
+      return id
+    }
+    // Series (facet) — scoped to the Subcategory (manufacturer/publisher).
+    const seriesIdCache = new Map()
+    const resolveOrCreateSeries = async (name, subcategoryId) => {
+      if (!name?.trim() || !subcategoryId) return null
+      const key = `${subcategoryId}::${name.trim().toLowerCase()}`
+      if (seriesIdCache.has(key)) return seriesIdCache.get(key)
+      const { data: found } = await supabase.from('series').select('series_id').eq('subcategory_id', subcategoryId).ilike('name', name.trim()).limit(1).maybeSingle()
+      let id = found?.series_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('series').insert({ name: name.trim(), subcategory_id: subcategoryId }).select('series_id').single()
+        id = created?.series_id || null
+      }
+      if (id) seriesIdCache.set(key, id)
       return id
     }
 
@@ -8549,6 +8598,10 @@ function App() {
       if (row.collectible_set_name?.trim() && !rowIsMinifig) rowCollectibleSetId = await resolveOrCreateCollectibleSet(row.collectible_set_name, rowFranchiseId, rowBrandId)
       // ── Faceted: Subtheme (subset) — picked id, else resolve the CSV name ──
       rowSubsetId = row.subset_id || (row.subtheme_name?.trim() ? await resolveOrCreateSubset(row.subtheme_name, rowFranchiseId) : null)
+      // ── Series (facet) — resolve the CSV name against this Subcategory ──
+      const rowSeriesId = row.series_name?.trim()
+        ? await resolveOrCreateSeries(row.series_name, catalogAdminSubcategoryId)
+        : null
       // ── Building Blocks: resolve parent set by BrickLink ID or set number ───
       const resolveParentSetItemId = async (ref) => {
         if (!ref?.trim()) return null
@@ -8637,6 +8690,7 @@ function App() {
         collectible_set_id:   rowCollectibleSetId           || null,
         subcollectble_set_id: row.subcollectble_set_id       || null,
         subset_id:            rowSubsetId                    || null,
+        series_id:            rowSeriesId                    || null,
         print_type_id:        row.print_type_id              || null,
         bricklink_id:         blId                           || null,
         rebrickable_fig_id:   row.rebrickable_fig_id?.trim() || null,
@@ -8700,12 +8754,13 @@ function App() {
         const { error: tmErr } = await supabase.from('item_teams').insert(row.team_ids.map(tid => ({ item_id: created.item_id, team_id: tid })))
         if (tmErr) console.error('item_teams insert error (bulk):', tmErr)
       }
-      // ── Faceted: Product Lines (m2m) — picked ids + any CSV names to resolve ──
-      if (rowSubsetId) {
+      // ── Faceted: Product Lines (m2m) — picked ids + any CSV names to resolve.
+      // Works with a Subtheme or directly under the Theme (Subfranchise optional).
+      if (rowSubsetId || rowFranchiseId) {
         const plIds = new Set(row.product_line_ids || [])
         if (row.product_line_names?.trim()) {
           for (const nm of row.product_line_names.split(';').map(s => s.trim()).filter(Boolean)) {
-            const plId = await resolveOrCreateProductLine(nm, rowSubsetId)
+            const plId = await resolveOrCreateProductLine(nm, rowSubsetId, rowFranchiseId)
             if (plId) plIds.add(plId)
           }
         }
@@ -15801,6 +15856,10 @@ function App() {
                                           </div>
                                         )}
                                         <div className="bulk-import-editor-field">
+                                          <label>Series <span className="catalog-admin-hint">(optional)</span></label>
+                                          <input type="text" value={cur.series_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { series_name: e.target.value })} placeholder="e.g. UCS, Topps Chrome" />
+                                        </div>
+                                        <div className="bulk-import-editor-field">
                                           <label>Print Type</label>
                                           <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
                                             <option value="">None</option>
@@ -16703,6 +16762,7 @@ function App() {
                             ? [editCatLabels.subset,      'subset_id',            catalogItemEditLookups.subthemes, false]
                             : [editCatLabels.subset,      'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
                           ...(editIsLego ? [[editCatLabels.productLine, 'product_line_id', catalogItemEditLookups.productLines, false]] : []),
+                          ['Series',                      'series_id',            catalogItemEditLookups.series,    false],
                           !editIsLego && ['Print Type',   'print_type_id',        catalogItemEditLookups.printTypes, false],
                         ].filter(Boolean)
                       })().map(([label, field, options, upper]) => (
