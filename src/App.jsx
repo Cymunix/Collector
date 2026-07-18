@@ -146,7 +146,7 @@ const CATEGORY_LABEL_OVERRIDES = {
     brand: 'Record Label',
     collectibleSet: 'Album',
     subset: 'Variant',
-    productLine: 'Product Line',
+    productLine: 'Property',
     subject: 'Artist(s)',
     hideFranchise: true,
   },
@@ -156,7 +156,7 @@ const CATEGORY_LABEL_OVERRIDES = {
     brand: 'Item Type',
     collectibleSet: 'Packaging',
     subset: 'Subtheme',
-    productLine: 'Product Line',
+    productLine: 'Property',
     subject: 'Subject(s)',
   },
 }
@@ -166,7 +166,7 @@ const DEFAULT_CATEGORY_LABELS = {
   brand: 'Brand',
   collectibleSet: 'Collectible Set',
   subset: 'Subset',
-  productLine: 'Product Line',
+  productLine: 'Property',
   subject: 'Subject(s)',
 }
 function getCategoryLabels(categoryName) {
@@ -187,7 +187,7 @@ const BULK_FIELD_MAP = {
   subcategory:     { aliases: ['subcategory', 'subcategories', 'sub_category'], band: 'taxonomy', label: 'Subcategory' },
   franchise:       { aliases: ['franchise', 'franchises', 'franchise_name'], band: 'taxonomy', label: 'Franchise' },
   subfranchise:    { aliases: ['subfranchise', 'subfranchises', 'subtheme', 'sub_theme', 'subset', 'subset_name'], band: 'taxonomy', label: 'Subfranchise' },
-  product_line:    { aliases: ['product_line', 'product_lines', 'productline'], band: 'taxonomy', label: 'Product Line' },
+  product_line:    { aliases: ['property', 'properties', 'product_line', 'product_lines', 'productline'], band: 'taxonomy', label: 'Property' },
   item_type:       { aliases: ['item_type', 'item_types', 'itemtype', 'brand', 'brand_name'], band: 'taxonomy', label: 'Item Type' },
   series:          { aliases: ['series', 'series_name'], band: 'taxonomy', label: 'Series' },
   item_name:       { aliases: ['item', 'items', 'item_name', 'title'], band: 'taxonomy', label: 'Item' },
@@ -8193,12 +8193,15 @@ function App() {
       const idNum = gv('id_number')
       const legoSetNumber = gv('lego_set_number') || (isMinifigType ? '' : idNum)
       const minifigCode   = gv('minifig_code')   || (isMinifigType ? idNum : '')
+      // Item name and Subject are one and the same — a Subject column and the
+      // Item column populate the same value.
+      const nameValue = gv('item_name') || gv('subject')
       return {
         _id: idx,
         status: 'pending',
         _unknownCols: unknownList,
         // ── taxonomy (mapped strictly by column; blank stays blank) ──
-        item_name: gv('item_name'),
+        item_name: nameValue,
         franchise_name: gv('franchise'),
         brand_name: gv('item_type'),
         subtheme_name: gv('subfranchise'),
@@ -8206,8 +8209,8 @@ function App() {
         series_name: gv('series'),
         subset_id: '',
         product_line_ids: [],
-        // subject is ONLY populated from an explicit Subject column — never the item name
-        subject_name: gv('subject'),
+        // Subject mirrors the item name (same concept).
+        subject_name: nameValue,
         subjectObj: null,
         // ── universal metadata ──
         description: gv('description'),
@@ -15800,8 +15803,8 @@ function App() {
                                       )}
                                       <div className="bulk-import-editor-fields">
                                         <div className="bulk-import-editor-field">
-                                          <label>Item Name</label>
-                                          <input type="text" value={cur.item_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { item_name: e.target.value })} placeholder="e.g. City of Atlantis" />
+                                          <label>Item Name <span className="catalog-admin-hint">(= Subject)</span></label>
+                                          <input type="text" value={cur.item_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { item_name: e.target.value, subject_name: e.target.value, subjectObj: null })} placeholder="e.g. City of Atlantis" />
                                         </div>
                                         <div className="bulk-import-editor-field">
                                           <label>{bulkLabels.franchise}</label>
@@ -16217,7 +16220,7 @@ function App() {
                                 <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
                                 {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
                               </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'productLine', value: '', subjectType: 'player' })}>+ New Product Line</button>)}
+                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'productLine', value: '', subjectType: 'player' })}>+ New {getCategoryLabels('Building Blocks').productLine}</button>)}
                           </div>
                           {/* Item Type — taxonomy order: after Product Line, before Series */}
                           <div>
