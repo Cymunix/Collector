@@ -223,6 +223,60 @@ const BULK_ALIAS_TO_FIELD = (() => {
   for (const [field, def] of Object.entries(BULK_FIELD_MAP)) for (const a of def.aliases) if (!(a in m)) m[a] = field
   return m
 })()
+// ─── Image Discovery: match scoring (swappable config) ───────────────────────
+// Central, data-driven weights so scoring can change without touching call sites.
+// A future provider builds candidates; scoreImageCandidate() ranks each against
+// metadata built from the item's taxonomy. Keep as data, never inline the numbers.
+const IMAGE_MATCH_SCORING = {
+  barcode:         100, // exact UPC/EAN
+  manufacturer_id: 100, // exact set number / minifig code / bricklink id
+  item_name:        40, // exact (case-insensitive) item name
+  product_line:     25,
+  series:           15,
+  manufacturer:     15, // brand / item type
+  franchise:        10,
+}
+
+// Build prioritised search metadata from whatever catalogue info the item has.
+// `item` is the selectedCatalogItem shape (with _details). Array order = priority.
+function buildImageSearchMetadata(item) {
+  const d = item?._details || {}
+  const terms = []
+  const push = (key, value, weightKey) => {
+    const v = value == null ? '' : String(value).trim()
+    if (v) terms.push({ key, value: v, weightKey })
+  }
+  push('barcode',         d.upc,                                                              'barcode')
+  push('manufacturer_id', d.lego_set_number || d.minifig_code || d.bricklink_id || d.rebrickable_fig_id, 'manufacturer_id')
+  push('item_name',       item?.name || d.name || d.description,                              'item_name')
+  push('product_line',    d.product_line || d.property,                                       'product_line')
+  push('series',          d.series || item?.series_name,                                      'series')
+  push('franchise',       d.franchise,                                                        'franchise')
+  push('manufacturer',    d.brand,                                                            'manufacturer')
+  return {
+    terms,
+    query: terms.map(t => t.value).join(' '),
+    priority: terms.map(t => t.key),
+    built_at: new Date().toISOString(),
+  }
+}
+
+// Score a candidate against metadata. A provider may tag a candidate with
+// {matched:[keys]}; absent that we can't infer a match, so score stays 0.
+function scoreImageCandidate(candidate, metadata) {
+  const reasons = []
+  let score = 0
+  const matched = Array.isArray(candidate?.matched) ? candidate.matched : []
+  for (const t of (metadata?.terms || [])) {
+    if (matched.includes(t.key)) {
+      const pts = IMAGE_MATCH_SCORING[t.weightKey] || 0
+      score += pts
+      reasons.push({ field: t.key, value: t.value, points: pts })
+    }
+  }
+  return { score, reasons }
+}
+
 const MTG_CARD_TREATMENT_NAMES  = new Set(['Foil', 'Etched', 'Borderless', 'Extended Art', 'Showcase', 'Retro', 'Textless'])
 const SPORTS_CARD_TYPE_NAMES    = new Set(['Foil', 'Patch', 'Rookie', 'Signature'])
 
@@ -1832,8 +1886,24 @@ function App() {
   const [isSavingCatalogItem, setIsSavingCatalogItem] = useState(false)
   const [catalogItemEditError, setCatalogItemEditError] = useState('')
   const [catalogItemImagesReloadToken, setCatalogItemImagesReloadToken] = useState(0)
+  // ── Manage Images (admin-only) ──
+  const [manageImagesCandidates, setManageImagesCandidates] = useState([])
+  const [manageImagesJobs, setManageImagesJobs] = useState([])
+  const [manageImagesBusy, setManageImagesBusy] = useState(false)
+  const [manageImagesError, setManageImagesError] = useState('')
+  const [manageImagesNotice, setManageImagesNotice] = useState('')
+  const [manageImagesEditSourceId, setManageImagesEditSourceId] = useState(null)
+  const [manageImagesSourceDraft, setManageImagesSourceDraft] = useState({ source_url: '', source_name: '', is_verified: false })
+  const [manageImagesUrlDraft, setManageImagesUrlDraft] = useState({ image_url: '', source_url: '', source_name: '', asPrimary: false })
+  // ── Image Queue (admin fast-path for imaging items with no images) ──
+  const [imageQueueActive, setImageQueueActive] = useState(false)
+  const [imageQueueItems, setImageQueueItems] = useState([])   // normalized item objects, snapshot at launch
+  const [imageQueuePos, setImageQueuePos] = useState(0)
+  const [imageQueueLoading, setImageQueueLoading] = useState(false)
+  const [imageQueueCount, setImageQueueCount] = useState(null) // badge: # of zero-image items
   const [bulkImportMode, setBulkImportMode] = useState(false)
   const [bulkImportRows, setBulkImportRows] = useState([])
+  const [bulkImportSheetSummary, setBulkImportSheetSummary] = useState(null) // multi-sheet workbook report
   const [bulkImportIdx, setBulkImportIdx] = useState(0)
   const [bulkImportSubjectSearch, setBulkImportSubjectSearch] = useState('')
   const [bulkImportSubjectResults, setBulkImportSubjectResults] = useState([])
@@ -4133,7 +4203,8 @@ function App() {
   }
 
   useEffect(() => {
-    setCatalogDetailViewTab('overview')
+    // In the Image Queue, jump straight to Manage Images; otherwise default to Overview.
+    setCatalogDetailViewTab(imageQueueActive ? 'manageImages' : 'overview')
   }, [selectedCatalogItem?.id])
 
   useEffect(() => {
@@ -8000,6 +8071,266 @@ function App() {
     setCatalogItemImagesReloadToken(t => t + 1)
   }
 
+  // ─── Manage Images (admin-only) ────────────────────────────────────────────
+  // NOTE: every mutation below runs through the anon-key client under the admin's
+  // authenticated session; the DB RLS policies (item_images_write, *_admin) are
+  // what actually enforce admin-only — the UI gate is not the security boundary.
+  const miResolveUrl = (p) => (!p ? '' : (p.startsWith('http') ? p : supabase.storage.from('item-images').getPublicUrl(p).data?.publicUrl || ''))
+  const miReload = () => setCatalogItemImagesReloadToken(t => t + 1)
+
+  const miReloadCandidatesJobs = async () => {
+    if (!selectedCatalogItem?.id) return
+    const [{ data: cands }, { data: jobs }] = await Promise.all([
+      supabase.from('image_candidates').select('*').eq('item_id', selectedCatalogItem.id).order('match_score', { ascending: false }).order('created_at', { ascending: false }),
+      supabase.from('image_search_jobs').select('*').eq('item_id', selectedCatalogItem.id).order('created_at', { ascending: false }),
+    ])
+    setManageImagesCandidates(cands || [])
+    setManageImagesJobs(jobs || [])
+  }
+
+  // Keep the invariant "is_primary === (position 0)" so the rest of the app, which
+  // still derives the front photo from position 0, never diverges from is_primary.
+  const miSyncPrimaryToPos0 = async (itemId) => {
+    await supabase.from('item_images').update({ is_primary: false }).eq('item_id', itemId)
+    await supabase.from('item_images').update({ is_primary: true }).eq('item_id', itemId).eq('position', 0)
+  }
+
+  // Move a given image row to position 0 (via a temp slot to avoid any collision),
+  // then re-sync the primary flag. Works for both existing rows and freshly inserted ones.
+  const miMakePrimary = async (row) => {
+    const itemId = row.item_id || selectedCatalogItem?.id
+    const cur0 = catalogItemImages.find(i => i.position === 0 && i.item_image_id !== row.item_image_id)
+    await supabase.from('item_images').update({ position: -1 }).eq('item_image_id', row.item_image_id)
+    if (cur0) await supabase.from('item_images').update({ position: row.position }).eq('item_image_id', cur0.item_image_id)
+    await supabase.from('item_images').update({ position: 0, updated_at: new Date().toISOString() }).eq('item_image_id', row.item_image_id)
+    await miSyncPrimaryToPos0(itemId)
+  }
+
+  const handleMiSetPrimary = async (img) => {
+    if (img.position === 0 && img.is_primary) return
+    setManageImagesBusy(true); setManageImagesError('')
+    try { await miMakePrimary(img) } catch (e) { setManageImagesError(e.message || 'Could not set primary.') }
+    setManageImagesBusy(false); miReload()
+  }
+
+  const handleMiReorder = async (img, dir) => {
+    const ordered = [...catalogItemImages].sort((a, b) => a.position - b.position)
+    const idx = ordered.findIndex(i => i.item_image_id === img.item_image_id)
+    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= ordered.length) return
+    const other = ordered[swapIdx]
+    setManageImagesBusy(true); setManageImagesError('')
+    const pA = img.position, pB = other.position
+    await supabase.from('item_images').update({ position: -1 }).eq('item_image_id', img.item_image_id)
+    await supabase.from('item_images').update({ position: pA }).eq('item_image_id', other.item_image_id)
+    await supabase.from('item_images').update({ position: pB }).eq('item_image_id', img.item_image_id)
+    await miSyncPrimaryToPos0(selectedCatalogItem.id)
+    setManageImagesBusy(false); miReload()
+  }
+
+  const handleMiRemove = async (img) => {
+    setManageImagesBusy(true); setManageImagesError('')
+    if (img.image_path && !img.image_path.startsWith('http')) {
+      await supabase.storage.from('item-images').remove([img.image_path])
+    }
+    const { error } = await supabase.from('item_images').delete().eq('item_image_id', img.item_image_id)
+    if (error) { setManageImagesError(error.message); setManageImagesBusy(false); return }
+    // Re-pack positions so they stay contiguous, then re-sync the primary flag.
+    const remaining = catalogItemImages.filter(i => i.item_image_id !== img.item_image_id).sort((a, b) => a.position - b.position)
+    for (let i = 0; i < remaining.length; i++) {
+      if (remaining[i].position !== i) await supabase.from('item_images').update({ position: i }).eq('item_image_id', remaining[i].item_image_id)
+    }
+    await miSyncPrimaryToPos0(selectedCatalogItem.id)
+    // Removing the last image makes the item eligible for discovery again. The
+    // queue is computed live from zero-image items, so nothing else to write here.
+    setManageImagesBusy(false); miReload()
+  }
+
+  const handleMiSaveSource = async (img) => {
+    setManageImagesBusy(true); setManageImagesError('')
+    const { error } = await supabase.from('item_images').update({
+      source_url:  manageImagesSourceDraft.source_url.trim() || null,
+      source_name: manageImagesSourceDraft.source_name.trim() || null,
+      is_verified: !!manageImagesSourceDraft.is_verified,
+      updated_at:  new Date().toISOString(),
+    }).eq('item_image_id', img.item_image_id)
+    if (error) setManageImagesError(error.message)
+    setManageImagesEditSourceId(null)
+    setManageImagesBusy(false); miReload()
+  }
+
+  const handleMiAddByUrl = async () => {
+    const url = manageImagesUrlDraft.image_url.trim()
+    if (!url) { setManageImagesError('Enter an image URL.'); return }
+    setManageImagesBusy(true); setManageImagesError('')
+    const maxPos = catalogItemImages.reduce((m, i) => Math.max(m, i.position), -1)
+    const { data: row, error } = await supabase.from('item_images').insert({
+      item_id: selectedCatalogItem.id, image_path: url, position: maxPos + 1,
+      source_url:  manageImagesUrlDraft.source_url.trim() || null,
+      source_name: manageImagesUrlDraft.source_name.trim() || null,
+    }).select('item_image_id, item_id, image_path, position').single()
+    if (error) { setManageImagesError(error.message); setManageImagesBusy(false); return }
+    if (manageImagesUrlDraft.asPrimary) await miMakePrimary(row); else await miSyncPrimaryToPos0(selectedCatalogItem.id)
+    setManageImagesUrlDraft({ image_url: '', source_url: '', source_name: '', asPrimary: false })
+    setManageImagesBusy(false); miReload()
+  }
+
+  const handleMiUpload = async (file, asPrimary) => {
+    if (!file || !selectedCatalogItem?.id) return
+    if (!file.type.startsWith('image/')) { setManageImagesError('Only image files can be uploaded.'); return }
+    setManageImagesBusy(true); setManageImagesError('')
+    const ext = file.name.split('.').pop()
+    const maxPos = catalogItemImages.reduce((m, i) => Math.max(m, i.position), -1)
+    const pos = maxPos + 1
+    const path = `items/${selectedCatalogItem.id}/${Date.now()}_${pos}.${ext}`
+    const { error: upErr } = await supabase.storage.from('item-images').upload(path, file)
+    if (upErr) { setManageImagesError(upErr.message || 'Upload failed.'); setManageImagesBusy(false); return }
+    const { data: row, error } = await supabase.from('item_images').insert({
+      item_id: selectedCatalogItem.id, image_path: path, position: pos, source_name: 'Manual upload',
+    }).select('item_image_id, item_id, image_path, position').single()
+    if (error) { setManageImagesError(error.message); setManageImagesBusy(false); return }
+    if (asPrimary) await miMakePrimary(row); else await miSyncPrimaryToPos0(selectedCatalogItem.id)
+    setManageImagesBusy(false); miReload()
+  }
+
+  // Approving a candidate creates a normal item_images row (the candidate becomes a
+  // real catalogue image), then marks the candidate approved so it isn't re-suggested.
+  const handleMiApproveCandidate = async (cand, mode /* 'primary' | 'gallery' */) => {
+    setManageImagesBusy(true); setManageImagesError('')
+    const maxPos = catalogItemImages.reduce((m, i) => Math.max(m, i.position), -1)
+    const { data: row, error } = await supabase.from('item_images').insert({
+      item_id: selectedCatalogItem.id, image_path: cand.image_url, position: maxPos + 1,
+      source_url: cand.source_url || null, source_name: cand.source_name || null, is_verified: false,
+    }).select('item_image_id, item_id, image_path, position').single()
+    if (error) { setManageImagesError(error.message); setManageImagesBusy(false); return }
+    if (mode === 'primary') await miMakePrimary(row); else await miSyncPrimaryToPos0(selectedCatalogItem.id)
+    await supabase.from('image_candidates').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: profile?.id || null }).eq('id', cand.id)
+    setManageImagesBusy(false); miReload(); await miReloadCandidatesJobs()
+  }
+
+  const handleMiRejectCandidate = async (cand) => {
+    setManageImagesBusy(true); setManageImagesError('')
+    const { error } = await supabase.from('image_candidates').update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: profile?.id || null }).eq('id', cand.id)
+    if (error) setManageImagesError(error.message)
+    setManageImagesBusy(false); await miReloadCandidatesJobs()
+  }
+
+  // Manual "Find Images" override. Builds prioritised metadata, creates a search
+  // job, then hands it to the `find-images` edge function (Google Programmable
+  // Search). The function verifies admin server-side, scores results and inserts
+  // image_candidates rows. Requires the function to be deployed with GOOGLE_API_KEY
+  // and GOOGLE_CSE_ID configured; otherwise it reports "provider not configured".
+  const handleMiFindImages = async () => {
+    if (!selectedCatalogItem?.id) return
+    setManageImagesBusy(true); setManageImagesError(''); setManageImagesNotice('')
+    const metadata = buildImageSearchMetadata(selectedCatalogItem)
+    if (!metadata.query) {
+      setManageImagesError('Not enough catalogue information to search — this item has no name, barcode, or ID to search on.')
+      setManageImagesBusy(false); return
+    }
+    const { data: job, error: jobErr } = await supabase.from('image_search_jobs').insert({
+      item_id: selectedCatalogItem.id, status: 'searching', trigger: 'manual',
+      search_metadata: metadata, started_at: new Date().toISOString(), created_by: profile?.id || null,
+    }).select('*').single()
+    if (jobErr) {
+      setManageImagesError(/uq_image_search_jobs_active|duplicate key/.test(jobErr.message) ? 'A search is already queued or running for this item.' : jobErr.message)
+      setManageImagesBusy(false); return
+    }
+    const { data: res, error: fnErr } = await supabase.functions.invoke('find-images', {
+      body: { item_id: selectedCatalogItem.id, job_id: job.id, metadata },
+    })
+    if (fnErr) {
+      await supabase.from('image_search_jobs').update({ status: 'error', error_message: fnErr.message, completed_at: new Date().toISOString() }).eq('id', job.id)
+      setManageImagesError(`Search failed: ${fnErr.message}. Is the "find-images" function deployed with GOOGLE_API_KEY / GOOGLE_CSE_ID set?`)
+      setManageImagesBusy(false); await miReloadCandidatesJobs(); return
+    }
+    if (res?.error) {
+      setManageImagesError(res.error)
+    } else {
+      const n = res?.candidates_found ?? 0
+      setManageImagesNotice(n ? `Found ${n} candidate${n === 1 ? '' : 's'}.` : 'Search ran but returned no candidates for this item.')
+    }
+    setManageImagesBusy(false); await miReloadCandidatesJobs()
+  }
+
+  // Load candidates + jobs for the open item (admin only). Re-runs on image changes
+  // so approving/rejecting stays in sync with the Current Images list.
+  useEffect(() => {
+    if (!isPlatformAdmin || !selectedCatalogItem?.id) { setManageImagesCandidates([]); setManageImagesJobs([]); return }
+    let cancelled = false
+    ;(async () => {
+      const [{ data: cands }, { data: jobs }] = await Promise.all([
+        supabase.from('image_candidates').select('*').eq('item_id', selectedCatalogItem.id).order('match_score', { ascending: false }).order('created_at', { ascending: false }),
+        supabase.from('image_search_jobs').select('*').eq('item_id', selectedCatalogItem.id).order('created_at', { ascending: false }),
+      ])
+      if (!cancelled) { setManageImagesCandidates(cands || []); setManageImagesJobs(jobs || []) }
+    })()
+    return () => { cancelled = true }
+  }, [isPlatformAdmin, selectedCatalogItem?.id, catalogItemImagesReloadToken])
+
+  // Badge: how many catalogue items currently have no image. item_details.front_image_path
+  // is derived from item_images, so NULL there === zero images (the single definition).
+  useEffect(() => {
+    if (!isPlatformAdmin) { setImageQueueCount(null); return }
+    let cancelled = false
+    ;(async () => {
+      const { count } = await supabase.from('item_details').select('item_id', { count: 'exact', head: true }).is('front_image_path', null)
+      if (!cancelled) setImageQueueCount(count ?? 0)
+    })()
+    return () => { cancelled = true }
+  }, [isPlatformAdmin, catalogItemImagesReloadToken])
+
+  // Map an item_details row to the shape handleOpenCatalogItem expects (mirrors the
+  // catalog list's normalizeItem so queue items open identically to clicked items).
+  const normalizeQueueItem = (raw) => {
+    const na = (v) => (v && v !== 'N/A' ? v : '')
+    const subjectName = na(raw.subject), printType = na(raw.print_type)
+    const cardNum = raw.card_number && raw.card_number !== 'N/A' ? `#${raw.card_number}` : ''
+    const nameParts = [subjectName, printType, cardNum || null].filter(Boolean)
+    return {
+      id: raw.item_id,
+      name: nameParts.join(' — ') || raw.description || 'Unnamed Item',
+      description: raw.description || '', release_year: raw.release_year,
+      category_id: raw.category_id, subcategory_id: raw.subcategory_id,
+      franchise_id: raw.franchise_id, collectible_set_id: raw.collectible_set_id, brand_id: raw.brand_id,
+      card_number: raw.card_number !== 'N/A' ? raw.card_number : null, print_count: raw.print_count,
+      metadata: {}, dynamic_fields: {},
+      _subject_name: subjectName, _set_name: na(raw.collectible_set), _print_type: printType,
+      _brand_name: na(raw.brand), _franchise_name: na(raw.franchise),
+      _details: raw, front_image_path: raw.front_image_path || null,
+    }
+  }
+
+  const openQueueItemAt = (items, pos) => {
+    setImageQueuePos(pos)
+    handleOpenCatalogItem(items[pos])           // the tab-reset effect opens Manage Images while queue is active
+  }
+
+  const startImageQueue = async () => {
+    setImageQueueLoading(true); setManageImagesError(''); setManageImagesNotice('')
+    const { data, error } = await supabase.from('item_details').select('*').is('front_image_path', null).order('subject', { ascending: true }).limit(5000)
+    if (error) { setManageImagesError(error.message || 'Could not load the image queue.'); setImageQueueLoading(false); return }
+    const items = (data || []).map(normalizeQueueItem)
+    setImageQueueItems(items)
+    setImageQueueCount(items.length)
+    if (!items.length) { setImageQueueActive(false); setImageQueueLoading(false); setManageImagesNotice('Every catalogue item already has an image. Nothing to queue.'); return }
+    setImageQueueActive(true)
+    openQueueItemAt(items, 0)
+    setImageQueueLoading(false)
+  }
+
+  const advanceImageQueue = () => {
+    const next = imageQueuePos + 1
+    if (next >= imageQueueItems.length) { exitImageQueue(true); return }
+    openQueueItemAt(imageQueueItems, next)
+  }
+
+  const exitImageQueue = (finished) => {
+    setImageQueueActive(false)
+    setSelectedCatalogItem(null)
+    if (finished) setManageImagesNotice('')
+  }
+
   const handleCatalogAdminSelectSubject = async (subject) => {
     setCatalogAdminSubjectIds(prev => prev.some(s => s.id === subject.id) ? prev : [...prev, { id: subject.id, name: subject.name, type: subject.type }])
     setCatalogAdminSubjectSearch('')
@@ -8275,15 +8606,31 @@ function App() {
     const isXlsx = /\.xlsx?$/i.test(file.name)
     const reader = new FileReader()
     reader.onload = async (e) => {
-      let csvText
+      // Parse EVERY sheet in an .xlsx workbook, not just the first — a workbook
+      // often has one table per item type (Sets, Minifigs, Magnets, Value Packs…)
+      // and reading only sheet 0 silently dropped the rest. Each sheet is parsed
+      // on its own headers, then the rows are concatenated. A sheet contributes
+      // only if it yields at least one usable row (an item name or subject), so
+      // legend/notes sheets don't inject junk. The per-sheet tally is surfaced.
+      let parsedRows = []
+      let sheetSummary = null
+      const isUsable = (r) => (r.item_name || '').trim() || (r.subject_name || '').trim()
       if (isXlsx) {
         const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        csvText = XLSX.utils.sheet_to_csv(ws)
+        const reports = []
+        for (const sheetName of wb.SheetNames) {
+          const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName])
+          const rs = parseBulkImportCsv(csv)
+          const usable = rs.filter(isUsable)
+          reports.push({ sheet: sheetName, rows: rs.length, usable: usable.length, included: usable.length > 0 })
+          if (usable.length > 0) parsedRows = parsedRows.concat(rs.map(r => ({ ...r, _sheet: sheetName })))
+        }
+        if (wb.SheetNames.length > 1) sheetSummary = reports
       } else {
-        csvText = e.target.result
+        parsedRows = parseBulkImportCsv(e.target.result)
       }
-      let rows = parseBulkImportCsv(csvText).map(r => ({
+      setBulkImportSheetSummary(sheetSummary)
+      let rows = parsedRows.map(r => ({
         ...r,
         subcollectble_set_id: defaultSubsetId || '',
       }))
@@ -14383,6 +14730,15 @@ function App() {
                     >
                       {isCatalogBulkEditMode ? 'Exit Bulk Edit' : 'Bulk Edit'}
                     </button>
+                    <button
+                      type="button"
+                      className="catalog-action-pill"
+                      disabled={imageQueueLoading || imageQueueCount === 0}
+                      title="Step through every catalogue item that has no image"
+                      onClick={startImageQueue}
+                    >
+                      {imageQueueLoading ? 'Loading…' : `Image Queue${imageQueueCount != null ? ` (${imageQueueCount})` : ''}`}
+                    </button>
                   </>
                 )}
                 <button type="button" className="catalog-action-pill">
@@ -15729,6 +16085,16 @@ function App() {
                           const allDone       = bulkImportRows.every(r => r.status !== 'pending')
                           return (
                             <div className="bulk-import-review">
+                              {bulkImportSheetSummary && (
+                                <div className="bulk-import-sheet-summary">
+                                  <strong>{bulkImportSheetSummary.length} sheets read.</strong>{' '}
+                                  {bulkImportSheetSummary.map((s, i) => (
+                                    <span key={s.sheet} className={s.included ? 'sheet-included' : 'sheet-skipped'}>
+                                      {i > 0 ? ' · ' : ''}{s.sheet}: {s.included ? `${s.usable} imported` : 'skipped (no item/subject column)'}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               <div className="bulk-import-topbar">
                                 <span className="bulk-import-stats">
                                   {bulkImportRows.length} rows &nbsp;·&nbsp;
@@ -15763,7 +16129,7 @@ function App() {
                                   >
                                     {bulkImportIsSaving ? `Saving… ${bulkImportSaveProgress}/${approvedCount}` : `Save ${approvedCount} Approved`}
                                   </button>
-                                  <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportRows([]); setBulkImportIdx(0) }}>Start Over</button>
+                                  <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSheetSummary(null) }}>Start Over</button>
                                 </div>
                               </div>
                               <div className="bulk-import-split">
@@ -16802,6 +17168,17 @@ function App() {
                   >
                     Reviews ({catalogDetailReviews.length})
                   </button>
+                  {isPlatformAdmin && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={catalogDetailViewTab === 'manageImages'}
+                      className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'manageImages' ? 'active' : ''}`}
+                      onClick={() => setCatalogDetailViewTab('manageImages')}
+                    >
+                      Manage Images{catalogItemImages.length ? ` (${catalogItemImages.length})` : ''}
+                    </button>
+                  )}
                 </div>
 
                 {catalogDetailViewTab === 'overview' ? (
@@ -17910,7 +18287,7 @@ function App() {
                       <button type="button" className="catalog-detail-cartbtn">Add to Cart</button>
                     </div>
                   </>
-                ) : (
+                ) : catalogDetailViewTab === 'reviews' ? (
                   <section className="catalog-card catalog-detail-section catalog-detail-reviews-section" role="tabpanel" aria-label="Item reviews">
                     <div className="catalog-detail-reviews-header">
                       <h3>Collector Reviews</h3>
@@ -17939,6 +18316,147 @@ function App() {
                         ))}
                       </div>
                     )}
+                  </section>
+                ) : isPlatformAdmin ? (
+                  <section className="catalog-card catalog-detail-section manage-images-panel" role="tabpanel" aria-label="Manage images">
+                    <div className="manage-images-head">
+                      <h3>Manage Images</h3>
+                      <span className="manage-images-admin-badge">Admin only</span>
+                    </div>
+                    {imageQueueActive && (
+                      <div className="image-queue-bar">
+                        <div className="image-queue-progress">
+                          <strong>Image Queue</strong>
+                          <span>Item {imageQueuePos + 1} of {imageQueueItems.length}</span>
+                          <span className="image-queue-name">{selectedCatalogItem?.name || ''}</span>
+                        </div>
+                        <div className="image-queue-controls">
+                          <button type="button" className="catalog-admin-inline-cancel" onClick={() => exitImageQueue(false)}>Exit Queue</button>
+                          <button type="button" className="catalog-action-pill" disabled={manageImagesBusy} onClick={advanceImageQueue}>Skip →</button>
+                          <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={manageImagesBusy} onClick={advanceImageQueue}>
+                            {imageQueuePos + 1 >= imageQueueItems.length ? 'Finish' : (catalogItemImages.length ? 'Save & Next →' : 'Next →')}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {manageImagesError ? <p className="catalog-admin-form-error">{manageImagesError}</p> : null}
+                    {manageImagesNotice ? <p className="auth-banner">{manageImagesNotice}</p> : null}
+
+                    {/* ── 1. Current images ─────────────────────────────────── */}
+                    <div className="manage-images-section">
+                      <h4>Current Images ({catalogItemImages.length})</h4>
+                      {catalogItemImages.length === 0 ? (
+                        <p className="manage-images-empty">No images yet. This item is eligible for automatic image discovery.</p>
+                      ) : (
+                        <div className="manage-images-grid">
+                          {[...catalogItemImages].sort((a, b) => a.position - b.position).map((img, idx, arr) => {
+                            const url = miResolveUrl(img.image_path)
+                            const isPrimary = img.position === 0 || img.is_primary
+                            const editing = manageImagesEditSourceId === img.item_image_id
+                            return (
+                              <div key={img.item_image_id} className={`manage-images-card ${isPrimary ? 'is-primary' : ''}`}>
+                                <div className="manage-images-thumb" onClick={() => url && openLightbox(url)} title="View full image">
+                                  {url ? <img src={url} alt={`Image ${img.position + 1}`} loading="lazy" /> : <div className="manage-images-thumb-missing">No preview</div>}
+                                  {isPrimary && <span className="manage-images-primary-tag">Primary</span>}
+                                </div>
+                                <div className="manage-images-meta">
+                                  <span className="manage-images-order">#{img.position + 1}</span>
+                                  {img.is_verified ? <span className="manage-images-verified">✓ Verified</span> : <span className="manage-images-unverified">Unverified</span>}
+                                </div>
+                                {img.source_name || img.source_url ? (
+                                  <p className="manage-images-source">{img.source_name || 'Source'}{img.source_url ? <> · <a href={img.source_url} target="_blank" rel="noreferrer">link</a></> : null}</p>
+                                ) : <p className="manage-images-source manage-images-source-none">No source recorded</p>}
+                                {editing ? (
+                                  <div className="manage-images-source-edit">
+                                    <input type="text" placeholder="Source name (e.g. Rebrickable)" value={manageImagesSourceDraft.source_name} onChange={e => setManageImagesSourceDraft(d => ({ ...d, source_name: e.target.value }))} />
+                                    <input type="text" placeholder="Source URL" value={manageImagesSourceDraft.source_url} onChange={e => setManageImagesSourceDraft(d => ({ ...d, source_url: e.target.value }))} />
+                                    <label className="manage-images-checkbox"><input type="checkbox" checked={manageImagesSourceDraft.is_verified} onChange={e => setManageImagesSourceDraft(d => ({ ...d, is_verified: e.target.checked }))} /> Verified</label>
+                                    <div className="manage-images-actions">
+                                      <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={manageImagesBusy} onClick={() => handleMiSaveSource(img)}>Save</button>
+                                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setManageImagesEditSourceId(null)}>Cancel</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="manage-images-actions">
+                                    {!isPrimary && <button type="button" disabled={manageImagesBusy} onClick={() => handleMiSetPrimary(img)}>Set Primary</button>}
+                                    <button type="button" disabled={manageImagesBusy || idx === 0} onClick={() => handleMiReorder(img, 'up')} title="Move up">↑</button>
+                                    <button type="button" disabled={manageImagesBusy || idx === arr.length - 1} onClick={() => handleMiReorder(img, 'down')} title="Move down">↓</button>
+                                    <button type="button" disabled={manageImagesBusy} onClick={() => { setManageImagesEditSourceId(img.item_image_id); setManageImagesSourceDraft({ source_url: img.source_url || '', source_name: img.source_name || '', is_verified: !!img.is_verified }) }}>Edit Source</button>
+                                    <button type="button" className="manage-images-danger" disabled={manageImagesBusy} onClick={() => handleMiRemove(img)}>Remove</button>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── 2. Image candidates ───────────────────────────────── */}
+                    <div className="manage-images-section">
+                      <div className="manage-images-section-head">
+                        <h4>Image Candidates ({manageImagesCandidates.filter(c => c.status === 'pending').length} pending)</h4>
+                        <button type="button" className="catalog-detail-btn" disabled={manageImagesBusy} onClick={handleMiFindImages}>Find Images</button>
+                      </div>
+                      {manageImagesJobs[0] ? (
+                        <p className="manage-images-jobline">Last search: <strong>{manageImagesJobs[0].status.replace(/_/g, ' ')}</strong>{manageImagesJobs[0].candidates_found ? ` · ${manageImagesJobs[0].candidates_found} found` : ''}{manageImagesJobs[0].error_message ? ` · ${manageImagesJobs[0].error_message}` : ''}</p>
+                      ) : null}
+                      {manageImagesCandidates.length === 0 ? (
+                        <p className="manage-images-empty">No candidates. Use “Find Images” to build a search job (no external provider is configured yet).</p>
+                      ) : (
+                        <div className="manage-images-candidates-grid">
+                          {manageImagesCandidates.map(cand => (
+                            <div key={cand.id} className={`manage-images-candidate status-${cand.status}`}>
+                              <div className="manage-images-thumb" onClick={() => cand.image_url && openLightbox(cand.image_url)}>
+                                {cand.image_url ? <img src={cand.thumb_url || cand.image_url} alt="Candidate" loading="lazy" /> : <div className="manage-images-thumb-missing">No preview</div>}
+                                <span className={`manage-images-status-tag status-${cand.status}`}>{cand.status}</span>
+                              </div>
+                              <div className="manage-images-candidate-body">
+                                <p className="manage-images-source">{cand.source_name || 'Unknown source'}{cand.source_url ? <> · <a href={cand.source_url} target="_blank" rel="noreferrer">source</a></> : null}</p>
+                                <p className="manage-images-score">Score: {Number(cand.match_score || 0)}</p>
+                                {Array.isArray(cand.match_reasons) && cand.match_reasons.length ? (
+                                  <ul className="manage-images-reasons">{cand.match_reasons.map((r, i) => <li key={i}>{r.field || r.reason || JSON.stringify(r)}{r.points ? ` (+${r.points})` : ''}</li>)}</ul>
+                                ) : null}
+                              </div>
+                              {cand.status === 'pending' ? (
+                                <div className="manage-images-actions">
+                                  <button type="button" disabled={manageImagesBusy} onClick={() => handleMiApproveCandidate(cand, 'primary')}>Approve as Primary</button>
+                                  <button type="button" disabled={manageImagesBusy} onClick={() => handleMiApproveCandidate(cand, 'gallery')}>Add to Gallery</button>
+                                  <button type="button" className="manage-images-danger" disabled={manageImagesBusy} onClick={() => handleMiRejectCandidate(cand)}>Reject</button>
+                                </div>
+                              ) : (
+                                <p className="manage-images-candidate-resolved">{cand.status === 'approved' ? 'Approved — added to catalogue' : 'Rejected — will not be suggested again'}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── 3. Manual image management ────────────────────────── */}
+                    <div className="manage-images-section">
+                      <h4>Add an Image</h4>
+                      <div className="manage-images-manual">
+                        <div className="manage-images-manual-upload">
+                          <label className="catalog-detail-btn catalog-detail-btn-collect manage-images-upload-btn">
+                            {manageImagesBusy ? 'Working…' : 'Upload from device'}
+                            <input type="file" accept="image/*" style={{ display: 'none' }} disabled={manageImagesBusy} onChange={e => { if (e.target.files?.[0]) handleMiUpload(e.target.files[0], catalogItemImages.length === 0); e.target.value = '' }} />
+                          </label>
+                          <span className="catalog-admin-hint">Uploads go to the existing <code>item-images</code> bucket. First image becomes primary automatically.</span>
+                        </div>
+                        <div className="manage-images-manual-url">
+                          <input type="text" placeholder="External image URL" value={manageImagesUrlDraft.image_url} onChange={e => setManageImagesUrlDraft(d => ({ ...d, image_url: e.target.value }))} />
+                          <input type="text" placeholder="Source name (optional)" value={manageImagesUrlDraft.source_name} onChange={e => setManageImagesUrlDraft(d => ({ ...d, source_name: e.target.value }))} />
+                          <input type="text" placeholder="Source URL (optional)" value={manageImagesUrlDraft.source_url} onChange={e => setManageImagesUrlDraft(d => ({ ...d, source_url: e.target.value }))} />
+                          <label className="manage-images-checkbox"><input type="checkbox" checked={manageImagesUrlDraft.asPrimary} onChange={e => setManageImagesUrlDraft(d => ({ ...d, asPrimary: e.target.checked }))} /> Set as primary</label>
+                          <button type="button" className="catalog-detail-btn" disabled={manageImagesBusy} onClick={handleMiAddByUrl}>Add by URL</button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                ) : (
+                  <section className="catalog-card catalog-detail-section" role="tabpanel">
+                    <p className="manage-images-empty">This tab is not available.</p>
                   </section>
                 )}
               </>

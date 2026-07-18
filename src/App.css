@@ -7047,3 +7047,106 @@ h2 {
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
   }
 }
+
+/* ─── Manage Images (admin-only tab) ─────────────────────────────────────── */
+.manage-images-panel { display: flex; flex-direction: column; gap: 1.5rem; }
+.manage-images-head { display: flex; align-items: center; gap: 0.75rem; }
+.manage-images-admin-badge {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  background: #f59e0b; color: #1a1a1a; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 700;
+}
+.manage-images-section { border-top: 1px solid var(--border-color, #e2e2e2); padding-top: 1rem; }
+.manage-images-section:first-of-type { border-top: none; padding-top: 0; }
+.manage-images-section > h4 { margin: 0 0 0.75rem; }
+.manage-images-section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+.manage-images-section-head h4 { margin: 0; }
+.manage-images-empty { color: var(--text-muted, #777); font-size: 0.9rem; margin: 0.25rem 0; }
+.manage-images-jobline { font-size: 0.82rem; color: var(--text-muted, #777); margin: 0 0 0.75rem; }
+
+.manage-images-grid,
+.manage-images-candidates-grid {
+  display: grid; gap: 0.9rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+.manage-images-card,
+.manage-images-candidate {
+  border: 1px solid var(--border-color, #e2e2e2); border-radius: 10px;
+  padding: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem; background: var(--surface, #fff);
+}
+.manage-images-card.is-primary { border-color: #f59e0b; box-shadow: 0 0 0 1px #f59e0b inset; }
+.manage-images-candidate.status-rejected { opacity: 0.55; }
+.manage-images-candidate.status-approved { border-color: #16a34a; }
+
+.manage-images-thumb {
+  position: relative; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden;
+  background: var(--surface-alt, #f4f4f5); cursor: zoom-in; display: flex; align-items: center; justify-content: center;
+}
+.manage-images-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.manage-images-thumb-missing { color: var(--text-muted, #999); font-size: 0.8rem; }
+.manage-images-primary-tag,
+.manage-images-status-tag {
+  position: absolute; top: 6px; left: 6px; font-size: 0.65rem; font-weight: 700;
+  padding: 0.1rem 0.4rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.manage-images-primary-tag { background: #f59e0b; color: #1a1a1a; }
+.manage-images-status-tag.status-pending { background: #3b82f6; color: #fff; }
+.manage-images-status-tag.status-approved { background: #16a34a; color: #fff; }
+.manage-images-status-tag.status-rejected { background: #9ca3af; color: #fff; }
+
+.manage-images-meta { display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; }
+.manage-images-order { font-weight: 700; }
+.manage-images-verified { color: #16a34a; font-weight: 600; }
+.manage-images-unverified { color: var(--text-muted, #999); }
+.manage-images-source { font-size: 0.78rem; margin: 0; word-break: break-word; }
+.manage-images-source-none { color: var(--text-muted, #999); font-style: italic; }
+.manage-images-score { font-size: 0.8rem; font-weight: 700; margin: 0.25rem 0 0; }
+.manage-images-reasons { margin: 0.25rem 0 0; padding-left: 1rem; font-size: 0.72rem; color: var(--text-muted, #777); }
+.manage-images-candidate-resolved { font-size: 0.75rem; color: var(--text-muted, #777); margin: 0; }
+
+.manage-images-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.manage-images-actions button {
+  font-size: 0.72rem; padding: 0.25rem 0.5rem; border-radius: 6px;
+  border: 1px solid var(--border-color, #d4d4d8); background: var(--surface-alt, #f4f4f5); cursor: pointer;
+}
+.manage-images-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.manage-images-actions button.manage-images-danger { color: #dc2626; border-color: #fca5a5; }
+.manage-images-source-edit { display: flex; flex-direction: column; gap: 0.35rem; }
+.manage-images-source-edit input[type="text"] { font-size: 0.78rem; padding: 0.3rem 0.4rem; border-radius: 6px; border: 1px solid var(--border-color, #d4d4d8); }
+.manage-images-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; }
+
+.manage-images-manual { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
+.manage-images-manual-upload { display: flex; flex-direction: column; gap: 0.5rem; }
+.manage-images-upload-btn { cursor: pointer; text-align: center; }
+.manage-images-manual-url { display: flex; flex-direction: column; gap: 0.5rem; }
+.manage-images-manual-url input[type="text"] { font-size: 0.85rem; padding: 0.4rem 0.5rem; border-radius: 6px; border: 1px solid var(--border-color, #d4d4d8); }
+@media (max-width: 640px) { .manage-images-manual { grid-template-columns: 1fr; } }
+
+/* ─── Image Queue bar (inside Manage Images) ─────────────────────────────── */
+.image-queue-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 0.6rem 0.9rem;
+}
+.image-queue-progress { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
+.image-queue-progress strong { color: #3730a3; }
+.image-queue-progress span { font-size: 0.85rem; color: #4b5563; }
+.image-queue-name { font-weight: 600; color: #1f2937 !important; }
+.image-queue-controls { display: flex; align-items: center; gap: 0.5rem; }
+@media (prefers-color-scheme: dark) {
+  .image-queue-bar { background: #1e1b4b; border-color: #3730a3; }
+  .image-queue-progress strong { color: #c7d2fe; }
+  .image-queue-progress span { color: #cbd5e1; }
+  .image-queue-name { color: #f1f5f9 !important; }
+}
+
+/* ─── Bulk import: multi-sheet summary ───────────────────────────────────── */
+.bulk-import-sheet-summary {
+  font-size: 0.82rem; background: #f0f9ff; border: 1px solid #bae6fd;
+  border-radius: 8px; padding: 0.45rem 0.7rem; margin-bottom: 0.6rem; color: #0c4a6e;
+}
+.bulk-import-sheet-summary .sheet-included { color: #065f46; }
+.bulk-import-sheet-summary .sheet-skipped { color: #92400e; }
+@media (prefers-color-scheme: dark) {
+  .bulk-import-sheet-summary { background: #082f49; border-color: #0369a1; color: #e0f2fe; }
+  .bulk-import-sheet-summary .sheet-included { color: #6ee7b7; }
+  .bulk-import-sheet-summary .sheet-skipped { color: #fcd34d; }
+}
