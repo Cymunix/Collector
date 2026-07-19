@@ -223,59 +223,11 @@ const BULK_ALIAS_TO_FIELD = (() => {
   for (const [field, def] of Object.entries(BULK_FIELD_MAP)) for (const a of def.aliases) if (!(a in m)) m[a] = field
   return m
 })()
-// ─── Image Discovery: match scoring (swappable config) ───────────────────────
-// Central, data-driven weights so scoring can change without touching call sites.
-// A future provider builds candidates; scoreImageCandidate() ranks each against
-// metadata built from the item's taxonomy. Keep as data, never inline the numbers.
-const IMAGE_MATCH_SCORING = {
-  barcode:         100, // exact UPC/EAN
-  manufacturer_id: 100, // exact set number / minifig code / bricklink id
-  item_name:        40, // exact (case-insensitive) item name
-  product_line:     25,
-  series:           15,
-  manufacturer:     15, // brand / item type
-  franchise:        10,
-}
-
-// Build prioritised search metadata from whatever catalogue info the item has.
-// `item` is the selectedCatalogItem shape (with _details). Array order = priority.
-function buildImageSearchMetadata(item) {
-  const d = item?._details || {}
-  const terms = []
-  const push = (key, value, weightKey) => {
-    const v = value == null ? '' : String(value).trim()
-    if (v) terms.push({ key, value: v, weightKey })
-  }
-  push('barcode',         d.upc,                                                              'barcode')
-  push('manufacturer_id', d.lego_set_number || d.minifig_code || d.bricklink_id || d.rebrickable_fig_id, 'manufacturer_id')
-  push('item_name',       item?.name || d.name || d.description,                              'item_name')
-  push('product_line',    d.product_line || d.property,                                       'product_line')
-  push('series',          d.series || item?.series_name,                                      'series')
-  push('franchise',       d.franchise,                                                        'franchise')
-  push('manufacturer',    d.brand,                                                            'manufacturer')
-  return {
-    terms,
-    query: terms.map(t => t.value).join(' '),
-    priority: terms.map(t => t.key),
-    built_at: new Date().toISOString(),
-  }
-}
-
-// Score a candidate against metadata. A provider may tag a candidate with
-// {matched:[keys]}; absent that we can't infer a match, so score stays 0.
-function scoreImageCandidate(candidate, metadata) {
-  const reasons = []
-  let score = 0
-  const matched = Array.isArray(candidate?.matched) ? candidate.matched : []
-  for (const t of (metadata?.terms || [])) {
-    if (matched.includes(t.key)) {
-      const pts = IMAGE_MATCH_SCORING[t.weightKey] || 0
-      score += pts
-      reasons.push({ field: t.key, value: t.value, points: pts })
-    }
-  }
-  return { score, reasons }
-}
+// NOTE: image-discovery query generation and candidate scoring now live
+// server-side in the `discover-catalog-images` edge function (the authoritative,
+// secure home — it holds the Google secrets and reads the DB directly). The former
+// client-side buildImageSearchMetadata/scoreImageCandidate helpers were removed so
+// there is a single source of truth.
 
 const MTG_CARD_TREATMENT_NAMES  = new Set(['Foil', 'Etched', 'Borderless', 'Extended Art', 'Showcase', 'Retro', 'Textless'])
 const SPORTS_CARD_TYPE_NAMES    = new Set(['Foil', 'Patch', 'Rookie', 'Signature'])
@@ -1952,6 +1904,16 @@ function App() {
   const [catalogDetailLegoCond, setCatalogDetailLegoCond] = useState({})
   // Minifigs connected to the currently-viewed set (via set_minifigs).
   const [catalogDetailSetMinifigs, setCatalogDetailSetMinifigs] = useState([])
+  // Universal Related Items (catalog_item_relationships). Includes = children this
+  // item contains; IncludedIn = parents that contain this item (derived, not stored).
+  const [catalogDetailIncludes, setCatalogDetailIncludes] = useState([])
+  const [catalogDetailIncludedIn, setCatalogDetailIncludedIn] = useState([])
+  // Admin relationship editor (Related Items tab).
+  const [relAddMode, setRelAddMode] = useState(null) // 'child' | 'parent' | null
+  const [relSearch, setRelSearch] = useState('')
+  const [relSearchResults, setRelSearchResults] = useState([])
+  const [relBusy, setRelBusy] = useState(false)
+  const [relError, setRelError] = useState('')
   // Admin set↔minifig link editor.
   const [linkSearch, setLinkSearch] = useState('')
   const [linkResults, setLinkResults] = useState([])
@@ -3345,17 +3307,29 @@ function App() {
       })
   }, [currentScreen, catalogSubsetId])
 
-  // Faceted filter: Subtheme options for the selected Theme (franchise).
+  // Faceted filter: Subtheme options for the selected Theme (franchise). Only show
+  // subthemes actually USED by items in this Theme — deriving from items.subset_id
+  // rather than every subset tied to the franchise keeps empty / artefact subsets
+  // (e.g. leftover "Key Chain" rows that are really Series) out of the filter.
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const franchiseId = selectedCatalogFranchiseRecord?.id || ''
     if (!franchiseId) { setCatalogSubthemeOptions([]); setCatalogSubthemeId(prev => prev ? '' : prev); return }
-    supabase.from('subsets').select('subset_id, name').eq('franchise_id', franchiseId).order('name')
-      .then(({ data }) => {
-        const list = (data || []).map(r => ({ id: r.subset_id, name: r.name }))
-        setCatalogSubthemeOptions(list)
-        setCatalogSubthemeId(prev => list.some(s => s.id === prev) ? prev : '')
-      })
+    let cancelled = false
+    ;(async () => {
+      const { data: itemRows } = await supabase
+        .from('items').select('subset_id').eq('franchise_id', franchiseId).not('subset_id', 'is', null)
+      const subsetIds = [...new Set((itemRows || []).map(r => r.subset_id))]
+      let list = []
+      if (subsetIds.length) {
+        const { data } = await supabase.from('subsets').select('subset_id, name').in('subset_id', subsetIds).order('name')
+        list = (data || []).map(r => ({ id: r.subset_id, name: r.name }))
+      }
+      if (cancelled) return
+      setCatalogSubthemeOptions(list)
+      setCatalogSubthemeId(prev => list.some(s => s.id === prev) ? prev : '')
+    })()
+    return () => { cancelled = true }
   }, [currentScreen, selectedCatalogFranchiseRecord?.id])
 
   // Faceted filter: Product Line options for the selected Subtheme.
@@ -3370,18 +3344,36 @@ function App() {
       })
   }, [currentScreen, catalogSubthemeId])
 
-  // Faceted filter: Series options for the selected Subcategory (manufacturer).
+  // Faceted filter: Series options. When a Theme (franchise) is selected, show only
+  // the Series actually used by items in that Theme (series link to items, not
+  // directly to franchises, so derive them from items.franchise_id → series_id).
+  // Otherwise fall back to every Series for the selected Subcategory (manufacturer).
   useEffect(() => {
     if (currentScreen !== 'catalog') return
     const subcatId = selectedCatalogSubcategoryRecord?.id || ''
+    const franchiseId = selectedCatalogFranchiseRecord?.id || ''
     if (!subcatId) { setCatalogSeriesOptions([]); setCatalogSeriesId(prev => prev ? '' : prev); return }
-    supabase.from('series').select('series_id, name').eq('subcategory_id', subcatId).order('name')
-      .then(({ data, error }) => {
-        const list = error ? [] : (data || []).map(r => ({ id: r.series_id, name: r.name }))
-        setCatalogSeriesOptions(list)
-        setCatalogSeriesId(prev => list.some(s => s.id === prev) ? prev : '')
-      })
-  }, [currentScreen, selectedCatalogSubcategoryRecord?.id])
+    let cancelled = false
+    ;(async () => {
+      let list = []
+      if (franchiseId) {
+        const { data: itemRows } = await supabase
+          .from('items').select('series_id').eq('franchise_id', franchiseId).not('series_id', 'is', null)
+        const seriesIds = [...new Set((itemRows || []).map(r => r.series_id))]
+        if (seriesIds.length) {
+          const { data } = await supabase.from('series').select('series_id, name').in('series_id', seriesIds).order('name')
+          list = (data || []).map(r => ({ id: r.series_id, name: r.name }))
+        }
+      } else {
+        const { data } = await supabase.from('series').select('series_id, name').eq('subcategory_id', subcatId).order('name')
+        list = (data || []).map(r => ({ id: r.series_id, name: r.name }))
+      }
+      if (cancelled) return
+      setCatalogSeriesOptions(list)
+      setCatalogSeriesId(prev => list.some(s => s.id === prev) ? prev : '')
+    })()
+    return () => { cancelled = true }
+  }, [currentScreen, selectedCatalogSubcategoryRecord?.id, selectedCatalogFranchiseRecord?.id])
 
   // Effect F: subject typeahead search (category-scoped when a category is selected)
   useEffect(() => {
@@ -4173,10 +4165,131 @@ function App() {
         }
       }
       if (!cancelled) setCatalogDetailParentSets(minifigParentSets)
+
+      // Universal Related Items (catalog_item_relationships). "Includes" = children
+      // of this item; "Included In" = parents (derived by querying where this item is
+      // the child — never a stored reverse row). Guarded so a missing table (migration
+      // not yet applied) yields empty lists, never an error. One batched query per
+      // direction + one item_details + one items lookup — never per-related-item.
+      let includes = [], includedIn = []
+      const [{ data: childRows, error: cErr }, { data: parentRows, error: pErr }] = await Promise.all([
+        supabase.from('catalog_item_relationships').select('child_item_id, quantity').eq('parent_item_id', selectedCatalogItem.id).eq('relationship_type', 'includes'),
+        supabase.from('catalog_item_relationships').select('parent_item_id, quantity').eq('child_item_id', selectedCatalogItem.id).eq('relationship_type', 'includes'),
+      ])
+      if (!cErr && !pErr) {
+        const childIds = [...new Set((childRows || []).map(r => r.child_item_id))]
+        const parentIds = [...new Set((parentRows || []).map(r => r.parent_item_id))]
+        const allIds = [...new Set([...childIds, ...parentIds])]
+        if (allIds.length) {
+          const [{ data: det }, { data: base }] = await Promise.all([
+            supabase.from('item_details').select('item_id, subject, description, brand, front_image_path, lego_set_number, print_type, release_year').in('item_id', allIds),
+            supabase.from('items').select('item_id, minifig_code, upc').in('item_id', allIds),
+          ])
+          const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
+          const baseById = Object.fromEntries((base || []).map(b => [b.item_id, b]))
+          const qtyChild = Object.fromEntries((childRows || []).map(r => [r.child_item_id, r.quantity]))
+          const na = (v) => (v && v !== 'N/A' ? v : '')
+          const shape = (id, qty) => {
+            const d = detById[id] || {}, b = baseById[id] || {}
+            const fp = d.front_image_path
+            const imageUrl = fp ? (fp.startsWith('http') ? fp : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || '') : ''
+            return {
+              item_id: id,
+              name: na(d.subject) || na(d.description) || 'Item',
+              description: na(d.print_type) || na(d.description) || '',
+              itemType: na(d.brand),
+              idNumber: na(d.lego_set_number) || na(b.minifig_code) || na(b.upc) || '',
+              year: d.release_year || null,
+              imageUrl,
+              quantity: qty || 1,
+            }
+          }
+          includes   = childIds.map(id => shape(id, qtyChild[id])).sort((a, b) => a.name.localeCompare(b.name))
+          includedIn = parentIds.map(id => shape(id, 1)).sort((a, b) => a.name.localeCompare(b.name))
+        }
+      }
+      if (!cancelled) { setCatalogDetailIncludes(includes); setCatalogDetailIncludedIn(includedIn) }
     }
     load()
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogItem?.id, catalogItemImagesReloadToken])
+
+  // ─── Related Items (universal relationships) admin CRUD ─────────────────────
+  // Writes go to catalog_item_relationships (RLS enforces admin server-side). A
+  // set↔minifig pair is also mirrored into legacy set_minifigs so LEGO completion
+  // (which still reads that table) stays consistent.
+  const mirrorSetMinifig = async (parentId, childId, action) => {
+    const { data: c } = await supabase.from('items').select('minifig_code, rebrickable_fig_id').eq('item_id', childId).maybeSingle()
+    if (!(c?.minifig_code || c?.rebrickable_fig_id)) return
+    if (action === 'add') {
+      await supabase.from('set_minifigs').upsert({ set_item_id: parentId, minifig_item_id: childId, quantity: 1 }, { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true })
+    } else {
+      await supabase.from('set_minifigs').delete().eq('set_item_id', parentId).eq('minifig_item_id', childId)
+    }
+  }
+  // mode 'child' → current item INCLUDES target; mode 'parent' → target INCLUDES current.
+  const handleAddRelatedItem = async (targetItemId, mode) => {
+    if (!selectedCatalogItem?.id || !targetItemId) return
+    if (targetItemId === selectedCatalogItem.id) { setRelError('An item cannot include itself.'); return }
+    setRelBusy(true); setRelError('')
+    const parent = mode === 'child' ? selectedCatalogItem.id : targetItemId
+    const child  = mode === 'child' ? targetItemId : selectedCatalogItem.id
+    const { error } = await supabase.from('catalog_item_relationships').upsert(
+      { parent_item_id: parent, child_item_id: child, relationship_type: 'includes', created_by: profile?.id || null },
+      { onConflict: 'parent_item_id,child_item_id,relationship_type', ignoreDuplicates: true })
+    if (error) { setRelError(error.message); setRelBusy(false); return }
+    await mirrorSetMinifig(parent, child, 'add')
+    setRelAddMode(null); setRelSearch(''); setRelSearchResults([])
+    setRelBusy(false); setCatalogItemImagesReloadToken(t => t + 1)
+  }
+  const handleRemoveRelated = async (otherItemId, mode) => {
+    if (!selectedCatalogItem?.id) return
+    if (!window.confirm('Remove this relationship? This affects both items (Includes / Included In).')) return
+    const parent = mode === 'child' ? selectedCatalogItem.id : otherItemId
+    const child  = mode === 'child' ? otherItemId : selectedCatalogItem.id
+    setRelBusy(true); setRelError('')
+    const { error } = await supabase.from('catalog_item_relationships').delete()
+      .eq('parent_item_id', parent).eq('child_item_id', child).eq('relationship_type', 'includes')
+    if (error) { setRelError(error.message); setRelBusy(false); return }
+    await mirrorSetMinifig(parent, child, 'remove')
+    setRelBusy(false); setCatalogItemImagesReloadToken(t => t + 1)
+  }
+
+  // Server-side item search for the relationship selector (name/description/codes/
+  // barcode + subject). Limited + debounced — never loads the whole catalogue.
+  useEffect(() => {
+    if (!relAddMode) { setRelSearchResults([]); return }
+    const q = relSearch.trim()
+    if (q.length < 2) { setRelSearchResults([]); return }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      const like = `%${q}%`
+      const na = (v) => (v && v !== 'N/A' ? v : '')
+      const [{ data: idRows }, { data: subjRows }] = await Promise.all([
+        supabase.from('items').select('item_id')
+          .or([`name.ilike.${like}`, `description.ilike.${like}`, `lego_set_number.ilike.${like}`, `minifig_code.ilike.${like}`, `bricklink_id.ilike.${like}`, `upc.ilike.${like}`].join(','))
+          .limit(25),
+        supabase.from('item_details').select('item_id').ilike('subject', like).limit(25),
+      ])
+      const ids = [...new Set([...(idRows || []).map(r => r.item_id), ...(subjRows || []).map(r => r.item_id)])]
+        .filter(id => id !== selectedCatalogItem?.id).slice(0, 25)
+      if (!ids.length) { if (!cancelled) setRelSearchResults([]); return }
+      const [{ data: det }, { data: base }] = await Promise.all([
+        supabase.from('item_details').select('item_id, subject, description, brand, franchise, lego_set_number').in('item_id', ids),
+        supabase.from('items').select('item_id, minifig_code, upc').in('item_id', ids),
+      ])
+      const baseById = Object.fromEntries((base || []).map(b => [b.item_id, b]))
+      const results = (det || []).map(d => ({
+        item_id: d.item_id,
+        name: na(d.subject) || na(d.description) || 'Item',
+        itemType: na(d.brand),
+        franchise: na(d.franchise),
+        idNumber: na(d.lego_set_number) || na(baseById[d.item_id]?.minifig_code) || na(baseById[d.item_id]?.upc) || '',
+      })).sort((a, b) => a.name.localeCompare(b.name))
+      if (!cancelled) setRelSearchResults(results)
+    }, 300)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [relSearch, relAddMode, selectedCatalogItem?.id])
 
   // Lightbox keyboard: Escape closes, arrows flip through images.
   useEffect(() => {
@@ -8215,40 +8328,31 @@ function App() {
     setManageImagesBusy(false); await miReloadCandidatesJobs()
   }
 
-  // Manual "Find Images" override. Builds prioritised metadata, creates a search
-  // job, then hands it to the `find-images` edge function (Google Programmable
-  // Search). The function verifies admin server-side, scores results and inserts
-  // image_candidates rows. Requires the function to be deployed with GOOGLE_API_KEY
-  // and GOOGLE_CSE_ID configured; otherwise it reports "provider not configured".
+  // Manual "Find Images" override. Hands the item to the `discover-catalog-images`
+  // edge function, which (server-side) verifies admin, loads the item + taxonomy,
+  // builds the query, calls Google Programmable Search, scores + saves candidates,
+  // and records the search job. The button is a deliberate admin override, so it
+  // searches even if the item already has images (override: true). The manageImagesBusy
+  // guard + disabled button prevent repeated concurrent clicks.
   const handleMiFindImages = async () => {
-    if (!selectedCatalogItem?.id) return
+    if (!selectedCatalogItem?.id || manageImagesBusy) return
     setManageImagesBusy(true); setManageImagesError(''); setManageImagesNotice('')
-    const metadata = buildImageSearchMetadata(selectedCatalogItem)
-    if (!metadata.query) {
-      setManageImagesError('Not enough catalogue information to search — this item has no name, barcode, or ID to search on.')
-      setManageImagesBusy(false); return
-    }
-    const { data: job, error: jobErr } = await supabase.from('image_search_jobs').insert({
-      item_id: selectedCatalogItem.id, status: 'searching', trigger: 'manual',
-      search_metadata: metadata, started_at: new Date().toISOString(), created_by: profile?.id || null,
-    }).select('*').single()
-    if (jobErr) {
-      setManageImagesError(/uq_image_search_jobs_active|duplicate key/.test(jobErr.message) ? 'A search is already queued or running for this item.' : jobErr.message)
-      setManageImagesBusy(false); return
-    }
-    const { data: res, error: fnErr } = await supabase.functions.invoke('find-images', {
-      body: { item_id: selectedCatalogItem.id, job_id: job.id, metadata },
+    const { data: res, error: fnErr } = await supabase.functions.invoke('discover-catalog-images', {
+      body: { item_id: selectedCatalogItem.id, override: true },
     })
     if (fnErr) {
-      await supabase.from('image_search_jobs').update({ status: 'error', error_message: fnErr.message, completed_at: new Date().toISOString() }).eq('id', job.id)
-      setManageImagesError(`Search failed: ${fnErr.message}. Is the "find-images" function deployed with GOOGLE_API_KEY / GOOGLE_CSE_ID set?`)
+      setManageImagesError(`Search failed: ${fnErr.message}. Is the "discover-catalog-images" function deployed with BRAVE_SEARCH_API_KEY set?`)
       setManageImagesBusy(false); await miReloadCandidatesJobs(); return
     }
-    if (res?.error) {
-      setManageImagesError(res.error)
+    if (res?.status === 'error') {
+      setManageImagesError(res.error || 'Image search failed.')
+    } else if (res?.status === 'already_has_images') {
+      setManageImagesNotice('This item already has images — automatic discovery is not required. Use manual upload/URL to add more.')
     } else {
       const n = res?.candidates_found ?? 0
-      setManageImagesNotice(n ? `Found ${n} candidate${n === 1 ? '' : 's'}.` : 'Search ran but returned no candidates for this item.')
+      setManageImagesNotice(n
+        ? `Found ${n} candidate${n === 1 ? '' : 's'} for “${res.query}”.`
+        : `Search ran (“${res?.query || ''}”) but returned no candidates for this item.`)
     }
     setManageImagesBusy(false); await miReloadCandidatesJobs()
   }
@@ -8820,6 +8924,9 @@ function App() {
     let saved = 0
     const isLegoCategory = selectedCatalogAdminCategoryName === 'Building Blocks'
     const bricklinkItemCache = new Map() // bricklink_id → item_id for items created this batch
+    // Every item touched this batch (created or matched-existing) + its row, so the
+    // post-insert linking pass can resolve Includes / Included In once ALL items exist.
+    const savedItems = [] // { itemId, row }
     // Caches to avoid redundant DB lookups/creates within this save batch
     const franchiseIdCache     = new Map() // name_lc → franchise_id
     const brandIdCache         = new Map() // `${franchise_id}::${name_lc}` → brand_id
@@ -9002,18 +9109,6 @@ function App() {
       const rowSeriesId = row.series_name?.trim()
         ? await resolveOrCreateSeries(row.series_name, catalogAdminSubcategoryId)
         : null
-      // ── Building Blocks: resolve parent set by BrickLink ID or set number ───
-      const resolveParentSetItemId = async (ref) => {
-        if (!ref?.trim()) return null
-        const r = ref.trim()
-        // Try bricklink_id first (e.g. "75357-1")
-        const { data: byBl } = await supabase.from('items').select('item_id').eq('bricklink_id', r).maybeSingle()
-        if (byBl?.item_id) return byBl.item_id
-        // Try lego_set_number (e.g. "75357" without variant suffix)
-        const setNum = r.replace(/-\d+$/, '')
-        const { data: bySn } = await supabase.from('items').select('item_id').eq('lego_set_number', setNum).maybeSingle()
-        return bySn?.item_id || null
-      }
       // ── Building Blocks: reuse existing minifig by bricklink_id OR fig-num ──
       // Minifigs are identified by their Rebrickable fig-num (the spec's dedupe
       // key); many also carry a bricklink code. Match on either so a re-import —
@@ -9033,15 +9128,7 @@ function App() {
           if (existingRb?.item_id) { existingId = existingRb.item_id; matchKey = rbId }
         }
         if (existingId) {
-          if (row.parent_set_bricklink_id?.trim()) {
-            const parentId = await resolveParentSetItemId(row.parent_set_bricklink_id)
-            if (parentId) {
-              await supabase.from('set_minifigs').upsert(
-                { set_item_id: parentId, minifig_item_id: existingId, quantity: 1 },
-                { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true }
-              )
-            }
-          }
+          savedItems.push({ itemId: existingId, row }) // links resolved in the post-pass
           updateBulkRow(row._origIdx, { status: 'skipped', errorMsg: `Already in catalog (${matchKey})` })
           saved++
           setBulkImportSaveProgress(saved)
@@ -9066,6 +9153,7 @@ function App() {
           if (rp !== '' && rp != null && Number.isFinite(Number(rp))) {
             await supabase.from('items').update({ retail_price: Number(rp) }).eq('item_id', dup.item_id)
           }
+          savedItems.push({ itemId: dup.item_id, row }) // links resolved in the post-pass
           updateBulkRow(row._origIdx, { status: 'skipped', errorMsg: `Already in catalog (set ${rowSetNum})` })
           saved++
           setBulkImportSaveProgress(saved)
@@ -9111,6 +9199,7 @@ function App() {
         continue
       }
       if (isLegoCategory && blId) bricklinkItemCache.set(blId, created.item_id)
+      savedItems.push({ itemId: created.item_id, row }) // links resolved in the post-pass
       // Subjects are optional and only assigned from an explicit Subject value —
       // the item's own name is NOT a Subject.
       let subjectId = row.subjectObj?.id || null
@@ -9169,17 +9258,6 @@ function App() {
           if (plErr) console.error('item_product_lines insert error (bulk):', plErr)
         }
       }
-      if (row.parent_set_bricklink_id?.trim() && selectedCatalogAdminCategoryName === 'Building Blocks') {
-        const parentSetId = await resolveParentSetItemId(row.parent_set_bricklink_id)
-        if (parentSetId) {
-          await supabase.from('set_minifigs').upsert(
-            { set_item_id: parentSetId, minifig_item_id: created.item_id, quantity: 1 },
-            { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true }
-          )
-        } else {
-          console.warn(`bulk import: parent set not found for "${row.parent_set_bricklink_id.trim()}"`)
-        }
-      }
       if (row.image_file) {
         const ext = row.image_file.name.split('.').pop()
         const path = `items/${created.item_id}/${Date.now()}_0.${ext}`
@@ -9196,6 +9274,61 @@ function App() {
       saved++
       setBulkImportSaveProgress(saved)
     }
+
+    // ── Post-insert linking pass: Includes / Included In ──────────────────────
+    // Runs after ALL items exist, so ordering doesn't matter, and handles
+    // comma/semicolon-separated multi-values. Each referenced code is resolved
+    // across minifig_code / lego_set_number / bricklink_id. A minifig↔set pair
+    // becomes a set_minifigs link; anything else (set↔set value packs, magnet
+    // sets → magnets) becomes a set_contents link. set_contents upserts are
+    // no-ops (silently skipped) until the set_contents migration is applied.
+    if (isLegoCategory && savedItems.length) {
+      const codeCache = new Map() // code_lc → { itemId, isMinifig } | null
+      const resolveByCode = async (raw) => {
+        const c = (raw || '').trim()
+        if (!c) return null
+        const key = c.toLowerCase()
+        if (codeCache.has(key)) return codeCache.get(key)
+        let hit = null
+        const { data: byFig } = await supabase.from('items').select('item_id, minifig_code').eq('minifig_code', c).maybeSingle()
+        if (byFig) hit = { itemId: byFig.item_id, isMinifig: true }
+        if (!hit) {
+          const setNum = c.replace(/-\d+$/, '')
+          const { data: bySet } = await supabase.from('items').select('item_id, minifig_code').eq('lego_set_number', setNum).maybeSingle()
+          if (bySet) hit = { itemId: bySet.item_id, isMinifig: !!bySet.minifig_code }
+        }
+        if (!hit) {
+          const { data: byBl } = await supabase.from('items').select('item_id, minifig_code').eq('bricklink_id', c).maybeSingle()
+          if (byBl) hit = { itemId: byBl.item_id, isMinifig: !!byBl.minifig_code }
+        }
+        codeCache.set(key, hit)
+        return hit
+      }
+      const linkPair = async (parent, child) => {
+        if (!parent || !child || parent.itemId === child.itemId) return
+        // Universal relationship (source of truth for the Related Items tab).
+        await supabase.from('catalog_item_relationships').upsert(
+          { parent_item_id: parent.itemId, child_item_id: child.itemId, relationship_type: 'includes', created_by: profile?.id || null },
+          { onConflict: 'parent_item_id,child_item_id,relationship_type', ignoreDuplicates: true })
+        // Mirror set↔minifig into legacy set_minifigs so LEGO completion stays correct.
+        if (child.isMinifig && !parent.isMinifig) {
+          await supabase.from('set_minifigs').upsert(
+            { set_item_id: parent.itemId, minifig_item_id: child.itemId, quantity: 1 },
+            { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true })
+        }
+      }
+      const splitCodes = (v) => String(v || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)
+      for (const { itemId, row } of savedItems) {
+        const self = { itemId, isMinifig: /minifig/i.test(row.brand_name || '') || !!(row.minifig_code && row.minifig_code.trim()) }
+        for (const code of splitCodes(row.parent_set_bricklink_id)) { // Included In: parent contains self
+          await linkPair(await resolveByCode(code), self)
+        }
+        for (const code of splitCodes(row.includes)) {                 // Includes: self contains child
+          await linkPair(self, await resolveByCode(code))
+        }
+      }
+    }
+
     setBulkImportIsSaving(false)
   }
 
@@ -17168,6 +17301,20 @@ function App() {
                   >
                     Reviews ({catalogDetailReviews.length})
                   </button>
+                  {(() => {
+                    const relCount = catalogDetailIncludes.length + catalogDetailIncludedIn.length
+                    return (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={catalogDetailViewTab === 'related'}
+                        className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'related' ? 'active' : ''}`}
+                        onClick={() => setCatalogDetailViewTab('related')}
+                      >
+                        Related Items{relCount ? ` (${relCount})` : ''}
+                      </button>
+                    )
+                  })()}
                   {isPlatformAdmin && (
                     <button
                       type="button"
@@ -18105,52 +18252,8 @@ function App() {
                   )}
                     </section>
 
-                    {/* ── Minifigures in this set ── */}
-                    {(isLegoSet || catalogDetailSetMinifigs.length > 0) && (
-                      <section className="catalog-card catalog-detail-section">
-                    <h3>Minifigures in this set ({catalogDetailSetMinifigs.length})</h3>
-                    <div className="catalog-detail-minifig-list">
-                      {catalogDetailSetMinifigs.map(m => (
-                        <div key={m.item_id} className="catalog-detail-minifig-row">
-                          <button type="button" className="catalog-detail-minifig-rowmain" onClick={() => openCatalogItemById(m.item_id)}>
-                            <span className="catalog-detail-minifig-name">
-                              {m.name}
-                              {m.variant ? <span className="catalog-detail-minifig-variant"> — {m.variant}</span> : null}
-                              {m.quantity > 1 ? <span className="catalog-detail-minifig-qty"> ×{m.quantity}</span> : null}
-                            </span>
-                            {(m.code || m.figNum) ? <span className="catalog-detail-minifig-fig">{m.code || m.figNum}</span> : null}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                      </section>
-                    )}
-
-                    {isLegoMinifig && (
-                      <section className="catalog-card catalog-detail-section">
-                        <h3>Sets this minifig appears in ({catalogDetailParentSets.length})</h3>
-                        {catalogDetailParentSets.length === 0 ? (
-                          <p className="catalog-detail-listing-condition">No linked sets found for this minifig yet.</p>
-                        ) : (
-                          <div className="catalog-detail-minifig-list">
-                            {catalogDetailParentSets.map((setItem) => (
-                              <div key={setItem.item_id} className="catalog-detail-minifig-row">
-                                <button type="button" className="catalog-detail-minifig-rowmain" onClick={() => openCatalogItemById(setItem.item_id)}>
-                                  <span className="catalog-detail-parent-set-name">
-                                    {setItem.name}
-                                    {setItem.franchise ? <span className="catalog-detail-minifig-variant"> — {setItem.franchise}</span> : null}
-                                    {setItem.release_year ? <span className="catalog-detail-minifig-variant"> • {setItem.release_year}</span> : null}
-                                  </span>
-                                  <span className="catalog-detail-parent-set-meta">
-                                    {setItem.quantity > 1 ? `x${setItem.quantity} in set` : 'Included'}
-                                  </span>
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-                    )}
+                    {/* Item-to-item relationships now live under the universal
+                        "Related Items" tab (Includes / Included In). */}
 
                     {/* ── Item images ── */}
                     {(catalogItemImages.length > 0 || isPlatformAdmin) && (
@@ -18317,6 +18420,92 @@ function App() {
                       </div>
                     )}
                   </section>
+                ) : catalogDetailViewTab === 'related' ? (
+                  <section className="catalog-card catalog-detail-section related-items-panel" role="tabpanel" aria-label="Related items">
+                    {(() => {
+                      const hasAny = catalogDetailIncludes.length > 0 || catalogDetailIncludedIn.length > 0
+                      const RelCard = ({ item, mode }) => (
+                        <div className="related-card">
+                          <button type="button" className="related-card-main" onClick={() => openCatalogItemById(item.item_id)}>
+                            <div className="related-card-thumb">
+                              {item.imageUrl ? <img src={item.imageUrl} alt={item.name} loading="lazy" /> : <div className="related-card-thumb-missing">No image</div>}
+                            </div>
+                            <div className="related-card-body">
+                              <span className="related-card-name">{item.name}{item.quantity > 1 ? <span className="related-card-qty"> ×{item.quantity}</span> : null}</span>
+                              {item.description ? <span className="related-card-desc">{item.description}</span> : null}
+                              <span className="related-card-meta">
+                                {item.itemType ? <span className="related-card-type">{item.itemType}</span> : null}
+                                {item.idNumber ? <span className="related-card-id">{item.idNumber}</span> : null}
+                              </span>
+                            </div>
+                          </button>
+                          {isPlatformAdmin && (
+                            <button type="button" className="related-card-remove" disabled={relBusy}
+                              onClick={() => handleRemoveRelated(item.item_id, mode)} title="Remove relationship">✕</button>
+                          )}
+                        </div>
+                      )
+                      return (
+                        <>
+                          <div className="related-items-head">
+                            <h3>Related Items</h3>
+                            {isPlatformAdmin && (
+                              <div className="related-items-actions">
+                                <button type="button" className="catalog-action-pill" onClick={() => { setRelAddMode(relAddMode === 'child' ? null : 'child'); setRelSearch(''); setRelSearchResults([]) }}>+ Add Included Item</button>
+                                <button type="button" className="catalog-action-pill" onClick={() => { setRelAddMode(relAddMode === 'parent' ? null : 'parent'); setRelSearch(''); setRelSearchResults([]) }}>+ Add Parent Item</button>
+                              </div>
+                            )}
+                          </div>
+                          {relError ? <p className="catalog-admin-form-error">{relError}</p> : null}
+
+                          {isPlatformAdmin && relAddMode && (
+                            <div className="related-add-box">
+                              <p className="catalog-admin-hint">
+                                {relAddMode === 'child'
+                                  ? 'Search for an item this one includes (current item → includes → selected).'
+                                  : 'Search for a parent item that includes this one (selected → includes → current).'}
+                              </p>
+                              <input type="text" autoFocus placeholder="Search name, description, ID, barcode…" value={relSearch} onChange={(e) => setRelSearch(e.target.value)} />
+                              {relSearchResults.length > 0 && (
+                                <div className="related-search-results">
+                                  {relSearchResults.map((r) => (
+                                    <button key={r.item_id} type="button" className="related-search-result" disabled={relBusy}
+                                      onClick={() => handleAddRelatedItem(r.item_id, relAddMode)}>
+                                      <span className="related-search-name">{r.name}</span>
+                                      <span className="related-search-ctx">{[r.itemType, r.idNumber, r.franchise].filter(Boolean).join(' · ')}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {!hasAny ? (
+                            <p className="related-empty">No related items have been linked yet.</p>
+                          ) : (
+                            <>
+                              {catalogDetailIncludes.length > 0 && (
+                                <div className="related-section">
+                                  <h4>Includes ({catalogDetailIncludes.length})</h4>
+                                  <div className="related-grid">
+                                    {catalogDetailIncludes.map((it) => <RelCard key={it.item_id} item={it} mode="child" />)}
+                                  </div>
+                                </div>
+                              )}
+                              {catalogDetailIncludedIn.length > 0 && (
+                                <div className="related-section">
+                                  <h4>Included In ({catalogDetailIncludedIn.length})</h4>
+                                  <div className="related-grid">
+                                    {catalogDetailIncludedIn.map((it) => <RelCard key={it.item_id} item={it} mode="parent" />)}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </section>
                 ) : isPlatformAdmin ? (
                   <section className="catalog-card catalog-detail-section manage-images-panel" role="tabpanel" aria-label="Manage images">
                     <div className="manage-images-head">
@@ -18402,7 +18591,7 @@ function App() {
                         <p className="manage-images-jobline">Last search: <strong>{manageImagesJobs[0].status.replace(/_/g, ' ')}</strong>{manageImagesJobs[0].candidates_found ? ` · ${manageImagesJobs[0].candidates_found} found` : ''}{manageImagesJobs[0].error_message ? ` · ${manageImagesJobs[0].error_message}` : ''}</p>
                       ) : null}
                       {manageImagesCandidates.length === 0 ? (
-                        <p className="manage-images-empty">No candidates. Use “Find Images” to build a search job (no external provider is configured yet).</p>
+                        <p className="manage-images-empty">No candidates yet. Use “Find Images” to search Google for this item’s images.</p>
                       ) : (
                         <div className="manage-images-candidates-grid">
                           {manageImagesCandidates.map(cand => (
