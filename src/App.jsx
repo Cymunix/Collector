@@ -146,7 +146,8 @@ const CATEGORY_LABEL_OVERRIDES = {
     brand: 'Record Label',
     collectibleSet: 'Album',
     subset: 'Variant',
-    productLine: 'Property',
+    productLine: 'Product Line',
+    property: 'Property',
     subject: 'Artist(s)',
     hideFranchise: true,
   },
@@ -156,7 +157,8 @@ const CATEGORY_LABEL_OVERRIDES = {
     brand: 'Item Type',
     collectibleSet: 'Packaging',
     subset: 'Subtheme',
-    productLine: 'Property',
+    productLine: 'Product Line',
+    property: 'Property',
     subject: 'Subject(s)',
   },
 }
@@ -166,7 +168,8 @@ const DEFAULT_CATEGORY_LABELS = {
   brand: 'Brand',
   collectibleSet: 'Collectible Set',
   subset: 'Subset',
-  productLine: 'Property',
+  productLine: 'Product Line',
+  property: 'Property',
   subject: 'Subject(s)',
 }
 function getCategoryLabels(categoryName) {
@@ -187,7 +190,9 @@ const BULK_FIELD_MAP = {
   subcategory:     { aliases: ['subcategory', 'subcategories', 'sub_category'], band: 'taxonomy', label: 'Subcategory' },
   franchise:       { aliases: ['franchise', 'franchises', 'franchise_name'], band: 'taxonomy', label: 'Franchise' },
   subfranchise:    { aliases: ['subfranchise', 'subfranchises', 'subtheme', 'sub_theme', 'subset', 'subset_name'], band: 'taxonomy', label: 'Subfranchise' },
-  product_line:    { aliases: ['property', 'properties', 'product_line', 'product_lines', 'productline'], band: 'taxonomy', label: 'Property' },
+  property:        { aliases: ['property', 'properties'], band: 'taxonomy', label: 'Property' },
+  product_line:    { aliases: ['product_line', 'product_lines', 'productline'], band: 'taxonomy', label: 'Product Line' },
+  manufacturer:    { aliases: ['manufacturer', 'brand/manufacturer', 'brand_manufacturer', 'brandmanufacturer', 'maker'], band: 'taxonomy', label: 'Brand/Manufacturer' },
   item_type:       { aliases: ['item_type', 'item_types', 'itemtype', 'brand', 'brand_name'], band: 'taxonomy', label: 'Item Type' },
   series:          { aliases: ['series', 'series_name'], band: 'taxonomy', label: 'Series' },
   item_name:       { aliases: ['item', 'items', 'item_name', 'title'], band: 'taxonomy', label: 'Item' },
@@ -197,16 +202,16 @@ const BULK_FIELD_MAP = {
   id_number:       { aliases: ['id_number', 'idnumber', 'id_no', 'reference'], band: 'universal', label: 'ID Number' },
   release_year:    { aliases: ['release_year', 'year'], band: 'universal', label: 'Release Year' },
   availability:    { aliases: ['availability', 'available'], band: 'universal', label: 'Availability' },
-  barcode:         { aliases: ['barcode', 'barcodes', 'upc', 'ean'], band: 'universal', label: 'Barcode' },
+  barcode:         { aliases: ['barcode', 'barcodes', 'upc', 'ean', 'barcode/upc', 'upc/barcode'], band: 'universal', label: 'Barcode' },
   includes:        { aliases: ['includes', 'contains'], band: 'universal', label: 'Includes' },
   included_in:     { aliases: ['included_in', 'parent_set', 'parent_set_number', 'parent_set_bricklink_id'], band: 'universal', label: 'Included In' },
   image_url:       { aliases: ['image_url', 'img_url', 'image', 'photo_url', 'photo'], band: 'universal', label: 'Image URL' },
   // ── Building Blocks attributes ──
   lego_set_number: { aliases: ['lego_set_number', 'set_number', 'set_num', 'lego_number', 'set_id'], band: 'attribute', categories: ['Building Blocks'], label: 'Set Number' },
-  piece_count:     { aliases: ['piece_count', 'pieces', 'parts', 'num_parts'], band: 'attribute', categories: ['Building Blocks'], label: 'Piece Count' },
+  piece_count:     { aliases: ['piece_count', 'pieces', 'parts', 'num_parts'], band: 'attribute', categories: ['Building Blocks', 'Toys'], label: 'Piece Count' },
   bricklink_id:    { aliases: ['bricklink_id', 'bricklink', 'bl_id', 'catalog_code'], band: 'attribute', categories: ['Building Blocks'], label: 'BrickLink ID' },
   rebrickable_id:  { aliases: ['rebrickable_fig_id', 'rebrickable_id', 'rebrickable', 'rb_id', 'fig_num'], band: 'attribute', categories: ['Building Blocks'], label: 'Rebrickable ID' },
-  retail_price:    { aliases: ['retail_price', 'msrp', 'rrp', 'retail', 'price'], band: 'attribute', categories: ['Building Blocks'], label: 'Retail Price' },
+  retail_price:    { aliases: ['retail_price', 'msrp', 'rrp', 'retail', 'price'], band: 'attribute', categories: ['Building Blocks', 'Toys'], label: 'Retail Price' },
   minifig_code:    { aliases: ['minifig_code', 'internal_code'], band: 'attribute', categories: ['Building Blocks'], itemTypes: ['minifigure', 'minifig', 'minifigs'], label: 'Minifig Code' },
   species:         { aliases: ['species', 'species_name', 'race'], band: 'attribute', categories: ['Building Blocks'], itemTypes: ['minifigure', 'minifig', 'minifigs'], label: 'Species' },
   // ── Trading / Sports card attributes ──
@@ -1914,6 +1919,7 @@ function App() {
   const [relSearchResults, setRelSearchResults] = useState([])
   const [relBusy, setRelBusy] = useState(false)
   const [relError, setRelError] = useState('')
+  const [relAddQty, setRelAddQty] = useState('1')
   // Admin set↔minifig link editor.
   const [linkSearch, setLinkSearch] = useState('')
   const [linkResults, setLinkResults] = useState([])
@@ -1946,6 +1952,7 @@ function App() {
   const [wishlistViewTab, setWishlistViewTab] = useState('overview')
   const [wishlistCategoryFilter, setWishlistCategoryFilter] = useState('all')
   const [catalogListStats, setCatalogListStats] = useState({})
+  const [catalogItemNumbers, setCatalogItemNumbers] = useState({}) // item_id → set number / minifig code
   const [catalogThemeStats, setCatalogThemeStats] = useState(null)
   const [catalogListPricing, setCatalogListPricing] = useState({})
   const [catalogDetailStats, setCatalogDetailStats] = useState(null)
@@ -3332,17 +3339,32 @@ function App() {
     return () => { cancelled = true }
   }, [currentScreen, selectedCatalogFranchiseRecord?.id])
 
-  // Faceted filter: Product Line options for the selected Subtheme.
+  // Faceted filter: Product Line options for the selected Theme (franchise) — the
+  // "pick a Franchise first" flow. Product Line is subcategory-owned but franchise-
+  // associated; show only lines actually used by items in the selected franchise.
   useEffect(() => {
     if (currentScreen !== 'catalog') return
-    if (!catalogSubthemeId) { setCatalogProductLineOptions([]); setCatalogProductLineId(prev => prev ? '' : prev); return }
-    supabase.from('product_lines').select('product_line_id, name').eq('subset_id', catalogSubthemeId).order('name')
-      .then(({ data }) => {
-        const list = (data || []).map(r => ({ id: r.product_line_id, name: r.name }))
-        setCatalogProductLineOptions(list)
-        setCatalogProductLineId(prev => list.some(p => p.id === prev) ? prev : '')
-      })
-  }, [currentScreen, catalogSubthemeId])
+    const franchiseId = selectedCatalogFranchiseRecord?.id || ''
+    if (!franchiseId) { setCatalogProductLineOptions([]); setCatalogProductLineId(prev => prev ? '' : prev); return }
+    let cancelled = false
+    ;(async () => {
+      const { data: itemRows } = await supabase.from('items').select('item_id').eq('franchise_id', franchiseId)
+      const itemIds = (itemRows || []).map(r => r.item_id)
+      let list = []
+      if (itemIds.length) {
+        const { data: iplRows } = await supabase.from('item_product_lines').select('product_line_id').in('item_id', itemIds)
+        const plIds = [...new Set((iplRows || []).map(r => r.product_line_id))]
+        if (plIds.length) {
+          const { data } = await supabase.from('product_lines').select('product_line_id, name').in('product_line_id', plIds).order('name')
+          list = (data || []).map(r => ({ id: r.product_line_id, name: r.name }))
+        }
+      }
+      if (cancelled) return
+      setCatalogProductLineOptions(list)
+      setCatalogProductLineId(prev => list.some(p => p.id === prev) ? prev : '')
+    })()
+    return () => { cancelled = true }
+  }, [currentScreen, selectedCatalogFranchiseRecord?.id])
 
   // Faceted filter: Series options. When a Theme (franchise) is selected, show only
   // the Series actually used by items in that Theme (series link to items, not
@@ -4182,12 +4204,13 @@ function App() {
         const allIds = [...new Set([...childIds, ...parentIds])]
         if (allIds.length) {
           const [{ data: det }, { data: base }] = await Promise.all([
-            supabase.from('item_details').select('item_id, subject, description, brand, front_image_path, lego_set_number, print_type, release_year').in('item_id', allIds),
-            supabase.from('items').select('item_id, minifig_code, upc').in('item_id', allIds),
+            supabase.from('item_details').select('item_id, subject, description, brand, front_image_path, print_type, release_year').in('item_id', allIds),
+            supabase.from('items').select('item_id, name, minifig_code, upc, lego_set_number').in('item_id', allIds),
           ])
           const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
           const baseById = Object.fromEntries((base || []).map(b => [b.item_id, b]))
           const qtyChild = Object.fromEntries((childRows || []).map(r => [r.child_item_id, r.quantity]))
+          const qtyParent = Object.fromEntries((parentRows || []).map(r => [r.parent_item_id, r.quantity]))
           const na = (v) => (v && v !== 'N/A' ? v : '')
           const shape = (id, qty) => {
             const d = detById[id] || {}, b = baseById[id] || {}
@@ -4195,17 +4218,17 @@ function App() {
             const imageUrl = fp ? (fp.startsWith('http') ? fp : supabase.storage.from('item-images').getPublicUrl(fp).data?.publicUrl || '') : ''
             return {
               item_id: id,
-              name: na(d.subject) || na(d.description) || 'Item',
+              name: na(b.name) || na(d.subject) || na(d.description) || 'Item',
               description: na(d.print_type) || na(d.description) || '',
               itemType: na(d.brand),
-              idNumber: na(d.lego_set_number) || na(b.minifig_code) || na(b.upc) || '',
+              idNumber: na(b.lego_set_number) || na(b.minifig_code) || na(b.upc) || '',
               year: d.release_year || null,
               imageUrl,
               quantity: qty || 1,
             }
           }
           includes   = childIds.map(id => shape(id, qtyChild[id])).sort((a, b) => a.name.localeCompare(b.name))
-          includedIn = parentIds.map(id => shape(id, 1)).sort((a, b) => a.name.localeCompare(b.name))
+          includedIn = parentIds.map(id => shape(id, qtyParent[id])).sort((a, b) => a.name.localeCompare(b.name))
         }
       }
       if (!cancelled) { setCatalogDetailIncludes(includes); setCatalogDetailIncludedIn(includedIn) }
@@ -4231,15 +4254,27 @@ function App() {
   const handleAddRelatedItem = async (targetItemId, mode) => {
     if (!selectedCatalogItem?.id || !targetItemId) return
     if (targetItemId === selectedCatalogItem.id) { setRelError('An item cannot include itself.'); return }
+    const qty = Math.max(1, parseInt(relAddQty, 10) || 1)
     setRelBusy(true); setRelError('')
     const parent = mode === 'child' ? selectedCatalogItem.id : targetItemId
     const child  = mode === 'child' ? targetItemId : selectedCatalogItem.id
     const { error } = await supabase.from('catalog_item_relationships').upsert(
-      { parent_item_id: parent, child_item_id: child, relationship_type: 'includes', created_by: profile?.id || null },
-      { onConflict: 'parent_item_id,child_item_id,relationship_type', ignoreDuplicates: true })
+      { parent_item_id: parent, child_item_id: child, relationship_type: 'includes', quantity: qty, created_by: profile?.id || null },
+      { onConflict: 'parent_item_id,child_item_id,relationship_type' })
     if (error) { setRelError(error.message); setRelBusy(false); return }
     await mirrorSetMinifig(parent, child, 'add')
-    setRelAddMode(null); setRelSearch(''); setRelSearchResults([])
+    if (qty > 1) await supabase.from('set_minifigs').update({ quantity: qty }).eq('set_item_id', parent).eq('minifig_item_id', child)
+    setRelAddMode(null); setRelSearch(''); setRelSearchResults([]); setRelAddQty('1')
+    setRelBusy(false); setCatalogItemImagesReloadToken(t => t + 1)
+  }
+  // Update how many copies of a child are in the current (parent) item.
+  const handleRelSetQuantity = async (childItemId, rawQty) => {
+    if (!selectedCatalogItem?.id) return
+    const qty = Math.max(1, parseInt(rawQty, 10) || 1)
+    setRelBusy(true); setRelError('')
+    await supabase.from('catalog_item_relationships').update({ quantity: qty })
+      .eq('parent_item_id', selectedCatalogItem.id).eq('child_item_id', childItemId).eq('relationship_type', 'includes')
+    await supabase.from('set_minifigs').update({ quantity: qty }).eq('set_item_id', selectedCatalogItem.id).eq('minifig_item_id', childItemId)
     setRelBusy(false); setCatalogItemImagesReloadToken(t => t + 1)
   }
   const handleRemoveRelated = async (otherItemId, mode) => {
@@ -4275,17 +4310,21 @@ function App() {
         .filter(id => id !== selectedCatalogItem?.id).slice(0, 25)
       if (!ids.length) { if (!cancelled) setRelSearchResults([]); return }
       const [{ data: det }, { data: base }] = await Promise.all([
-        supabase.from('item_details').select('item_id, subject, description, brand, franchise, lego_set_number').in('item_id', ids),
-        supabase.from('items').select('item_id, minifig_code, upc').in('item_id', ids),
+        supabase.from('item_details').select('item_id, subject, description, brand, franchise').in('item_id', ids),
+        supabase.from('items').select('item_id, name, minifig_code, upc, lego_set_number').in('item_id', ids),
       ])
+      const detById = Object.fromEntries((det || []).map(d => [d.item_id, d]))
       const baseById = Object.fromEntries((base || []).map(b => [b.item_id, b]))
-      const results = (det || []).map(d => ({
-        item_id: d.item_id,
-        name: na(d.subject) || na(d.description) || 'Item',
-        itemType: na(d.brand),
-        franchise: na(d.franchise),
-        idNumber: na(d.lego_set_number) || na(baseById[d.item_id]?.minifig_code) || na(baseById[d.item_id]?.upc) || '',
-      })).sort((a, b) => a.name.localeCompare(b.name))
+      const results = ids.map(id => {
+        const d = detById[id] || {}, b = baseById[id] || {}
+        return {
+          item_id: id,
+          name: na(b.name) || na(d.subject) || na(d.description) || 'Item',
+          itemType: na(d.brand),
+          franchise: na(d.franchise),
+          idNumber: na(b.lego_set_number) || na(b.minifig_code) || na(b.upc) || '',
+        }
+      }).sort((a, b) => a.name.localeCompare(b.name))
       if (!cancelled) setRelSearchResults(results)
     }, 300)
     return () => { cancelled = true; clearTimeout(timer) }
@@ -4549,15 +4588,14 @@ function App() {
       .then(({ data }) => setCatalogAdminSubsetsList((data || []).map(r => ({ id: r.subset_id, name: r.name }))))
   }, [currentScreen, isPlatformAdmin, catalogAdminRealFranchiseId])
 
-  // Product Line options: under the selected Subtheme, or — since Subfranchise is
-  // optional — directly under the Theme (franchise) when no Subtheme is chosen.
+  // Property options (properties table). Constrained by the selected Subfranchise
+  // when one is chosen (e.g. Star Wars → "Fall of the Jedi" → only its properties);
+  // otherwise every Property for the Theme/franchise. (List var name kept for churn.)
   useEffect(() => {
-    if (currentScreen !== 'catalog' || !isPlatformAdmin) { setCatalogAdminProductLinesList([]); return }
-    let q = supabase.from('product_lines').select('product_line_id, name').order('name')
+    if (currentScreen !== 'catalog' || !isPlatformAdmin || !catalogAdminRealFranchiseId) { setCatalogAdminProductLinesList([]); return }
+    let q = supabase.from('properties').select('property_id, name').eq('franchise_id', catalogAdminRealFranchiseId).order('name')
     if (catalogAdminSubsetSel) q = q.eq('subset_id', catalogAdminSubsetSel)
-    else if (catalogAdminRealFranchiseId) q = q.eq('franchise_id', catalogAdminRealFranchiseId).is('subset_id', null)
-    else { setCatalogAdminProductLinesList([]); return }
-    q.then(({ data, error }) => setCatalogAdminProductLinesList(error ? [] : (data || []).map(r => ({ id: r.product_line_id, name: r.name }))))
+    q.then(({ data, error }) => setCatalogAdminProductLinesList(error ? [] : (data || []).map(r => ({ id: r.property_id, name: r.name }))))
   }, [currentScreen, isPlatformAdmin, catalogAdminSubsetSel, catalogAdminRealFranchiseId])
 
   // Packaging (repurposed collectible_sets — global rows, no brand) — independent.
@@ -5445,6 +5483,22 @@ function App() {
     })
     return () => { cancelled = true }
   }, [catalogItems, catalogViewMode])
+
+  // Item numbers (set number / minifig code) aren't in item_details; fetch from
+  // items so cards can show an identifier instead of "Unassigned set". Runs for
+  // both grid and list views.
+  useEffect(() => {
+    if (catalogItems.length === 0) { setCatalogItemNumbers({}); return }
+    let cancelled = false
+    const ids = catalogItems.map((i) => i.id)
+    supabase.from('items').select('item_id, lego_set_number, minifig_code, bricklink_id, upc').in('item_id', ids).then(({ data }) => {
+      if (cancelled || !Array.isArray(data)) return
+      const map = {}
+      for (const r of data) map[r.item_id] = r.lego_set_number || r.minifig_code || r.bricklink_id || r.upc || ''
+      setCatalogItemNumbers(map)
+    })
+    return () => { cancelled = true }
+  }, [catalogItems])
 
   // Community/theme analytics for the Context panel (when a single theme is selected).
   const catalogThemeFranchiseId = selectedCatalogFranchiseRecord?.id || ''
@@ -8547,12 +8601,21 @@ function App() {
       setCatalogAdminSubsetsList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
       setCatalogAdminSubsetSel(data.subset_id)
     } else if (field === 'productLine') {
-      // Product Line anchors to the Theme; Subtheme is optional (may be null).
-      const { data, error } = await supabase.from('product_lines').insert({ name, franchise_id: catalogAdminRealFranchiseId, subset_id: catalogAdminSubsetSel || null }).select('product_line_id').single()
+      // Product Line is owned by the Subcategory (manufacturer) and associated with
+      // the Theme/franchise for the "pick a Franchise first" flow.
+      const { data, error } = await supabase.from('product_lines').insert({ name, subcategory_id: catalogAdminSubcategoryId || null, franchise_id: catalogAdminRealFranchiseId || null }).select('product_line_id').single()
       if (error) { fail(error.message); return }
       const item = { id: data.product_line_id, name }
       setCatalogAdminProductLinesList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
       setCatalogAdminProductLineIds([data.product_line_id])
+    } else if (field === 'property') {
+      // Property is the IP sub-level, anchored to the Franchise and (optionally) the
+      // Subfranchise — so a new one is scoped to the currently-selected subfranchise.
+      const { data, error } = await supabase.from('properties').insert({ name, franchise_id: catalogAdminRealFranchiseId || null, subset_id: catalogAdminSubsetSel || null }).select('property_id').single()
+      if (error) { fail(error.message); return }
+      const item = { id: data.property_id, name }
+      setCatalogAdminProductLinesList(prev => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)))
+      setCatalogAdminProductLineIds([data.property_id])
     } else if (field === 'series') {
       const { data, error } = await supabase.from('series').insert({ name, subcategory_id: catalogAdminSubcategoryId }).select('series_id').single()
       if (error) { fail(error.message); return }
@@ -8591,7 +8654,7 @@ function App() {
   }
 
   // ── Bulk Import helpers ──────────────────────────────────────────────────
-  const parseBulkImportCsv = (text) => {
+  const parseBulkImportCsv = (text, categoryName = '') => {
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n')
     if (lines.length < 2) return []
     const parseRow = (line) => {
@@ -8614,8 +8677,13 @@ function App() {
     rawHeaders.forEach((raw, i) => {
       const norm = BULK_HEADER_NORMALIZE(raw)
       const field = BULK_ALIAS_TO_FIELD[norm]
-      if (field && fieldIndex[field] === undefined) fieldIndex[field] = i
-      else if (!field && norm) unknownHeaders.push({ header: raw.trim(), index: i })
+      const def = field ? BULK_FIELD_MAP[field] : null
+      // Enforce the per-category gate: a field limited to certain categories is only
+      // accepted when the selected category matches. So a Toys import recognises only
+      // its valid fields; a stray LEGO/card column is surfaced as unknown, not mapped.
+      const allowedForCategory = def && (!def.categories || !categoryName || def.categories.includes(categoryName))
+      if (field && allowedForCategory && fieldIndex[field] === undefined) fieldIndex[field] = i
+      else if (norm) unknownHeaders.push({ header: raw.trim(), index: i })
     })
     const unknownList = unknownHeaders.map(u => u.header)
     return lines.slice(1).filter(l => l.trim()).map((line, idx) => {
@@ -8640,7 +8708,9 @@ function App() {
         franchise_name: gv('franchise'),
         brand_name: gv('item_type'),
         subtheme_name: gv('subfranchise'),
+        property_names: gv('property'),
         product_line_names: gv('product_line'),
+        manufacturer_name: gv('manufacturer'),
         series_name: gv('series'),
         subset_id: '',
         product_line_ids: [],
@@ -8724,14 +8794,14 @@ function App() {
         const reports = []
         for (const sheetName of wb.SheetNames) {
           const csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName])
-          const rs = parseBulkImportCsv(csv)
+          const rs = parseBulkImportCsv(csv, selectedCatalogAdminCategoryName)
           const usable = rs.filter(isUsable)
           reports.push({ sheet: sheetName, rows: rs.length, usable: usable.length, included: usable.length > 0 })
           if (usable.length > 0) parsedRows = parsedRows.concat(rs.map(r => ({ ...r, _sheet: sheetName })))
         }
         if (wb.SheetNames.length > 1) sheetSummary = reports
       } else {
-        parsedRows = parseBulkImportCsv(e.target.result)
+        parsedRows = parseBulkImportCsv(e.target.result, selectedCatalogAdminCategoryName)
       }
       setBulkImportSheetSummary(sheetSummary)
       let rows = parsedRows.map(r => ({
@@ -8932,7 +9002,8 @@ function App() {
     const brandIdCache         = new Map() // `${franchise_id}::${name_lc}` → brand_id
     const collectibleSetIdCache = new Map() // `${franchise_id}::${brand_id}::${name_lc}` → collectible_set_id
     const subsetIdCache        = new Map() // `${franchise_id}::${name_lc}` → subset_id
-    const productLineIdCache   = new Map() // `${subset_id}::${name_lc}` → product_line_id
+    const productLineIdCache   = new Map() // `${subcategory_id}::${name_lc}` → product_line_id
+    const propertyIdCache      = new Map() // `${franchise_id}::${name_lc}` → property_id
     const franchiseLegoAbbrCache = new Map() // franchise_id → lego_abbreviation
     const mintedCodeCounters  = new Map() // prefix → last minted NN (in-memory, seeded from DB on first use)
 
@@ -8966,17 +9037,39 @@ function App() {
       return `${prefix}-${String(nextNN).padStart(2, '0')}`
     }
 
-    const resolveOrCreateFranchise = async (name) => {
+    // Brand/Manufacturer maps to the Subcategory (manufacturer/publisher). Resolved
+    // per-row from the sheet when present, else the admin's UI selection is used.
+    const subcategoryIdCache = new Map()
+    const resolveOrCreateSubcategory = async (name, categoryId) => {
+      if (!name?.trim() || !categoryId) return null
+      const key = `${categoryId}::${name.trim().toLowerCase()}`
+      if (subcategoryIdCache.has(key)) return subcategoryIdCache.get(key)
+      const { data: found } = await supabase.from('subcategories').select('subcategory_id').ilike('name', name.trim()).eq('category_id', categoryId).limit(1).maybeSingle()
+      let id = found?.subcategory_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('subcategories').insert({ name: name.trim(), category_id: categoryId }).select('subcategory_id').single()
+        id = created?.subcategory_id || null
+      }
+      if (id) subcategoryIdCache.set(key, id)
+      return id
+    }
+
+    const resolveOrCreateFranchise = async (name, subcategoryId) => {
       const key = name.trim().toLowerCase()
-      if (franchiseIdCache.has(key)) return franchiseIdCache.get(key)
+      const subId = subcategoryId || catalogAdminSubcategoryId
+      if (franchiseIdCache.has(key)) {
+        const id = franchiseIdCache.get(key)
+        if (id && subId) await supabase.from('franchise_subcategory').upsert({ franchise_id: id, subcategory_id: subId }, { onConflict: 'franchise_id,subcategory_id', ignoreDuplicates: true })
+        return id
+      }
       const { data: found } = await supabase.from('franchises').select('franchise_id').ilike('name', name.trim()).limit(1).maybeSingle()
       let id = found?.franchise_id || null
       if (!id) {
         const { data: created } = await supabase.from('franchises').insert({ name: name.trim() }).select('franchise_id').single()
         id = created?.franchise_id || null
       }
-      if (id && catalogAdminSubcategoryId) {
-        await supabase.from('franchise_subcategory').upsert({ franchise_id: id, subcategory_id: catalogAdminSubcategoryId }, { onConflict: 'franchise_id,subcategory_id', ignoreDuplicates: true })
+      if (id && subId) {
+        await supabase.from('franchise_subcategory').upsert({ franchise_id: id, subcategory_id: subId }, { onConflict: 'franchise_id,subcategory_id', ignoreDuplicates: true })
       }
       if (id) franchiseIdCache.set(key, id)
       return id
@@ -9055,20 +9148,37 @@ function App() {
       if (id) subsetIdCache.set(key, id)
       return id
     }
-    // Product Line anchors to the Theme; the Subtheme is optional, so a line can
-    // sit directly under the franchise (subset_id null).
-    const resolveOrCreateProductLine = async (name, subsetId, franchiseId) => {
-      if (!name?.trim() || (!subsetId && !franchiseId)) return null
-      const key = `${subsetId || 'F:' + franchiseId}::${name.trim().toLowerCase()}`
+    // Property = IP sub-level under the Franchise (Episode VI, Jurassic Park).
+    // Anchors to the Theme/franchise; Subtheme optional. Stored in `properties`.
+    const resolveOrCreateProperty = async (name, subsetId, franchiseId) => {
+      if (!name?.trim() || !franchiseId) return null
+      const key = `P::${franchiseId}::${name.trim().toLowerCase()}`
+      if (propertyIdCache.has(key)) return propertyIdCache.get(key)
+      const { data: found } = await supabase.from('properties').select('property_id')
+        .ilike('name', name.trim()).eq('franchise_id', franchiseId).limit(1).maybeSingle()
+      let id = found?.property_id || null
+      if (!id) {
+        const { data: created } = await supabase.from('properties')
+          .insert({ name: name.trim(), franchise_id: franchiseId, subset_id: subsetId || null })
+          .select('property_id').single()
+        id = created?.property_id || null
+      }
+      if (id) propertyIdCache.set(key, id)
+      return id
+    }
+    // Product Line = commercial toy line owned by the manufacturer/Subcategory
+    // (Micro Galaxy Squadron, Mystery Minis), franchise associated. Stored in
+    // the (repurposed) `product_lines` table.
+    const resolveOrCreateProductLine = async (name, subcategoryId, franchiseId) => {
+      if (!name?.trim() || !subcategoryId) return null
+      const key = `PL::${subcategoryId}::${name.trim().toLowerCase()}`
       if (productLineIdCache.has(key)) return productLineIdCache.get(key)
-      let q = supabase.from('product_lines').select('product_line_id').ilike('name', name.trim())
-      if (subsetId) q = q.eq('subset_id', subsetId)
-      else q = q.eq('franchise_id', franchiseId).is('subset_id', null)
-      const { data: found } = await q.limit(1).maybeSingle()
+      const { data: found } = await supabase.from('product_lines').select('product_line_id')
+        .ilike('name', name.trim()).eq('subcategory_id', subcategoryId).limit(1).maybeSingle()
       let id = found?.product_line_id || null
       if (!id) {
         const { data: created } = await supabase.from('product_lines')
-          .insert({ name: name.trim(), subset_id: subsetId || null, franchise_id: franchiseId || null })
+          .insert({ name: name.trim(), subcategory_id: subcategoryId, franchise_id: franchiseId || null })
           .select('product_line_id').single()
         id = created?.product_line_id || null
       }
@@ -9097,7 +9207,11 @@ function App() {
       let rowBrandId         = null
       let rowCollectibleSetId = null
       let rowSubsetId        = null
-      if (row.franchise_name?.trim()) rowFranchiseId = await resolveOrCreateFranchise(row.franchise_name)
+      // Brand/Manufacturer (per-row) → Subcategory; falls back to the UI selection.
+      const rowSubcategoryId = row.manufacturer_name?.trim()
+        ? (await resolveOrCreateSubcategory(row.manufacturer_name, catalogAdminCategoryId)) || catalogAdminSubcategoryId
+        : catalogAdminSubcategoryId
+      if (row.franchise_name?.trim()) rowFranchiseId = await resolveOrCreateFranchise(row.franchise_name, rowSubcategoryId)
       if (row.brand_name?.trim() && rowFranchiseId) rowBrandId = await resolveOrCreateBrand(row.brand_name, rowFranchiseId)
       // Minifigs don't have packaging — skip resolving a collectible_set for them.
       const rowBlIdForPkg = row.bricklink_id?.trim() || ''
@@ -9107,7 +9221,7 @@ function App() {
       rowSubsetId = row.subset_id || (row.subtheme_name?.trim() ? await resolveOrCreateSubset(row.subtheme_name, rowFranchiseId) : null)
       // ── Series (facet) — resolve the CSV name against this Subcategory ──
       const rowSeriesId = row.series_name?.trim()
-        ? await resolveOrCreateSeries(row.series_name, catalogAdminSubcategoryId)
+        ? await resolveOrCreateSeries(row.series_name, rowSubcategoryId)
         : null
       // ── Building Blocks: reuse existing minifig by bricklink_id OR fig-num ──
       // Minifigs are identified by their Rebrickable fig-num (the spec's dedupe
@@ -9173,7 +9287,7 @@ function App() {
       const { data: created, error } = await supabase.from('items').insert({
         name:                 row.item_name?.trim()         || null,
         category_id:          catalogAdminCategoryId        || null,
-        subcategory_id:       catalogAdminSubcategoryId      || null,
+        subcategory_id:       rowSubcategoryId              || null,
         franchise_id:         rowFranchiseId                || null,
         brand_id:             rowBrandId                    || null,
         collectible_set_id:   rowCollectibleSetId           || null,
@@ -9242,15 +9356,27 @@ function App() {
         const { error: tmErr } = await supabase.from('item_teams').insert(row.team_ids.map(tid => ({ item_id: created.item_id, team_id: tid })))
         if (tmErr) console.error('item_teams insert error (bulk):', tmErr)
       }
-      // ── Faceted: Product Lines (m2m) — picked ids + any CSV names to resolve.
-      // Works with a Subtheme or directly under the Theme (Subfranchise optional).
-      if (rowSubsetId || rowFranchiseId) {
-        const plIds = new Set(row.product_line_ids || [])
-        if (row.product_line_names?.trim()) {
-          for (const nm of row.product_line_names.split(';').map(s => s.trim()).filter(Boolean)) {
-            const plId = await resolveOrCreateProductLine(nm, rowSubsetId, rowFranchiseId)
-            if (plId) plIds.add(plId)
+      // ── Faceted: Property (IP sub-level) — resolves against the Franchise. ──
+      if (rowFranchiseId && (row.property_names?.trim() || (row.product_line_ids || []).length)) {
+        const propIds = new Set(row.product_line_ids || []) // picked ids target properties
+        if (row.property_names?.trim()) {
+          for (const nm of row.property_names.split(';').map(s => s.trim()).filter(Boolean)) {
+            const pid = await resolveOrCreateProperty(nm, rowSubsetId, rowFranchiseId)
+            if (pid) propIds.add(pid)
           }
+        }
+        if (propIds.size > 0) {
+          const { error: prErr } = await supabase.from('item_properties')
+            .insert([...propIds].map(pid => ({ item_id: created.item_id, property_id: pid })))
+          if (prErr) console.error('item_properties insert error (bulk):', prErr)
+        }
+      }
+      // ── Faceted: Product Line (commercial line) — owned by the Subcategory. ──
+      if (rowSubcategoryId && row.product_line_names?.trim()) {
+        const plIds = new Set()
+        for (const nm of row.product_line_names.split(';').map(s => s.trim()).filter(Boolean)) {
+          const plId = await resolveOrCreateProductLine(nm, rowSubcategoryId, rowFranchiseId)
+          if (plId) plIds.add(plId)
         }
         if (plIds.size > 0) {
           const { error: plErr } = await supabase.from('item_product_lines')
@@ -9304,27 +9430,35 @@ function App() {
         codeCache.set(key, hit)
         return hit
       }
-      const linkPair = async (parent, child) => {
+      const linkPair = async (parent, child, qty = 1) => {
         if (!parent || !child || parent.itemId === child.itemId) return
-        // Universal relationship (source of truth for the Related Items tab).
+        // Universal relationship (source of truth for the Related Items tab). Update
+        // quantity on conflict so a re-import with a higher count is reflected.
         await supabase.from('catalog_item_relationships').upsert(
-          { parent_item_id: parent.itemId, child_item_id: child.itemId, relationship_type: 'includes', created_by: profile?.id || null },
-          { onConflict: 'parent_item_id,child_item_id,relationship_type', ignoreDuplicates: true })
+          { parent_item_id: parent.itemId, child_item_id: child.itemId, relationship_type: 'includes', quantity: qty, created_by: profile?.id || null },
+          { onConflict: 'parent_item_id,child_item_id,relationship_type' })
         // Mirror set↔minifig into legacy set_minifigs so LEGO completion stays correct.
         if (child.isMinifig && !parent.isMinifig) {
           await supabase.from('set_minifigs').upsert(
-            { set_item_id: parent.itemId, minifig_item_id: child.itemId, quantity: 1 },
-            { onConflict: 'set_item_id,minifig_item_id', ignoreDuplicates: true })
+            { set_item_id: parent.itemId, minifig_item_id: child.itemId, quantity: qty },
+            { onConflict: 'set_item_id,minifig_item_id' })
         }
       }
-      const splitCodes = (v) => String(v || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)
+      // Parse a code token that may carry a quantity: "atl015 x2" / "atl015*2" /
+      // "atl015 (2)" → { code:'atl015', qty:2 }. Bare code → qty 1.
+      const parseCode = (raw) => {
+        const s = String(raw || '').trim()
+        let m = s.match(/^(.+?)\s*[x×*]\s*(\d+)$/i) || s.match(/^(.+?)\s*\((\d+)\)$/)
+        return m ? { code: m[1].trim(), qty: Math.max(1, parseInt(m[2], 10)) } : { code: s, qty: 1 }
+      }
+      const splitCodes = (v) => String(v || '').split(/[,;]/).map(s => s.trim()).filter(Boolean).map(parseCode)
       for (const { itemId, row } of savedItems) {
         const self = { itemId, isMinifig: /minifig/i.test(row.brand_name || '') || !!(row.minifig_code && row.minifig_code.trim()) }
-        for (const code of splitCodes(row.parent_set_bricklink_id)) { // Included In: parent contains self
-          await linkPair(await resolveByCode(code), self)
+        for (const { code, qty } of splitCodes(row.parent_set_bricklink_id)) { // Included In: parent contains self
+          await linkPair(await resolveByCode(code), self, qty)
         }
-        for (const code of splitCodes(row.includes)) {                 // Includes: self contains child
-          await linkPair(self, await resolveByCode(code))
+        for (const { code, qty } of splitCodes(row.includes)) {                 // Includes: self contains child
+          await linkPair(self, await resolveByCode(code), qty)
         }
       }
     }
@@ -9643,8 +9777,9 @@ function App() {
     }
     // Product Line is many-to-many (an item can belong to several).
     if (createdItem?.item_id && catalogAdminProductLineIds.length > 0) {
-      await supabase.from('item_product_lines').insert(
-        catalogAdminProductLineIds.map(plid => ({ item_id: createdItem.item_id, product_line_id: plid }))
+      // catalogAdminProductLineIds holds Property ids (create-form Property picker).
+      await supabase.from('item_properties').insert(
+        catalogAdminProductLineIds.map(pid => ({ item_id: createdItem.item_id, property_id: pid }))
       )
     }
 
@@ -15461,7 +15596,7 @@ function App() {
                       <div className="catalog-results-grid">
                         {paginatedCatalogItems.map((item) => {
                           const categoryName     = catalogCategoryById[item.category_id] || ''
-                          const franchiseName    = item._set_name || 'Unassigned set'
+                          const franchiseName    = item._set_name || catalogItemNumbers[item.id] || 'Unassigned set'
                           const franchiseBrandName = item._franchise_name || ''
                           const subsetName       = item._details?.subcollectible_set || ''
                           const isCard           = CARD_CONDITION_CATEGORIES.has(categoryName)
@@ -16301,6 +16436,73 @@ function App() {
                                         </div>
                                       )}
                                       <div className="bulk-import-editor-fields">
+                                        {selectedCatalogAdminCategoryName === 'Toys' ? (<>
+                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide">
+                                            <label>Subject</label>
+                                            <div className="catalog-admin-subject-search-wrap">
+                                              <input
+                                                type="text"
+                                                value={cur.subjectObj ? cur.subjectObj.name : (cur.item_name || '')}
+                                                onChange={e => {
+                                                  const v = e.target.value
+                                                  // Subject IS the item name — keep both in step and drop any
+                                                  // previously-matched subject so it re-resolves as you type.
+                                                  updateBulkRow(bulkImportIdx, { item_name: v, subject_name: v, subjectObj: null })
+                                                  setBulkImportSubjectSearch(v)
+                                                }}
+                                                placeholder="e.g. Imperial Speeder Bike"
+                                                autoComplete="off"
+                                              />
+                                              {!cur.subjectObj && bulkImportSubjectResults.length > 0 && (
+                                                <div className="catalog-admin-subject-results">
+                                                  {bulkImportSubjectResults.map(s => (
+                                                    <button key={s.id} type="button" className="catalog-admin-subject-result"
+                                                      onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: s, subject_name: s.name, item_name: s.name }); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>
+                                                      <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
+                                                      <span className="catalog-admin-hint"> · {s.type}</span>
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </div>
+                                            {cur.subjectObj ? (
+                                              <span className="bulk-subject-state bulk-subject-existing">
+                                                ✓ Using existing subject{cur.subjectObj.type ? ` · ${cur.subjectObj.type}` : ''}
+                                                <button type="button" className="bulk-import-subject-search-link" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: null }); setBulkImportSubjectSearch(cur.subjectObj.name) }}>change</button>
+                                              </span>
+                                            ) : (cur.item_name || '').trim() ? (
+                                              <span className="bulk-subject-state bulk-subject-new">＋ Will create a new subject</span>
+                                            ) : null}
+                                          </div>
+                                          <div className="bulk-import-editor-field"><label>Franchise</label><input type="text" value={cur.franchise_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { franchise_name: e.target.value })} placeholder="e.g. Star Wars" /></div>
+                                          <div className="bulk-import-editor-field"><label>Subfranchise</label><input type="text" value={cur.subtheme_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { subtheme_name: e.target.value })} placeholder="e.g. Age of Rebellion" /></div>
+                                          <div className="bulk-import-editor-field"><label>Product Line</label><input type="text" value={cur.product_line_names || ''} onChange={e => updateBulkRow(bulkImportIdx, { product_line_names: e.target.value })} placeholder="e.g. Micro Galaxy Squadron" /></div>
+                                          <div className="bulk-import-editor-field"><label>Property</label><input type="text" value={cur.property_names || ''} onChange={e => updateBulkRow(bulkImportIdx, { property_names: e.target.value })} placeholder="e.g. Return of the Jedi" /></div>
+                                          <div className="bulk-import-editor-field"><label>Brand/Manufacturer</label><input type="text" value={cur.manufacturer_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { manufacturer_name: e.target.value })} placeholder="e.g. Jazwares" /></div>
+                                          <div className="bulk-import-editor-field"><label>Item Type</label><input type="text" value={cur.brand_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { brand_name: e.target.value })} placeholder="e.g. Vehicle" /></div>
+                                          <div className="bulk-import-editor-field"><label>Series</label><input type="text" value={cur.series_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { series_name: e.target.value })} placeholder="e.g. Series 1" /></div>
+                                          <div className="bulk-import-editor-field"><label>ID Number</label><input type="text" value={cur.lego_set_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { lego_set_number: e.target.value })} placeholder="Manufacturer / catalogue #" /></div>
+                                          <div className="bulk-import-editor-field"><label>Piece Count</label><input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} /></div>
+                                          <div className="bulk-import-editor-field"><label>Retail Price</label><input type="number" step="0.01" min="0" value={cur.retail_price || ''} onChange={e => updateBulkRow(bulkImportIdx, { retail_price: e.target.value })} /></div>
+                                          <div className="bulk-import-editor-field"><label>Release Year</label><input type="number" min="1900" max="2100" value={cur.release_year || ''} onChange={e => updateBulkRow(bulkImportIdx, { release_year: e.target.value })} /></div>
+                                          <div className="bulk-import-editor-field"><label>Availability</label><input type="text" value={cur.availability || ''} onChange={e => updateBulkRow(bulkImportIdx, { availability: e.target.value })} placeholder="e.g. Retired" /></div>
+                                          <div className="bulk-import-editor-field"><label>Barcode/UPC</label><input type="text" value={cur.upc || ''} onChange={e => updateBulkRow(bulkImportIdx, { upc: e.target.value })} /></div>
+                                          <div className="bulk-import-editor-field"><label>Includes</label><input type="text" value={cur.includes || ''} onChange={e => updateBulkRow(bulkImportIdx, { includes: e.target.value })} placeholder="child IDs (comma-separated)" /></div>
+                                          <div className="bulk-import-editor-field"><label>Included In</label><input type="text" value={cur.parent_set_bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { parent_set_bricklink_id: e.target.value })} placeholder="parent IDs (comma-separated)" /></div>
+                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide"><label>Description</label><textarea rows={2} value={cur.description || ''} onChange={e => updateBulkRow(bulkImportIdx, { description: e.target.value })} /></div>
+                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide bulk-import-image-field">
+                                            <label>Photo</label>
+                                            <div className="bulk-import-image-row">
+                                              {(cur.image_preview || cur.image_url) && <img src={cur.image_preview || cur.image_url} alt="preview" className="bulk-import-image-thumb" onError={e => { e.target.style.display = 'none' }} />}
+                                              <div className="bulk-import-image-controls">
+                                                <input type="text" placeholder="Image URL (from CSV or paste)" value={cur.image_url || ''} onChange={e => updateBulkRow(bulkImportIdx, { image_url: e.target.value, image_file: null, image_preview: '' })} />
+                                                <span className="bulk-import-image-or">or</span>
+                                                <label className="bulk-import-image-upload-btn">Upload file<input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateBulkRow(bulkImportIdx, { image_file: f, image_preview: URL.createObjectURL(f), image_url: '' }) }} /></label>
+                                                {(cur.image_file || cur.image_url) && <button type="button" className="bulk-import-image-clear" onClick={() => updateBulkRow(bulkImportIdx, { image_file: null, image_preview: '', image_url: '' })}>✕</button>}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </>) : (<>
                                         <div className="bulk-import-editor-field">
                                           <label>Item Name <span className="catalog-admin-hint">(= Subject)</span></label>
                                           <input type="text" value={cur.item_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { item_name: e.target.value, subject_name: e.target.value, subjectObj: null })} placeholder="e.g. City of Atlantis" />
@@ -16419,6 +16621,7 @@ function App() {
                                           <label>Series <span className="catalog-admin-hint">(optional)</span></label>
                                           <input type="text" value={cur.series_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { series_name: e.target.value })} placeholder="e.g. UCS, Topps Chrome" />
                                         </div>
+                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
                                         <div className="bulk-import-editor-field">
                                           <label>Print Type</label>
                                           <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
@@ -16443,6 +16646,7 @@ function App() {
                                             <button type="button" className="catalog-admin-create-inline-link" style={{ marginTop: 2 }} onClick={() => setBulkImportCreatingPrintType(true)}>＋ New print type</button>
                                           )}
                                         </div>
+                                        )}
                                         {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogRarities.length > 0 && (
                                           <div className="bulk-import-editor-field">
                                             <label>Rarity</label>
@@ -16452,14 +16656,18 @@ function App() {
                                             </select>
                                           </div>
                                         )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>BrickLink ID</label>
-                                          <input type="text" value={cur.bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { bricklink_id: e.target.value })} placeholder="e.g. col473" />
-                                        </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>Rebrickable ID</label>
-                                          <input type="text" value={cur.rebrickable_fig_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rebrickable_fig_id: e.target.value })} placeholder="e.g. fig-001234" />
-                                        </div>
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>BrickLink ID</label>
+                                            <input type="text" value={cur.bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { bricklink_id: e.target.value })} placeholder="e.g. col473" />
+                                          </div>
+                                        )}
+                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
+                                          <div className="bulk-import-editor-field">
+                                            <label>Rebrickable ID</label>
+                                            <input type="text" value={cur.rebrickable_fig_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rebrickable_fig_id: e.target.value })} placeholder="e.g. fig-001234" />
+                                          </div>
+                                        )}
                                         {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) ? (
                                           <div className="bulk-import-editor-field">
                                             <label>Print Count</label>
@@ -16599,6 +16807,7 @@ function App() {
                                             </div>
                                           </div>
                                         </div>
+                                        </>)}
                                       </div>
                                       {cur.errorMsg && <p className="catalog-admin-error" style={{ marginTop: 8 }}>{cur.errorMsg}</p>}
                                       <div className="bulk-import-actions">
@@ -16707,19 +16916,19 @@ function App() {
                           </div>
                           {/* Product Line — under the Theme; Subtheme optional */}
                           <div>
-                            <label htmlFor="cai-productline">{getCategoryLabels('Building Blocks').productLine} {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a theme first)</span>}</label>
+                            <label htmlFor="cai-productline">{getCategoryLabels(selectedCatalogAdminCategoryName).property} {!catalogAdminRealFranchiseId ? <span className="catalog-admin-hint">(select a theme first)</span> : (!catalogAdminSubsetSel && <span className="catalog-admin-hint">(all — or pick a subfranchise to narrow)</span>)}</label>
                             <select id="cai-productline" value={catalogAdminProductLineIds[0] || ''} onChange={e => setCatalogAdminProductLineIds(e.target.value ? [e.target.value] : [])} disabled={!catalogAdminRealFranchiseId}>
                               <option value="">None</option>
                               {catalogAdminProductLinesList.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
                             </select>
-                            {catalogAdminRealFranchiseId && (catalogAdminInlineCreate.field === 'productLine' ? (
+                            {catalogAdminRealFranchiseId && (catalogAdminInlineCreate.field === 'property' ? (
                               <div className="catalog-admin-inline-create">
-                                <input autoFocus className="catalog-admin-inline-input" placeholder="Product line name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
+                                <input autoFocus className="catalog-admin-inline-input" placeholder="Property name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
                                 <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
                                 <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
                                 {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
                               </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'productLine', value: '', subjectType: 'player' })}>+ New {getCategoryLabels('Building Blocks').productLine}</button>)}
+                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'property', value: '', subjectType: 'player' })}>+ New {getCategoryLabels(selectedCatalogAdminCategoryName).property}</button>)}
                           </div>
                           {/* Item Type — taxonomy order: after Product Line, before Series */}
                           <div>
@@ -18439,6 +18648,13 @@ function App() {
                               </span>
                             </div>
                           </button>
+                          {isPlatformAdmin && mode === 'child' && (
+                            <label className="related-card-qtyedit" title="Copies in this item" onClick={(e) => e.stopPropagation()}>
+                              ×<input type="number" min="1" defaultValue={item.quantity} disabled={relBusy}
+                                onClick={(e) => e.stopPropagation()}
+                                onBlur={(e) => { const v = Math.max(1, parseInt(e.target.value, 10) || 1); if (v !== item.quantity) handleRelSetQuantity(item.item_id, v) }} />
+                            </label>
+                          )}
                           {isPlatformAdmin && (
                             <button type="button" className="related-card-remove" disabled={relBusy}
                               onClick={() => handleRemoveRelated(item.item_id, mode)} title="Remove relationship">✕</button>
@@ -18465,7 +18681,14 @@ function App() {
                                   ? 'Search for an item this one includes (current item → includes → selected).'
                                   : 'Search for a parent item that includes this one (selected → includes → current).'}
                               </p>
-                              <input type="text" autoFocus placeholder="Search name, description, ID, barcode…" value={relSearch} onChange={(e) => setRelSearch(e.target.value)} />
+                              <div className="related-add-controls">
+                                <input type="text" autoFocus placeholder="Search name, description, ID, barcode…" value={relSearch} onChange={(e) => setRelSearch(e.target.value)} />
+                                {relAddMode === 'child' && (
+                                  <label className="related-add-qty">Qty
+                                    <input type="number" min="1" value={relAddQty} onChange={(e) => setRelAddQty(e.target.value)} />
+                                  </label>
+                                )}
+                              </div>
                               {relSearchResults.length > 0 && (
                                 <div className="related-search-results">
                                   {relSearchResults.map((r) => (
