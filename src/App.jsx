@@ -15794,13 +15794,6 @@ function App() {
                                   : <div className="catalog-list-thumb-placeholder" />}
                               </div>
                               <div className="catalog-list-body">
-                                {tags.length > 0 && (
-                                  <div className="catalog-list-tags">
-                                    {tags.map((tag) => (
-                                      <span key={tag} className="catalog-list-tag">{tag}</span>
-                                    ))}
-                                  </div>
-                                )}
                                 {/* Shared structured meta for ALL categories, labelled per
                                     category. Building Blocks renders exactly as before
                                     (Theme / Year / Pieces / Item Type) because its labels
@@ -15823,7 +15816,6 @@ function App() {
                                     </div>
                                   )
                                 })()}
-                                {ownedCount > 0 && categoryName !== 'Building Blocks' && <span className="catalog-list-owned">You own {ownedCount}</span>}
                               </div>
                               <div className="catalog-list-purchase">
                                 <p className="catalog-list-purchase-heading">Ownership</p>
@@ -15841,42 +15833,33 @@ function App() {
                                     {stats ? stats.wanted_count : '—'}
                                   </span>
                                 </div>
-                                {categoryName === 'Building Blocks' ? (
-                                  <div className="catalog-list-purchase-checks" onClick={(e) => e.stopPropagation()}>
-                                    <button type="button" className="catalog-ownwant-btn" onClick={collect}>
-                                      <span className={`catalog-ownwant-count${ownedCount > 0 ? ' has' : ''}`}>{ownedCount}</span>
-                                      <span>{ownedCount > 0 ? 'I own another' : 'I own this set'}</span>
-                                    </button>
-                                    <label className={`catalog-ownwant-check want${isWishlisted ? ' checked' : ''}`}>
-                                      <input type="checkbox" checked={isWishlisted} onChange={toggleWishlist} />
-                                      <span>I want this set</span>
-                                    </label>
-                                  </div>
-                                ) : (
-                                  <div className="catalog-list-buy">
-                                    <span className="catalog-list-buy-label">Buy:</span>
-                                    <a
-                                      className="catalog-list-buy-link"
-                                      href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      eBay
-                                    </a>
-                                  </div>
-                                )}
+                                {/* Own / want controls for EVERY category (was LEGO-only).
+                                    Only the noun adapts: "set" for Building Blocks. */}
+                                <div className="catalog-list-purchase-checks" onClick={(e) => e.stopPropagation()}>
+                                  <button type="button" className="catalog-ownwant-btn" onClick={collect}>
+                                    <span className={`catalog-ownwant-count${ownedCount > 0 ? ' has' : ''}`}>{ownedCount}</span>
+                                    <span>{ownedCount > 0 ? 'I own another' : `I own this ${categoryName === 'Building Blocks' ? 'set' : 'item'}`}</span>
+                                  </button>
+                                  <label className={`catalog-ownwant-check want${isWishlisted ? ' checked' : ''}`}>
+                                    <input type="checkbox" checked={isWishlisted} onChange={toggleWishlist} />
+                                    <span>I want this {categoryName === 'Building Blocks' ? 'set' : 'item'}</span>
+                                  </label>
+                                </div>
                               </div>
-                              {categoryName === 'Building Blocks' ? (
-                                  <div className="catalog-list-ownwant" onClick={(e) => e.stopPropagation()}>
-                                    <div className="catalog-list-pricing">
-                                      <p className="cll-pricing-head">Pricing</p>
-                                      <div className="cll-price-row"><span className="cll-price-label">Value</span><span className="cll-price-val">{pricing.market != null ? formatUsd(Number(pricing.market)) : '—'}</span></div>
-                                      <div className={`cll-price-row${hasCollectorPlusAccess ? '' : ' cll-price-locked'}`}><span className="cll-price-label">Local Value</span><span className="cll-price-val">{hasCollectorPlusAccess ? (pricing.local != null ? formatUsd(Number(pricing.local)) : '—') : 'Collector+'}</span></div>
-                                      <div className="cll-price-row"><span className="cll-price-label">Retail</span><span className="cll-price-val">{pricing.retail != null ? formatUsd(Number(pricing.retail)) : '—'}</span></div>
-                                    </div>
-                                    <div className="catalog-list-buy">
-                                      <span className="catalog-list-buy-label">Buy this item</span>
+                              {/* Pricing + buy panel for EVERY category (was LEGO-only).
+                                  Only the marketplace links differ, since BrickLink and
+                                  Brick Owl are LEGO-specific; eBay applies to all. */}
+                              <div className="catalog-list-ownwant" onClick={(e) => e.stopPropagation()}>
+                                <div className="catalog-list-pricing">
+                                  <p className="cll-pricing-head">Pricing</p>
+                                  <div className="cll-price-row"><span className="cll-price-label">Value</span><span className="cll-price-val">{pricing.market != null ? formatUsd(Number(pricing.market)) : '—'}</span></div>
+                                  <div className={`cll-price-row${hasCollectorPlusAccess ? '' : ' cll-price-locked'}`}><span className="cll-price-label">Local Value</span><span className="cll-price-val">{hasCollectorPlusAccess ? (pricing.local != null ? formatUsd(Number(pricing.local)) : '—') : 'Collector+'}</span></div>
+                                  <div className="cll-price-row"><span className="cll-price-label">Retail</span><span className="cll-price-val">{pricing.retail != null ? formatUsd(Number(pricing.retail)) : '—'}</span></div>
+                                </div>
+                                <div className="catalog-list-buy">
+                                  <span className="catalog-list-buy-label">Buy this item</span>
+                                  {categoryName === 'Building Blocks' && (
+                                    <>
                                       <a
                                         className="catalog-list-buy-link"
                                         href={item.card_number
@@ -15897,29 +15880,19 @@ function App() {
                                       >
                                         Brick Owl
                                       </a>
-                                      <a
-                                        className="catalog-list-buy-link"
-                                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        eBay
-                                      </a>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="catalog-list-actions">
-                                    <button type="button" className="catalog-list-action-btn catalog-list-action-collect" title="Add to Collection" onClick={(e) => { e.stopPropagation(); collect() }}>
-                                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><path d="M3 8h10M8 3v10" strokeLinecap="round"/></svg>
-                                      Collect
-                                    </button>
-                                    <button type="button" className={`catalog-list-action-btn catalog-list-action-wishlist${isWishlisted ? ' wishlisted' : ''}`} title={isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'} onClick={(e) => { e.stopPropagation(); toggleWishlist() }}>
-                                      <svg viewBox="0 0 16 16" fill={isWishlisted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={isWishlisted ? '0' : '1.5'} width="13" height="13"><path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5a3 3 0 0 1 5.5-1.65A3 3 0 0 1 14.5 5.5c0 4-6.5 8-6.5 8z"/></svg>
-                                      {isWishlisted ? 'Wishlisted' : 'Wishlist'}
-                                    </button>
-                                  </div>
-                                )}
+                                    </>
+                                  )}
+                                  <a
+                                    className="catalog-list-buy-link"
+                                    href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    eBay
+                                  </a>
+                                </div>
+                              </div>
                             </article>
                           )
                         })}
