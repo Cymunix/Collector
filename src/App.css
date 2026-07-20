@@ -2544,6 +2544,10 @@ h1 {
   align-items: start;
   row-gap: 10px;
   grid-template-columns: 168px minmax(200px, 1.4fr) minmax(165px, 1fr) minmax(160px, 0.9fr);
+  /* Every category renders this layout, but categories have different numbers of
+     meta rows (LEGO adds "Pieces"). Pin the height to the tallest so a Toy row and
+     a LEGO row are the same size instead of sizing to their own content. */
+  min-height: 206px;
 }
 /* Title heads only the photo+meta section; Pricing/Ownership columns
    span both rows so their own headers sit at the top, level with the title. */
@@ -2940,21 +2944,52 @@ h1 {
   margin: 0;
   color: #16345e;
   font-size: 0.88rem;
+  /* Grid rows stretch to their tallest card, so a long title (e.g. "2022 Holiday
+     Advent Calendar") wrapping to 3 lines made every card in that row taller than
+     the next row's. Reserve exactly two lines for the title on every card so all
+     cards are the same size regardless of name length or category. */
+  line-height: 1.25;
+  min-height: 2.5em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
+/* Every meta line reserves a fixed number of lines. Without this, a longer value
+   ("Item Type: Advent Calendar" vs "Item Type: Figure") wraps to an extra line and
+   stretches its whole grid row, so cards ended up different heights. */
 .catalog-item-meta {
   margin: 6px 0 0;
   color: #5a6f93;
   font-size: 0.74rem;
   line-height: 1.35;
+  min-height: 1.35em;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.catalog-item-brand,
+.catalog-item-brand {
+  margin: 4px 0 0;
+  color: #35547f;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .catalog-item-year {
   margin: 4px 0 0;
   color: #35547f;
   font-size: 0.74rem;
   font-weight: 700;
+  line-height: 1.35;
 }
 
 .catalog-pagination {
