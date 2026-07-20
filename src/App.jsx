@@ -161,6 +161,16 @@ const CATEGORY_LABEL_OVERRIDES = {
     property: 'Property',
     subject: 'Subject(s)',
   },
+  Toys: {
+    subcategory: 'Brand/Manufacturer',
+    franchise: 'Franchise',
+    brand: 'Item Type',
+    collectibleSet: 'Packaging',
+    subset: 'Subfranchise',
+    productLine: 'Product Line',
+    property: 'Property',
+    subject: 'Subject(s)',
+  },
 }
 const DEFAULT_CATEGORY_LABELS = {
   subcategory: 'Subcategory',
@@ -15757,7 +15767,7 @@ function App() {
                           return (
                             <article
                               key={item.id}
-                              className={`catalog-list-row${categoryName === 'Building Blocks' ? ' catalog-list-row-lego' : ''}${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-list-row-selected' : ''}`}
+                              className={`catalog-list-row catalog-list-row-lego${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-list-row-selected' : ''}`}
                               role="button"
                               tabIndex={0}
                               onClick={() => handleOpenCatalogItem(item)}
@@ -15776,37 +15786,43 @@ function App() {
                                   />
                                 </label>
                               )}
-                              {categoryName === 'Building Blocks' && (
-                                <h3 className="catalog-list-name catalog-list-name-top">{item.name || 'Untitled item'}</h3>
-                              )}
+                              {/* Name above the photo for every category (was LEGO-only). */}
+                              <h3 className="catalog-list-name catalog-list-name-top">{isMusic ? (setName || 'Untitled item') : (item.name || 'Untitled item')}</h3>
                               <div className="catalog-list-thumb">
                                 {imageUrl
                                   ? <img src={imageUrl} alt={item.name || 'Item'} loading="lazy" />
                                   : <div className="catalog-list-thumb-placeholder" />}
                               </div>
                               <div className="catalog-list-body">
-                                {categoryName !== 'Building Blocks' && (
-                                  <h3 className="catalog-list-name">{isMusic ? (setName || 'Untitled item') : (item.name || 'Untitled item')}</h3>
-                                )}
-                                {categoryName === 'Building Blocks' ? (
-                                  <div className="catalog-list-lego-meta">
-                                    {item._franchise_name ? <p className="cll-row"><span className="cll-label">Theme</span><span>{item._franchise_name}</span></p> : null}
-                                    {item.release_year ? <p className="cll-row"><span className="cll-label">Year</span><span>{item.release_year}</span></p> : null}
-                                    {item._details?.piece_count != null && item._details?.piece_count !== '' ? <p className="cll-row"><span className="cll-label">Pieces</span><span>{item._details.piece_count}</span></p> : null}
-                                    {brandName ? <p className="cll-row"><span className="cll-label">Item Type</span><span>{brandName}</span></p> : null}
+                                {tags.length > 0 && (
+                                  <div className="catalog-list-tags">
+                                    {tags.map((tag) => (
+                                      <span key={tag} className="catalog-list-tag">{tag}</span>
+                                    ))}
                                   </div>
-                                ) : (
-                                  <>
-                                    {tags.length > 0 && (
-                                      <div className="catalog-list-tags">
-                                        {tags.map((tag) => (
-                                          <span key={tag} className="catalog-list-tag">{tag}</span>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {brandName ? <p className="catalog-list-meta">{getCategoryLabels(categoryName).brand}: {brandName}</p> : null}
-                                  </>
                                 )}
+                                {/* Shared structured meta for ALL categories, labelled per
+                                    category. Building Blocks renders exactly as before
+                                    (Theme / Year / Pieces / Item Type) because its labels
+                                    resolve to those; Toys gets Franchise / Year / Item Type. */}
+                                {(() => {
+                                  const rowLabels = getCategoryLabels(categoryName)
+                                  const pieces = item._details?.piece_count
+                                  const metaRows = [
+                                    { label: rowLabels.franchise, value: item._franchise_name },
+                                    { label: 'Year', value: item.release_year },
+                                    { label: 'Pieces', value: pieces != null && pieces !== '' ? pieces : '' },
+                                    { label: rowLabels.brand, value: brandName },
+                                  ].filter(r => r.label && r.value)
+                                  if (!metaRows.length) return null
+                                  return (
+                                    <div className="catalog-list-lego-meta">
+                                      {metaRows.map(r => (
+                                        <p key={r.label} className="cll-row"><span className="cll-label">{r.label}</span><span>{r.value}</span></p>
+                                      ))}
+                                    </div>
+                                  )
+                                })()}
                                 {ownedCount > 0 && categoryName !== 'Building Blocks' && <span className="catalog-list-owned">You own {ownedCount}</span>}
                               </div>
                               <div className="catalog-list-purchase">
