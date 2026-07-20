@@ -5653,8 +5653,15 @@ function App() {
               const subjectName = na(row.subject)
               const setName     = na(row.collectible_set)
               const printType   = na(row.print_type)
+              const description = na(row.description)
               const cardNum     = row.card_number && row.card_number !== 'N/A' ? `#${row.card_number}` : ''
-              const nameParts   = [subjectName, printType, cardNum].filter(Boolean)
+              // The variant/description distinguishes otherwise identically-named
+              // items (e.g. two "Princess Leia" figures). Cards already encode their
+              // variant via print type + card number, so only append it when neither
+              // is present — that's what was dropping Toy variants from the name.
+              const hasCardVariant = Boolean(printType || cardNum)
+              const variant     = !hasCardVariant && description && description.toLowerCase() !== subjectName.toLowerCase() ? description : ''
+              const nameParts   = [subjectName, printType, cardNum, variant].filter(Boolean)
               const fp          = row.front_image_path
               const imageUrl    = fp
                 ? fp.startsWith('http')
@@ -5663,13 +5670,16 @@ function App() {
                 : ''
               accumulator[row.item_id] = {
                 id:                row.item_id,
-                name:              nameParts.join(' — ') || row.description || 'Unnamed Item',
-                description:       row.description || '',
-                release_year:      null,
+                name:              nameParts.join(' — ') || description || 'Unnamed Item',
+                description,
+                // Was hard-coded null, so every collection card rendered "Year N/A".
+                release_year:      row.release_year || null,
                 category_id:       row.category_id,
                 subcategory_id:    row.subcategory_id,
                 collectible_set_id: row.collectible_set_id,
                 rarity_id:         row.rarity_id || null,
+                franchise:         na(row.franchise),
+                brand:             na(row.brand),
                 metadata:          { image_url: imageUrl, set: setName },
                 dynamic_fields:    {},
                 teams:             normalizeDelimitedList(row.teams),
@@ -5786,6 +5796,7 @@ function App() {
             subcategoryName: '',
             setName: '',
             franchiseName: resolvedCatalogItem?.franchise || '',
+            brandName: resolvedCatalogItem?.brand || '',
             subtheme: resolvedCatalogItem?.collectible_set || '',
             teams: Array.isArray(resolvedCatalogItem?.teams)
               ? resolvedCatalogItem.teams
@@ -7066,22 +7077,37 @@ function App() {
   // Load the minifigs connected to a set (used by the add modal from any entry
   // point — detail, grid, completion — since the detail effect only runs on the
   // item screen).
-  const fetchConnectedMinifigs = async (setItemId) => {
-    if (!setItemId) return []
-    const { data: smRows } = await supabase.from('set_minifigs').select('minifig_item_id, quantity').eq('set_item_id', setItemId)
-    if (!smRows?.length) return []
-    const figIds = smRows.map(r => r.minifig_item_id)
-    const { data: figItems } = await supabase.from('items').select('item_id, description, rebrickable_fig_id, minifig_code, subject_id, image_path').in('item_id', figIds)
-    const subjIds = [...new Set((figItems || []).map(f => f.subject_id).filter(Boolean))]
+  // Child items CONTAINED BY a catalogue item — parent → child direction only, so
+  // adding a child never pulls in its parent. Category-agnostic: the universal
+  // catalog_item_relationships table is the source of truth for every category, and
+  // legacy set_minifigs is still read so existing LEGO links keep working unchanged.
+  const fetchConnectedMinifigs = async (parentItemId) => {
+    if (!parentItemId) return []
+    const [{ data: relRows }, { data: smRows }] = await Promise.all([
+      supabase.from('catalog_item_relationships')
+        .select('child_item_id, quantity').eq('parent_item_id', parentItemId).eq('relationship_type', 'includes'),
+      supabase.from('set_minifigs').select('minifig_item_id, quantity').eq('set_item_id', parentItemId),
+    ])
+    const qtyById = new Map()
+    for (const r of relRows || []) qtyById.set(r.child_item_id, Math.max(qtyById.get(r.child_item_id) || 0, Number(r.quantity) || 1))
+    for (const r of smRows || []) qtyById.set(r.minifig_item_id, Math.max(qtyById.get(r.minifig_item_id) || 0, Number(r.quantity) || 1))
+    const childIds = [...qtyById.keys()]
+    if (!childIds.length) return []
+    const { data: childItems } = await supabase.from('items')
+      .select('item_id, name, description, rebrickable_fig_id, minifig_code, lego_set_number, subject_id, image_path').in('item_id', childIds)
+    const subjIds = [...new Set((childItems || []).map(f => f.subject_id).filter(Boolean))]
     const { data: subs } = subjIds.length ? await supabase.from('subjects').select('subject_id, subject_name').in('subject_id', subjIds) : { data: [] }
     const subjName = Object.fromEntries((subs || []).map(s => [s.subject_id, s.subject_name]))
-    const byId = Object.fromEntries((figItems || []).map(f => [f.item_id, f]))
-    const qtyByFig = Object.fromEntries(smRows.map(r => [r.minifig_item_id, r.quantity]))
-    return figIds.map(id => {
+    const byId = Object.fromEntries((childItems || []).map(f => [f.item_id, f]))
+    return childIds.map(id => {
       const it = byId[id] || {}
-      const subjectName = subjName[it.subject_id]
-      const variant = subjectName && it.description && it.description.trim().toLowerCase() !== subjectName.trim().toLowerCase() ? it.description.trim() : null
-      return { item_id: id, quantity: qtyByFig[id] || 1, name: subjectName || it.description || 'Minifig', variant, code: it.minifig_code || null, figNum: it.rebrickable_fig_id || null, image_path: it.image_path || null }
+      const displayName = it.name || subjName[it.subject_id] || it.description || 'Item'
+      const variant = it.description && it.description.trim().toLowerCase() !== displayName.trim().toLowerCase() ? it.description.trim() : null
+      return {
+        item_id: id, quantity: qtyById.get(id) || 1, name: displayName, variant,
+        code: it.minifig_code || it.lego_set_number || null,
+        figNum: it.rebrickable_fig_id || null, image_path: it.image_path || null,
+      }
     }).sort((a, b) => a.name.localeCompare(b.name))
   }
 
@@ -7178,8 +7204,12 @@ function App() {
     // A set with connected minifigs routes through the modal so the user can choose
     // which minifigs to include — quick-add can't ask on its own.
     if (typeof itemArg !== 'string') {
-      const { data: smCheck } = await supabase.from('set_minifigs').select('minifig_item_id').eq('set_item_id', itemId).limit(1)
-      if (smCheck?.length) {
+      // Any category: does this item contain children? (parent → child only)
+      const [{ data: relCheck }, { data: smCheck }] = await Promise.all([
+        supabase.from('catalog_item_relationships').select('child_item_id').eq('parent_item_id', itemId).eq('relationship_type', 'includes').limit(1),
+        supabase.from('set_minifigs').select('minifig_item_id').eq('set_item_id', itemId).limit(1),
+      ])
+      if (relCheck?.length || smCheck?.length) {
         setSelectedCatalogItem({
           ...itemArg,
           id: itemId,
@@ -7312,6 +7342,21 @@ function App() {
       }
       return Object.keys(out).length ? out : null
     })() : null
+    // Included child items (parent → child). Category-agnostic: ANY catalogue item
+    // with children offers them for inclusion, not just LEGO sets. A sealed parent
+    // auto-includes everything. This replaces the old isLegoSet-only path.
+    const includedChildren = catalogDetailSetMinifigs.length
+      ? catalogDetailSetMinifigs.map((m) => {
+          const sealed = (selectedCondition || '').includes('Sealed')
+          return {
+            item_id: m.item_id,
+            name: m.name,
+            quantity: m.quantity || 1,
+            included: sealed ? true : (collectionMinifigInclusion[m.item_id] ?? true),
+            condition: sealed ? 'New / Sealed (MISB)' : null,
+          }
+        })
+      : []
     const collectionId = await getOrCreateDefaultCollectionId(currentUser.id)
     const baseItemPayload = {
       collection_id: collectionId,
@@ -7350,14 +7395,15 @@ function App() {
       }
     })
 
-    // A set's included minifigs become individually-owned copies, one per physical
-    // instance (a battle-pack fig at ×2 → 2 copies), tagged with provenance back to
-    // this set so the sell flow can offer to include them. Price stays on the set.
-    if (isLegoSet && Array.isArray(legoConditionMeta?.minifigs)) {
+    // Included children become individually-owned copies, one per physical instance
+    // (a child at ×2 → 2 copies), tagged with provenance back to this parent so the
+    // sell flow can offer to include them. Price stays on the parent. Works for every
+    // category — a LEGO set's minifigs, a Toy multipack's figures, a value pack's sets.
+    if (includedChildren.length) {
       const figCopies = []
-      for (const mf of legoConditionMeta.minifigs) {
+      for (const mf of includedChildren) {
         if (!mf.included) continue
-        const qty = catalogDetailSetMinifigs.find(x => x.item_id === mf.item_id)?.quantity || 1
+        const qty = mf.quantity || 1
         for (let i = 0; i < qty; i++) {
           figCopies.push({
             collection_id: collectionId,
@@ -14294,7 +14340,11 @@ function App() {
                                   {primaryAcquisitionType
                                     ? ` | ${COLLECTION_ACQUISITION_TYPE_LABELS[primaryAcquisitionType] || primaryAcquisitionType}`
                                     : ''}
+                                  {/* Taxonomy: franchise + item type surface for every
+                                      category (LEGO theme/type, Toy franchise/type). */}
+                                  {item.franchiseName ? ` | ${item.franchiseName}` : ''}
                                   {item.setName ? ` | ${item.setName}` : ''}
+                                  {item.brandName ? ` | ${item.brandName}` : ''}
                                   {item.categoryName ? ` | ${item.categoryName}` : ''}
                                 </p>
                                 <div className="collection-item-stats">
@@ -20439,12 +20489,12 @@ function App() {
                 </>
               ) : null}
 
-              {isLegoSet && catalogDetailSetMinifigs.length > 0 ? (
+              {catalogDetailSetMinifigs.length > 0 ? (
                 <div className="collection-minifig-checklist">
-                  <label>Minifigures included</label>
+                  <label>{isLegoSet ? 'Minifigures included' : 'Included items'}</label>
                   {(selectedCondition || '').includes('Sealed') ? (
                     <p className="auth-banner">
-                      Sealed set — all {catalogDetailSetMinifigs.length} minifigs auto-included as New / Sealed (MISB).
+                      Sealed — all {catalogDetailSetMinifigs.length} included item{catalogDetailSetMinifigs.length === 1 ? '' : 's'} auto-added as New / Sealed (MISB).
                     </p>
                   ) : (
                     <div className="collection-minifig-rows">
