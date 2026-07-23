@@ -11,6 +11,17 @@ import AddLocationModal from './components/AddLocationModal'
 import QRCode from 'qrcode'
 import StorePOSDashboard from './components/StorePOSDashboard'
 import CatalogAdminPanel from './components/CatalogAdminPanel'
+import CompletionPage from './pages/CompletionPage'
+import HomePage from './pages/HomePage'
+import CollectionPage from './pages/CollectionPage'
+import CollectionItemPage from './pages/CollectionItemPage'
+import WishlistPage from './pages/WishlistPage'
+import CatalogPage from './pages/CatalogPage'
+import PlansPage from './pages/PlansPage'
+import CatalogItemPage from './pages/CatalogItemPage'
+import ProfilePage from './pages/ProfilePage'
+import SettingsPage from './pages/SettingsPage'
+import CartPage from './pages/CartPage'
 
 const DEFAULT_HOME_SECTIONS = ['Events Near You', 'Trending Items', 'Sales Near You']
 
@@ -1613,6 +1624,7 @@ const getPlanDisplayLabel = (profile) => {
   return baseLabel
 }
 
+
 function App() {
   const [posSession, setPosSession] = useState(null)
   const [currentScreen, setCurrentScreen] = useState(() => {
@@ -1832,7 +1844,9 @@ function App() {
   const [catalogSetNavIndex, setCatalogSetNavIndex] = useState(-1)
   const [catalogTotalItemCount, setCatalogTotalItemCount] = useState(0)
   const [selectedCatalogItem, setSelectedCatalogItem] = useState(null)
+  const [catalogRawItemRow, setCatalogRawItemRow] = useState(null)
   const [catalogDetailViewTab, setCatalogDetailViewTab] = useState('overview')
+  const [catalogPricingSource, setCatalogPricingSource] = useState('combined')
   const [catalogItemImages, setCatalogItemImages] = useState([])
   const [lightbox, setLightbox] = useState(null)   // { images: [url], index } — full-size image overlay
   const [catalogDetailSubjects, setCatalogDetailSubjects] = useState([])
@@ -1853,7 +1867,7 @@ function App() {
   const [isSavingCatalogItem, setIsSavingCatalogItem] = useState(false)
   const [catalogItemEditError, setCatalogItemEditError] = useState('')
   const [catalogItemImagesReloadToken, setCatalogItemImagesReloadToken] = useState(0)
-  // ── Manage Images (admin-only) ──
+  // ── Images (admin-only) ──
   const [manageImagesCandidates, setManageImagesCandidates] = useState([])
   const [manageImagesJobs, setManageImagesJobs] = useState([])
   const [manageImagesBusy, setManageImagesBusy] = useState(false)
@@ -8294,7 +8308,7 @@ function App() {
     setCatalogItemImagesReloadToken(t => t + 1)
   }
 
-  // ─── Manage Images (admin-only) ────────────────────────────────────────────
+  // ─── Images (admin-only) ────────────────────────────────────────────
   // NOTE: every mutation below runs through the anon-key client under the admin's
   // authenticated session; the DB RLS policies (item_images_write, *_admin) are
   // what actually enforce admin-only — the UI gate is not the security boundary.
@@ -12854,7 +12868,18 @@ function App() {
     acc[k].push(item)
     return acc
   }, {})
-  const completionCategoryGroups = groupByKey(startedSetCards, c => c.categoryName)
+  // Root Completion categories should reflect what the user actually owns, not only
+  // categories that already produced a recognised completion/set card. Merge owned
+  // collection categories with started-set data so categories never disappear simply
+  // because their completion-set mapping is not available yet.
+  const completionCategoryGroups = (() => {
+    const groups = groupByKey(startedSetCards, c => c.categoryName)
+    for (const item of collectionItems) {
+      const categoryName = (item.categoryName || '').trim()
+      if (categoryName && !groups[categoryName]) groups[categoryName] = []
+    }
+    return groups
+  })()
   const completionSubcategoryGroups = groupByKey(
     startedSetCards.filter(c => c.categoryName === completionNavCategory),
     c => c.subcategoryName,
@@ -13182,6 +13207,884 @@ function App() {
     return <StorePOSDashboard session={posSession} onLogout={() => setPosSession(null)} />
   }
 
+  useEffect(() => {
+    let cancelled = false
+    const itemId = selectedCatalogItem?.item_id || selectedCatalogItem?.id
+    if (!itemId) {
+      setCatalogRawItemRow(null)
+      return
+    }
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('items')
+        .select('item_id, category_id, subcategory_id, franchise_id, brand_id, collectible_set_id, subcollectble_set_id, subject_id, description, print_type_id, card_number, print_count, image_path, catalog_code, piece_count, release_year, attributes, upc, bricklink_id, rebrickable_fig_id, rarity_id, mtg_card_type_id, market_price, minifig_code, lego_set_number, retail_price, subset_id, series_id, name')
+        .eq('item_id', itemId)
+        .maybeSingle()
+      if (!cancelled) setCatalogRawItemRow(error ? null : data)
+    })()
+    return () => { cancelled = true }
+  }, [selectedCatalogItem?.item_id, selectedCatalogItem?.id])
+
+  const pageScope = {
+    AddEmployeeModal,
+    AddLocationModal,
+    Admin,
+    BGS_SUBGRADE_FIELDS,
+    BGS_SUBGRADE_OPTIONS,
+    CARD_CONDITION_CATEGORIES,
+    COLLECTION_ACQUISITION_TYPE_LABELS,
+    CatalogAdminPanel,
+    DEFAULT_BGS_SUBGRADES,
+    EMPLOYEE_PERMISSION_OPTIONS,
+    EMPLOYEE_ROLE_OPTIONS,
+    EmployeeCard,
+    GRADING_COMPANIES,
+    LANGUAGE_OPTIONS,
+    LEGO_PRESENCE_OPTIONS,
+    LEGO_SET_BOX_GRADES,
+    LocationCard,
+    MTG_CARD_TREATMENT_NAMES,
+    PROFILE_ACHIEVEMENTS,
+    SPORTS_CARD_TYPE_NAMES,
+    SubscriptionCard,
+    activeCollectionFilter,
+    activeGradeEntry,
+    activeGradeScale,
+    activeSettingsTab,
+    activeStorageFilter,
+    addSetMinifigLink,
+    admin,
+    advanceImageQueue,
+    allVisibleCatalogItemsSelected,
+    allocationByCategory,
+    assignableCustomCollections,
+    authMessage,
+    bgsAllSubgradesAreTen,
+    bgsAllSubgradesSet,
+    bgsCertLookupUrl,
+    boundedSelectedCollectionCopyIndex,
+    bulkImportApprove,
+    bulkImportCreatingPrintType,
+    bulkImportIdx,
+    bulkImportIsSaving,
+    bulkImportMode,
+    bulkImportNewPrintTypeName,
+    bulkImportRows,
+    bulkImportSaveError,
+    bulkImportSaveProgress,
+    bulkImportSheetSummary,
+    bulkImportSkip,
+    bulkImportSpeciesList,
+    bulkImportSubjectResults,
+    bulkImportSubjectSearch,
+    bulkImportTeamSearch,
+    bulkPhotoAnalyzeProgress,
+    bulkPhotoAnalyzing,
+    bulkPhotoApprove,
+    bulkPhotoApproveAll,
+    bulkPhotoIdx,
+    bulkPhotoIsSaving,
+    bulkPhotoManualResults,
+    bulkPhotoManualSearch,
+    bulkPhotoMode,
+    bulkPhotoPhase,
+    bulkPhotoPosition,
+    bulkPhotoPrintTypeId,
+    bulkPhotoRows,
+    bulkPhotoSaveError,
+    bulkPhotoSaveProgress,
+    bulkPhotoSkip,
+    canAccessEmployeesTab,
+    canAccessHomeScreenTab,
+    canAccessIntegrationsTab,
+    canAccessLocationsTab,
+    canAccessStoreTab,
+    canListSelectedCollectionCopy,
+    cartItems,
+    cartSubtotalCents,
+    cartTaxCents,
+    cartTotalCents,
+    catalogActiveContextRows,
+    catalogAdminBackImageFile,
+    catalogAdminBrandId,
+    catalogAdminBrands,
+    catalogAdminBricklinkId,
+    catalogAdminCardNumber,
+    catalogAdminCardTypeIds,
+    catalogAdminCardTypes,
+    catalogAdminCategories,
+    catalogAdminCategoryId,
+    catalogAdminFormError,
+    catalogAdminFranchiseId,
+    catalogAdminFranchises,
+    catalogAdminFrontImageFile,
+    catalogAdminInlineCreate,
+    catalogAdminIsMtg,
+    catalogAdminItemDescription,
+    catalogAdminLegoSetNumber,
+    catalogAdminMtgCardTypeId,
+    catalogAdminPackagingId,
+    catalogAdminPackagingList,
+    catalogAdminPieceCount,
+    catalogAdminPrintCount,
+    catalogAdminPrintTypeId,
+    catalogAdminPrintTypes,
+    catalogAdminProductLineIds,
+    catalogAdminProductLinesList,
+    catalogAdminRarityId,
+    catalogAdminRealFranchiseId,
+    catalogAdminRealFranchises,
+    catalogAdminRebrickableId,
+    catalogAdminReleaseYear,
+    catalogAdminRetailPrice,
+    catalogAdminSeriesId,
+    catalogAdminSeriesList,
+    catalogAdminSpecies,
+    catalogAdminSubcategories,
+    catalogAdminSubcategoryId,
+    catalogAdminSubjectIds,
+    catalogAdminSubjectIsSearching,
+    catalogAdminSubjectResults,
+    catalogAdminSubjectSearch,
+    catalogAdminSubsetId,
+    catalogAdminSubsetSel,
+    catalogAdminSubsets,
+    catalogAdminSubsetsList,
+    catalogAdminTeamIds,
+    catalogAdminTeams,
+    catalogAdminUpc,
+    catalogAlbumResults,
+    catalogAlbumSearch,
+    catalogAlbumSearching,
+    catalogAllCardTypes,
+    catalogBrandById,
+    catalogBrandId,
+    catalogBrands,
+    catalogBulkBrandOptions,
+    catalogBulkEditError,
+    catalogBulkEditMessage,
+    catalogBulkEditValues,
+    catalogBulkSelectedIds,
+    catalogBulkSetOptions,
+    catalogCardTypeIds,
+    catalogCategories,
+    catalogCategory,
+    catalogCategoryById,
+    catalogCategoryOptions,
+    catalogContextThemeText,
+    catalogDetailAverageRating,
+    catalogDetailBgsSubgrades,
+    catalogDetailCardTypes,
+    catalogDetailCertNumber,
+    catalogDetailGradingCompany,
+    catalogDetailIncludedIn,
+    catalogDetailIncludes,
+    catalogDetailIsGraded,
+    catalogDetailLego,
+    catalogDetailLegoCond,
+    catalogDetailMtgCardTypeId,
+    catalogDetailParentSets,
+    catalogDetailRarityId,
+    catalogDetailReviews,
+    catalogDetailSelectedGrade,
+    catalogDetailSetMinifigs,
+    catalogDetailStats,
+    catalogDetailSubjects,
+    catalogDetailTeams,
+    catalogDetailViewTab,
+    catalogFranchiseLinkedBrands,
+    catalogFranchiseOptions,
+    catalogFranchiseSearch,
+    catalogItemEditCardTypeIds,
+    catalogItemEditError,
+    catalogItemEditLookups,
+    catalogItemEditMtgCardTypeId,
+    catalogItemEditRarityId,
+    catalogItemEditSubjectIds,
+    catalogItemEditSubjectIsSearching,
+    catalogItemEditSubjectResults,
+    catalogItemEditSubjectSearch,
+    catalogItemEditTeamIds,
+    catalogItemEditValues,
+    catalogItemImages,
+    catalogItemIsMtg,
+    catalogItemNumbers,
+    catalogItemOrigin,
+    catalogListPricing,
+    catalogListStats,
+    catalogLoadError,
+    catalogMarketVariants,
+    catalogMaxYear,
+    catalogMinYear,
+    catalogMtgCardTypes,
+    catalogPage,
+    catalogPageInput,
+    catalogPricingSource,
+    catalogPrintTypeId,
+    catalogPrintTypes,
+    catalogProductLineId,
+    catalogProductLineOptions,
+    catalogRarities,
+    catalogRarityId,
+    catalogRawItemRow,
+    catalogSeriesId,
+    catalogSeriesOptions,
+    catalogSetId,
+    catalogSetNavIndex,
+    catalogSetNavItems,
+    catalogSets,
+    catalogSidebarLabels,
+    catalogSortKey,
+    catalogSubcategories,
+    catalogSubcategory,
+    catalogSubcategoryById,
+    catalogSubcategoryOptions,
+    catalogSubjectId,
+    catalogSubjectResults,
+    catalogSubjectSearch,
+    catalogSubjectSearching,
+    catalogSubsetId,
+    catalogSubsets,
+    catalogSubthemeId,
+    catalogSubthemeOptions,
+    catalogTeamId,
+    catalogTeams,
+    catalogThemeImageUrl,
+    catalogThemeShortDesc,
+    catalogThemeStats,
+    catalogTotalItemCount,
+    catalogTotalPages,
+    catalogViewMode,
+    cgcCertLookupUrl,
+    collectionCopySalePriceInput,
+    collectionFilterCondition,
+    collectionFilterFaction,
+    collectionFilterOptions,
+    collectionFilterSpecies,
+    collectionFilterSubtheme,
+    collectionItemDetailActionError,
+    collectionItemDetailActionMessage,
+    collectionLoadError,
+    collectionOverviewPage,
+    collectionOverviewPageInput,
+    collectionOverviewTotalPages,
+    collectionSearchQuery,
+    collectionSortKey,
+    collectionSummary,
+    collectionViewTab,
+    completionAfterProductLine,
+    completionAfterSubtheme,
+    completionBrandGroups,
+    completionBrandSetCards,
+    completionCategoryGroups,
+    completionCategoryRollup,
+    completionFacetStage,
+    completionFranchiseGroups,
+    completionIsLego,
+    completionLabels,
+    completionNavBrand,
+    completionNavCategory,
+    completionNavFranchise,
+    completionNavSubcategory,
+    completionNavSubset,
+    completionNavSubtheme,
+    completionProductLines,
+    completionSetAllItems,
+    completionSetSubsets,
+    completionSubcategoryGroups,
+    completionSubthemes,
+    conditionOptions,
+    createdEmployeeLoginInfo,
+    currentUser,
+    customCollectionPerformance,
+    customCollections,
+    deriveMinifigShorthand,
+    editingEmployeeAllLocations,
+    editingEmployeeId,
+    editingEmployeeLocationIds,
+    editingEmployeePermissions,
+    effectiveBgsGradeEntry,
+    email,
+    employeesError,
+    exitImageQueue,
+    filteredCatalogItems,
+    filteredCollectionItems,
+    filteredWishlistItems,
+    formatDate,
+    formatPercentValue,
+    formatPlanPrice,
+    formatUsd,
+    friendSearchLoading,
+    friendSearchQuery,
+    friendSearchResults,
+    getCategoryLabels,
+    getListingCertNumber,
+    getPlanActionMeta,
+    getPlanDisplayLabel,
+    handleAcceptFriendRequest,
+    handleAddRelatedItem,
+    handleApplyCatalogBulkEdit,
+    handleAssignStorageLocationToItem,
+    handleBackToCollection,
+    handleBulkCreatePrintType,
+    handleBulkImportFile,
+    handleBulkImportSave,
+    handleBulkPhotoFolder,
+    handleBulkPhotoSave,
+    handleCancelEmployeePermissions,
+    handleCatalogAdminInlineSave,
+    handleCatalogAdminRemoveSubject,
+    handleCatalogAdminSelectSubject,
+    handleCatalogItemEditRemoveSubject,
+    handleCatalogItemEditSelectSubject,
+    handleChangeEmail,
+    handleChangePassword,
+    handleCheckoutCart,
+    handleClearCatalogBulkSelection,
+    handleCloseAddEmployeeModal,
+    handleCloseAddLocationModal,
+    handleCopyEmployeeLoginInfo,
+    handleCreateCatalogItemInApp,
+    handleCreateCustomCollection,
+    handleCreateEmployee,
+    handleCreateLocation,
+    handleCreateStorageLocation,
+    handleDeactivateEmployee,
+    handleDeactivateLocation,
+    handleDeclineFriendRequest,
+    handleDeleteActiveCollection,
+    handleDeleteActiveStorageLocation,
+    handleDeleteCatalogItemImage,
+    handleEditEmployeePermissions,
+    handleFriendSearch,
+    handleImportMagicCards,
+    handleLanguageChange,
+    handleListSelectedCollectionCopyForSale,
+    handleMiAddByUrl,
+    handleMiApproveCandidate,
+    handleMiFindImages,
+    handleMiRejectCandidate,
+    handleMiRemove,
+    handleMiReorder,
+    handleMiSaveSource,
+    handleMiSetPrimary,
+    handleMiUpload,
+    handleMoveActiveStorageLocation,
+    handleOpenAddEmployeeModal,
+    handleOpenAddLocationModal,
+    handleOpenAddToCollectionModal,
+    handleOpenCatalog,
+    handleOpenCatalogItem,
+    handleOpenCatalogItemEdit,
+    handleOpenCollectionItemDetails,
+    handleOpenPlans,
+    handleOpenProfileItem,
+    handleOpenTwoFactorSetup,
+    handlePlanAction,
+    handleRelSetQuantity,
+    handleRemoveCollectionItem,
+    handleRemoveEmployee,
+    handleRemoveFriend,
+    handleRemoveRelated,
+    handleRenameActiveCollection,
+    handleRenameActiveStorageLocation,
+    handleSaveCatalogItem,
+    handleSaveEmployeePermissions,
+    handleSaveLocalSettings,
+    handleSaveLocation,
+    handleSaveProfileSettings,
+    handleSaveStoreSettings,
+    handleSelectAllCatalogPageItems,
+    handleSendFriendRequest,
+    handleSetEditingEmployeeAllLocations,
+    handleSetNewEmployeeAllLocations,
+    handleToggleCatalogBulkSelect,
+    handleToggleCollectionMembership,
+    handleToggleEditingEmployeeLocation,
+    handleToggleEmployeePermission,
+    handleToggleNewEmployeeLocation,
+    handleUpdateCollectionCopyCondition,
+    handleUploadCatalogItemImage,
+    handleUploadCollectionCopyImage,
+    handleWishlistRemove,
+    hasCatalogActiveContext,
+    hasCollectorPlusAccess,
+    hasStoreProAccess,
+    homeColumns,
+    homeHeading,
+    homeSectionOneOptions,
+    homeSectionThreeOptions,
+    homeSectionTwoOptions,
+    imageQueueActive,
+    imageQueueCount,
+    imageQueueItems,
+    imageQueueLoading,
+    imageQueuePos,
+    insights,
+    isAddEmployeeModalOpen,
+    isAddLocationModalOpen,
+    isApplyingCatalogBulkEdit,
+    isBgsActive,
+    isBgsBlackLabel,
+    isBusinessTier,
+    isCardConditionCategory,
+    isCatalogAdminPanelOpen,
+    isCatalogBulkEditMode,
+    isCatalogItemEditMode,
+    isCatalogItemModalOpen,
+    isCatalogLoading,
+    isCgcActive,
+    isCollectionLoading,
+    isCollectorPlusMember,
+    isCreatingCatalogItem,
+    isCreatingCustomCollection,
+    isCreatingEmployee,
+    isCreatingLocation,
+    isCreatingStorageLocation,
+    isEmployeesLoading,
+    isFriendSearchOpen,
+    isImportingMagic,
+    isLegoConditionCategory,
+    isLegoMinifig,
+    isLegoSet,
+    isListingCertVerified,
+    isListingCollectionCopyForSale,
+    isLocationsLoading,
+    isPlansLoading,
+    isPlatformAdmin,
+    isPsaActive,
+    isSavingCatalogAdminInline,
+    isSavingCatalogItem,
+    isSavingCollectionOrganization,
+    isSavingCopyCondition,
+    isSavingLink,
+    isSavingSettings,
+    isSubmitting,
+    isTAGActive,
+    isTwoFactorEnabled,
+    isTwoFactorLoading,
+    isUpdatingPlan,
+    isUploadingCatalogItemImage,
+    isUploadingCollectionCopyImage,
+    isWishlistLoading,
+    largestGainItem,
+    largestLossItem,
+    legoPropertyRegistry,
+    linkQty,
+    linkResults,
+    linkSearch,
+    listingRequirementItems,
+    listings,
+    localAvailability,
+    locationOptions,
+    locationsById,
+    locationsError,
+    magicImportError,
+    magicImportFile,
+    magicImportProgress,
+    magicImportSummary,
+    manageImagesBusy,
+    manageImagesCandidates,
+    manageImagesEditSourceId,
+    manageImagesError,
+    manageImagesJobs,
+    manageImagesNotice,
+    manageImagesSourceDraft,
+    manageImagesUrlDraft,
+    managerOptions,
+    marketPrice,
+    marketTrendLabel,
+    marketTrendPercent,
+    marketplaceCompletionMatches,
+    metric30Day,
+    metricAllTimeHigh,
+    metricLowListing,
+    miResolveUrl,
+    monthlyAnalytics,
+    mostValuableItem,
+    newCustomCollectionName,
+    newEmployeeAllLocations,
+    newEmployeeFirstName,
+    newEmployeeLastName,
+    newEmployeeLocationIds,
+    newEmployeePin,
+    newEmployeeRole,
+    newLocationCity,
+    newLocationManagerEmployeeId,
+    newLocationName,
+    newLocationPhoneNumber,
+    newLocationPostalCode,
+    newLocationProvince,
+    newLocationStreetAddress,
+    newStorageLocationName,
+    newStorageParentLocationId,
+    normalizeLanguage,
+    notificationsDealAlerts,
+    notificationsEmail,
+    notificationsEventReminders,
+    notificationsPush,
+    notificationsStorePromotions,
+    notificationsWishlistAlerts,
+    openAuth,
+    openCatalogItemById,
+    openLightbox,
+    overallCollectionValue,
+    overallProfitLoss,
+    overallRoi,
+    overallTotalInvested,
+    ownedCatalogItemCounts,
+    ownedCatalogItemIds,
+    ownedItemsByCatalogId,
+    ownershipCount,
+    paginatedCatalogItemIds,
+    paginatedCatalogItems,
+    paginatedCollectionItems,
+    paginatedWishlistItems,
+    performQuickAdd,
+    plansError,
+    privacyAllowFollowers,
+    privacyPublicProfile,
+    privacyShowCollectionValue,
+    privacyShowOnlineStatus,
+    privacyShowWishlist,
+    profile,
+    profileFriendRequests,
+    profileFriends,
+    profileIsLoading,
+    profileMostValuable,
+    profileRecentItems,
+    profileSentToIds,
+    profileStats,
+    psaCertLookupUrl,
+    psaPrestigeScore,
+    quickAddMode,
+    quickAddPrice,
+    relAddMode,
+    relAddQty,
+    relBusy,
+    relError,
+    relSearch,
+    relSearchResults,
+    removeConfirmItemId,
+    removePlanFromCart,
+    removeSetMinifigLink,
+    renewalStatus,
+    rollupCards,
+    searchLegoItemsToLink,
+    selectedCatalogAdminCategoryName,
+    selectedCatalogBulkFranchiseIds,
+    selectedCatalogFranchiseRecord,
+    selectedCatalogItem,
+    selectedCatalogItemCategoryLabels,
+    selectedCatalogItemMetadata,
+    selectedCollectionCopyAcquiredLabel,
+    selectedCollectionCopyBackImageUrl,
+    selectedCollectionCopyCollection,
+    selectedCollectionCopyCondition,
+    selectedCollectionCopyFrontImageUrl,
+    selectedCollectionCopyHasMarketValue,
+    selectedCollectionCopyImageUrl,
+    selectedCollectionCopyIsListed,
+    selectedCollectionCopyListingPrice,
+    selectedCollectionCopyLocation,
+    selectedCollectionCopyProfitLoss,
+    selectedCollectionCopyProfitLossPercent,
+    selectedCollectionCopyRow,
+    selectedCollectionItemCopyRows,
+    selectedCollectionItemDetails,
+    selectedCompletionSet,
+    selectedCompletionSetEntries,
+    selectedCompletionSetId,
+    selectedCondition,
+    selectedCopyConditionOptions,
+    sellConnectedMinifigs,
+    sellMinifigInclusion,
+    setActiveCollectionFilter,
+    setActiveSettingsTab,
+    setActiveStorageFilter,
+    setBulkImportCreatingPrintType,
+    setBulkImportIdx,
+    setBulkImportMode,
+    setBulkImportNewPrintTypeName,
+    setBulkImportRows,
+    setBulkImportSheetSummary,
+    setBulkImportSubjectResults,
+    setBulkImportSubjectSearch,
+    setBulkImportTeamSearch,
+    setBulkPhotoIdx,
+    setBulkPhotoManualResults,
+    setBulkPhotoManualSearch,
+    setBulkPhotoMode,
+    setBulkPhotoPhase,
+    setBulkPhotoPosition,
+    setBulkPhotoPrintTypeId,
+    setBulkPhotoRows,
+    setCatalogAdminBackImageFile,
+    setCatalogAdminBrandId,
+    setCatalogAdminBricklinkId,
+    setCatalogAdminCardNumber,
+    setCatalogAdminCardTypeIds,
+    setCatalogAdminCategoryId,
+    setCatalogAdminFormError,
+    setCatalogAdminFranchiseId,
+    setCatalogAdminFrontImageFile,
+    setCatalogAdminInlineCreate,
+    setCatalogAdminItemDescription,
+    setCatalogAdminLegoSetNumber,
+    setCatalogAdminMtgCardTypeId,
+    setCatalogAdminPackagingId,
+    setCatalogAdminPieceCount,
+    setCatalogAdminPrintCount,
+    setCatalogAdminPrintTypeId,
+    setCatalogAdminProductLineIds,
+    setCatalogAdminRarityId,
+    setCatalogAdminRealFranchiseId,
+    setCatalogAdminRebrickableId,
+    setCatalogAdminReleaseYear,
+    setCatalogAdminRetailPrice,
+    setCatalogAdminSeriesId,
+    setCatalogAdminSubcategoryId,
+    setCatalogAdminSubjectIds,
+    setCatalogAdminSubjectResults,
+    setCatalogAdminSubjectSearch,
+    setCatalogAdminSubsetId,
+    setCatalogAdminSubsetSel,
+    setCatalogAdminTeamIds,
+    setCatalogAdminUpc,
+    setCatalogAlbumResults,
+    setCatalogAlbumSearch,
+    setCatalogBrandId,
+    setCatalogBulkEditValues,
+    setCatalogBulkSelectedIds,
+    setCatalogCardTypeIds,
+    setCatalogCategory,
+    setCatalogDetailBgsSubgrades,
+    setCatalogDetailCertNumber,
+    setCatalogDetailGradingCompany,
+    setCatalogDetailIsGraded,
+    setCatalogDetailLegoCond,
+    setCatalogDetailSelectedCondition,
+    setCatalogDetailSelectedGrade,
+    setCatalogDetailTagDigReport,
+    setCatalogDetailTagLookupError,
+    setCatalogDetailTagPopulation,
+    setCatalogDetailTagScore,
+    setCatalogDetailTagScoreRank,
+    setCatalogDetailTagVerifiedSlab,
+    setCatalogDetailViewTab,
+    setCatalogFranchise,
+    setCatalogFranchiseSearch,
+    setCatalogItemEditCardTypeIds,
+    setCatalogItemEditMtgCardTypeId,
+    setCatalogItemEditRarityId,
+    setCatalogItemEditSubjectSearch,
+    setCatalogItemEditTeamIds,
+    setCatalogItemEditValues,
+    setCatalogListStats,
+    setCatalogMaxYear,
+    setCatalogMinYear,
+    setCatalogPage,
+    setCatalogPageInput,
+    setCatalogPricingSource,
+    setCatalogPrintTypeId,
+    setCatalogProductLineId,
+    setCatalogRarityId,
+    setCatalogReloadToken,
+    setCatalogSeriesId,
+    setCatalogSetId,
+    setCatalogSortKey,
+    setCatalogSubcategory,
+    setCatalogSubjectId,
+    setCatalogSubjectResults,
+    setCatalogSubjectSearch,
+    setCatalogSubsetId,
+    setCatalogSubthemeId,
+    setCatalogTeamId,
+    setCatalogViewMode,
+    setCollectionCopySalePriceInput,
+    setCollectionFilterCondition,
+    setCollectionFilterFaction,
+    setCollectionFilterSpecies,
+    setCollectionFilterSubtheme,
+    setCollectionOverviewPage,
+    setCollectionOverviewPageInput,
+    setCollectionSearchQuery,
+    setCollectionSortKey,
+    setCollectionViewTab,
+    setCompletionNavBrand,
+    setCompletionNavCategory,
+    setCompletionNavFranchise,
+    setCompletionNavProductLine,
+    setCompletionNavSubcategory,
+    setCompletionNavSubset,
+    setCompletionNavSubtheme,
+    setCompletionSheetPopup,
+    setCurrentScreen,
+    setFriendSearchQuery,
+    setFriendSearchResults,
+    setIsCatalogAdminPanelOpen,
+    setIsCatalogBulkEditMode,
+    setIsCatalogDetailTagLookupLoading,
+    setIsCatalogItemEditMode,
+    setIsCatalogItemModalOpen,
+    setIsFriendSearchOpen,
+    setLinkQty,
+    setLinkResults,
+    setLinkSearch,
+    setMagicImportError,
+    setMagicImportFile,
+    setMagicImportProgress,
+    setMagicImportSummary,
+    setManageImagesEditSourceId,
+    setManageImagesSourceDraft,
+    setManageImagesUrlDraft,
+    setNewCustomCollectionName,
+    setNewEmployeeFirstName,
+    setNewEmployeeLastName,
+    setNewEmployeePin,
+    setNewEmployeeRole,
+    setNewLocationCity,
+    setNewLocationManagerEmployeeId,
+    setNewLocationName,
+    setNewLocationPhoneNumber,
+    setNewLocationPostalCode,
+    setNewLocationProvince,
+    setNewLocationStreetAddress,
+    setNewStorageLocationName,
+    setNewStorageParentLocationId,
+    setNotificationsDealAlerts,
+    setNotificationsEmail,
+    setNotificationsEventReminders,
+    setNotificationsPush,
+    setNotificationsStorePromotions,
+    setNotificationsWishlistAlerts,
+    setPrivacyAllowFollowers,
+    setPrivacyPublicProfile,
+    setPrivacyShowCollectionValue,
+    setPrivacyShowOnlineStatus,
+    setPrivacyShowWishlist,
+    setQuickAddMode,
+    setQuickAddPrice,
+    setRelAddMode,
+    setRelAddQty,
+    setRelSearch,
+    setRelSearchResults,
+    setRemoveConfirmItemId,
+    setSearchAreaContext,
+    setSelectedCatalogItem,
+    setSelectedCollectionCopyIndex,
+    setSelectedCompletionSetId,
+    setSellMinifigInclusion,
+    setSettingsApiKeys,
+    setSettingsBio,
+    setSettingsCollectionAnalytics,
+    setSettingsConnectedApps,
+    setSettingsDisplayName,
+    setSettingsFavouriteCategories,
+    setSettingsGradingRecommendations,
+    setSettingsHomeSectionOne,
+    setSettingsHomeSectionThree,
+    setSettingsHomeSectionTwo,
+    setSettingsHomeShowEmptyStateHints,
+    setSettingsHomeShowGreeting,
+    setSettingsInventoryAllowPurchaseRequests,
+    setSettingsInventoryAutoPublish,
+    setSettingsInventoryEnableEventCreation,
+    setSettingsInventoryEnableMarketplaceListings,
+    setSettingsInventoryTrackByLocation,
+    setSettingsLocation,
+    setSettingsMailingAddress,
+    setSettingsPendingEmail,
+    setSettingsPortfolioInsights,
+    setSettingsPosConnections,
+    setSettingsProfileBannerFile,
+    setSettingsProfilePhotoFile,
+    setSettingsPublicProfileUrl,
+    setSettingsStoreAddress,
+    setSettingsStoreBannerFile,
+    setSettingsStoreDescription,
+    setSettingsStoreHours,
+    setSettingsStoreLogoFile,
+    setSettingsStoreName,
+    setSettingsStoreVisibility,
+    setSettingsTimezone,
+    setSettingsUnlimitedCollectionFolders,
+    setSettingsUsername,
+    setSettingsWebhookSettings,
+    setWishlistCategoryFilter,
+    setWishlistItemIds,
+    setWishlistPage,
+    setWishlistRemoveConfirmId,
+    setWishlistSearchQuery,
+    setWishlistViewTab,
+    settingsApiKeys,
+    settingsBio,
+    settingsCollectionAnalytics,
+    settingsConnectedApps,
+    settingsDisplayName,
+    settingsError,
+    settingsFavouriteCategories,
+    settingsGradingRecommendations,
+    settingsHomeSectionOne,
+    settingsHomeSectionThree,
+    settingsHomeSectionTwo,
+    settingsHomeShowEmptyStateHints,
+    settingsHomeShowGreeting,
+    settingsInventoryAllowPurchaseRequests,
+    settingsInventoryAutoPublish,
+    settingsInventoryEnableEventCreation,
+    settingsInventoryEnableMarketplaceListings,
+    settingsInventoryTrackByLocation,
+    settingsLanguage,
+    settingsLocation,
+    settingsMailingAddress,
+    settingsPendingEmail,
+    settingsPortfolioInsights,
+    settingsPosConnections,
+    settingsProfileBanner,
+    settingsProfilePhoto,
+    settingsPublicProfileUrl,
+    settingsStoreAddress,
+    settingsStoreBanner,
+    settingsStoreDescription,
+    settingsStoreHours,
+    settingsStoreLogo,
+    settingsStoreName,
+    settingsStoreVisibility,
+    settingsTabs,
+    settingsTimezone,
+    settingsUnlimitedCollectionFolders,
+    settingsUsername,
+    settingsWebhookSettings,
+    startImageQueue,
+    storageLocationPathById,
+    storageLocations,
+    storeEmployees,
+    storeLocations,
+    subscriptionPlans,
+    supabase,
+    t,
+    tagDisplayedShortLabel,
+    tagPopReportSearchUrl,
+    themeStatName,
+    themeStatPct,
+    tx,
+    updateBulkPhotoRow,
+    updateBulkRow,
+    wishlistCategories,
+    wishlistCategoryFilter,
+    wishlistItemIds,
+    wishlistItems,
+    wishlistLoadError,
+    wishlistPage,
+    wishlistRemoveConfirmId,
+    wishlistSearchQuery,
+    wishlistSummary,
+    wishlistTotalPages,
+    wishlistViewTab
+  }
+
+
   return (
     <div className="page-shell">
       <header className="topbar">
@@ -13461,6675 +14364,16 @@ function App() {
       </nav>
 
       <main className="home-content">
-        {currentScreen === 'home' ? (
-          <>
-            <h1>{homeHeading}</h1>
-            <p className="subtitle">
-              {currentUser
-                ? ''
-                : t('tagline')}
-            </p>
-            {authMessage && <p className="auth-banner">{authMessage}</p>}
-
-            <section className="panel-grid" aria-label="Homepage content sections">
-              {homeColumns.map((column) => (
-                <article key={column.title} className="panel-column">
-                  <header className="column-head">
-                    <h2>{tx(column.title)}</h2>
-                    {column.action && (
-                      <a href="#" className="column-link">
-                        {tx(column.action)}
-                      </a>
-                    )}
-                  </header>
-                  <div className={`cards cards-${column.variant}`}>
-                    {Array.from({ length: column.cards }).map((_, index) => (
-                      <div key={`${column.title}-${index}`} className="card-placeholder">
-                        {settingsHomeShowEmptyStateHints && column.showMessage && <span>{tx('No purchases yet')}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </section>
-          </>
-        ) : currentScreen === 'collection' ? (
-          <section className="collection-screen" aria-label="My collection">
-            <div className="catalog-head">
-              <div>
-                <h1>{t('myCollection')}</h1>
-                <p className="subtitle catalog-subtitle">Organize by custom collections and physical storage locations.</p>
-              </div>
-              <div className="catalog-actions">
-                <button type="button" className="catalog-action-pill" onClick={handleOpenCatalog}>
-                  Browse Catalog
-                </button>
-              </div>
-            </div>
-
-            {!currentUser ? (
-              <div className="settings-empty-state">
-                <p className="subtitle">Log in to view and manage your collection.</p>
-                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>
-                  Log in
-                </button>
-              </div>
-            ) : (
-              <div className="collection-layout">
-                {collectionViewTab === 'completion' ? (
-                  <aside className="catalog-card collection-sidebar" aria-label="Completion filters">
-                    <div className="collection-sidebar-section">
-                      <p className="collection-sidebar-title">Filter</p>
-
-                      <label className="completion-filter-label">Category</label>
-                      <select
-                        value={completionNavCategory}
-                        onChange={(e) => { setCompletionNavCategory(e.target.value); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
-                      >
-                        <option value="">All categories</option>
-                        {Object.keys(completionCategoryGroups).sort((a, b) => a.localeCompare(b)).map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
-                      </select>
-
-                      <label className="completion-filter-label">{completionLabels.subcategory}</label>
-                      <select
-                        value={completionNavSubcategory}
-                        disabled={!completionNavCategory}
-                        onChange={(e) => { setCompletionNavSubcategory(e.target.value); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
-                      >
-                        <option value="">All {completionLabels.subcategory.toLowerCase()}s</option>
-                        {Object.keys(completionSubcategoryGroups).sort((a, b) => a.localeCompare(b)).map(sub => (
-                          <option key={sub} value={sub}>{sub}</option>
-                        ))}
-                      </select>
-
-                      <label className="completion-filter-label">{completionLabels.franchise}</label>
-                      <select
-                        value={completionNavFranchise}
-                        disabled={!completionNavSubcategory}
-                        onChange={(e) => { setCompletionNavFranchise(e.target.value); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
-                      >
-                        <option value="">All {completionLabels.franchise.toLowerCase()}s</option>
-                        {Object.keys(completionFranchiseGroups).sort((a, b) => a.localeCompare(b)).map(fr => (
-                          <option key={fr} value={fr}>{fr}</option>
-                        ))}
-                      </select>
-
-                      <label className="completion-filter-label">{completionLabels.brand}</label>
-                      <select
-                        value={completionNavBrand}
-                        disabled={!completionNavFranchise}
-                        onChange={(e) => { setCompletionNavBrand(e.target.value); setSelectedCompletionSetId('') }}
-                      >
-                        <option value="">All {completionLabels.brand.toLowerCase()}s</option>
-                        {Object.keys(completionBrandGroups).sort((a, b) => a.localeCompare(b)).map(brand => (
-                          <option key={brand} value={brand}>{brand}</option>
-                        ))}
-                      </select>
-
-                      {(completionNavCategory || completionNavSubcategory || completionNavFranchise || completionNavBrand) && (
-                        <button
-                          type="button"
-                          className="completion-filter-clear"
-                          onClick={() => { setCompletionNavCategory(''); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}
-                        >
-                          Clear filters
-                        </button>
-                      )}
-                    </div>
-                  </aside>
-                ) : (
-                  <aside className="catalog-card collection-sidebar" aria-label="Collections and storage">
-                    <div className="collection-sidebar-section">
-                      <p className="collection-sidebar-title">{t('myCollection')}</p>
-                      <button
-                        type="button"
-                        className={`collection-sidebar-link ${activeCollectionFilter === 'all' ? 'active' : ''}`}
-                        onClick={() => setActiveCollectionFilter('all')}
-                      >
-                        All Items
-                      </button>
-                      {customCollections.map((collection) => (
-                        <button
-                          key={collection.id}
-                          type="button"
-                          className={`collection-sidebar-link ${activeCollectionFilter === collection.id ? 'active' : ''}`}
-                          onClick={() => setActiveCollectionFilter(collection.id)}
-                        >
-                          {collection.name}
-                        </button>
-                      ))}
-
-                      <div className="collection-inline-create">
-                        <input
-                          type="text"
-                          value={newCustomCollectionName}
-                          onChange={(event) => setNewCustomCollectionName(event.target.value)}
-                          placeholder="Create Collection"
-                        />
-                        <button type="button" className="catalog-action-pill" onClick={handleCreateCustomCollection} disabled={isCreatingCustomCollection}>
-                          +
-                        </button>
-                      </div>
-
-                      {activeCollectionFilter !== 'all' && (
-                        <div className="collection-inline-actions">
-                          <button type="button" className="catalog-action-pill" onClick={handleRenameActiveCollection}>Rename</button>
-                          <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveCollection}>Delete</button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="collection-sidebar-section">
-                      <p className="collection-sidebar-title">Storage</p>
-                      {storageLocations.map((location) => {
-                        const locationPath = storageLocationPathById[location.id] || location.name
-                        const depth = locationPath ? Math.max(0, locationPath.split(' -> ').length - 1) : 0
-                        return (
-                          <button
-                            key={location.id}
-                            type="button"
-                            className={`collection-sidebar-link ${activeStorageFilter === location.id ? 'active' : ''}`}
-                            style={{ paddingLeft: `${12 + depth * 14}px` }}
-                            onClick={() => setActiveStorageFilter((currentValue) => (currentValue === location.id ? '' : location.id))}
-                          >
-                            {location.name}
-                          </button>
-                        )
-                      })}
-
-                      <div className="collection-inline-create">
-                        <input
-                          type="text"
-                          value={newStorageLocationName}
-                          onChange={(event) => setNewStorageLocationName(event.target.value)}
-                          placeholder="Create Location"
-                        />
-                        <button type="button" className="catalog-action-pill" onClick={handleCreateStorageLocation} disabled={isCreatingStorageLocation}>
-                          +
-                        </button>
-                      </div>
-
-                      <select
-                        value={newStorageParentLocationId}
-                        onChange={(event) => setNewStorageParentLocationId(event.target.value)}
-                      >
-                        <option value="">Top Level</option>
-                        {storageLocations.map((location) => (
-                          <option key={`storage-parent-${location.id}`} value={location.id}>
-                            {storageLocationPathById[location.id] || location.name}
-                          </option>
-                        ))}
-                      </select>
-
-                      {activeStorageFilter && (
-                        <>
-                          <select
-                            value=""
-                            onChange={(event) => handleMoveActiveStorageLocation(event.target.value)}
-                          >
-                            <option value="">Move Location To...</option>
-                            <option value="">Top Level</option>
-                            {storageLocations
-                              .filter((location) => location.id !== activeStorageFilter)
-                              .map((location) => (
-                                <option key={`move-storage-${location.id}`} value={location.id}>
-                                  {storageLocationPathById[location.id] || location.name}
-                                </option>
-                              ))}
-                          </select>
-                          <div className="collection-inline-actions">
-                            <button type="button" className="catalog-action-pill" onClick={handleRenameActiveStorageLocation}>Rename</button>
-                            <button type="button" className="catalog-action-pill" onClick={handleDeleteActiveStorageLocation}>Delete</button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </aside>
-                )}
-
-                <div className="collection-main-pane">
-                  <div className="collection-topbar">
-                    <input
-                      type="search"
-                      value={collectionSearchQuery}
-                      onChange={(event) => setCollectionSearchQuery(event.target.value)}
-                      placeholder="Search by item, collection, location, set, or category"
-                    />
-                    <div className="collection-filter-row">
-                      {collectionFilterOptions.subthemes.length > 0 && (
-                        <select className="collection-filter-select" value={collectionFilterSubtheme} onChange={(e) => setCollectionFilterSubtheme(e.target.value)} aria-label="Filter by set">
-                          <option value="">All sets</option>
-                          {collectionFilterOptions.subthemes.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      )}
-                      {collectionFilterOptions.factions.length > 0 && (
-                        <select className="collection-filter-select" value={collectionFilterFaction} onChange={(e) => setCollectionFilterFaction(e.target.value)} aria-label="Filter by faction">
-                          <option value="">All factions</option>
-                          {collectionFilterOptions.factions.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      )}
-                      {collectionFilterOptions.species.length > 0 && (
-                        <select className="collection-filter-select" value={collectionFilterSpecies} onChange={(e) => setCollectionFilterSpecies(e.target.value)} aria-label="Filter by species">
-                          <option value="">All species</option>
-                          {collectionFilterOptions.species.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      )}
-                      {collectionFilterOptions.conditions.length > 0 && (
-                        <select className="collection-filter-select" value={collectionFilterCondition} onChange={(e) => setCollectionFilterCondition(e.target.value)} aria-label="Filter by condition">
-                          <option value="">All conditions</option>
-                          {collectionFilterOptions.conditions.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      )}
-                      <select className="collection-filter-select" value={collectionSortKey} onChange={(e) => setCollectionSortKey(e.target.value)} aria-label="Sort">
-                        <option value="recent">Sort: Recently added</option>
-                        <option value="name">Sort: Name (A–Z)</option>
-                        <option value="value_desc">Sort: Value (high→low)</option>
-                        <option value="value_asc">Sort: Value (low→high)</option>
-                        <option value="quantity">Sort: Quantity</option>
-                      </select>
-                      {(collectionFilterSubtheme || collectionFilterFaction || collectionFilterSpecies || collectionFilterCondition) && (
-                        <button type="button" className="catalog-action-pill" onClick={() => { setCollectionFilterSubtheme(''); setCollectionFilterFaction(''); setCollectionFilterSpecies(''); setCollectionFilterCondition('') }}>Clear filters</button>
-                      )}
-                    </div>
-                    <div className="collection-tab-row" role="tablist" aria-label="Collection views">
-                      <button
-                        type="button"
-                        className={`collection-tab-button ${collectionViewTab === 'overview' ? 'active' : ''}`}
-                        onClick={() => setCollectionViewTab('overview')}
-                      >
-                        Overview
-                      </button>
-                      <button
-                        type="button"
-                        className={`collection-tab-button ${collectionViewTab === 'analytics' ? 'active' : ''}`}
-                        onClick={() => setCollectionViewTab('analytics')}
-                      >
-                        Analytics
-                      </button>
-                      <button
-                        type="button"
-                        className={`collection-tab-button ${collectionViewTab === 'completion' ? 'active' : ''}`}
-                        onClick={() => setCollectionViewTab('completion')}
-                      >
-                        Completion
-                      </button>
-                    </div>
-                  </div>
-
-                  {isCollectionLoading ? (
-                    <div className="catalog-card catalog-loading-panel">Loading your collection...</div>
-                  ) : collectionLoadError ? (
-                    <div className="catalog-card catalog-loading-panel">{collectionLoadError}</div>
-                  ) : filteredCollectionItems.length === 0 ? (
-                    <div className="catalog-card catalog-loading-panel">No matching items. Add cards from the catalog or adjust your filters.</div>
-                  ) : collectionViewTab === 'analytics' ? (
-                    <div className="collection-analytics-stack">
-                      <section className="collection-summary-grid" aria-label="Portfolio summary">
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Collection Value</p>
-                          <strong>{formatUsd(overallCollectionValue)}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Total Invested</p>
-                          <strong>{formatUsd(overallTotalInvested)}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Profit / Loss</p>
-                          <strong className={overallProfitLoss >= 0 ? 'collection-positive' : 'collection-negative'}>{formatUsd(overallProfitLoss)}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">ROI</p>
-                          <strong className={overallRoi >= 0 ? 'collection-positive' : 'collection-negative'}>{formatPercentValue(overallRoi)}</strong>
-                        </article>
-                      </section>
-
-                      <section className="collection-analytics-grid">
-                        <article className="catalog-card collection-analytics-card">
-                          <h3>Portfolio Allocation</h3>
-                          <div className="collection-allocation-list">
-                            {allocationByCategory.map((entry) => (
-                              <div key={`allocation-${entry.categoryName}`} className="collection-allocation-row">
-                                <div className="collection-allocation-row-head">
-                                  <strong>{entry.categoryName}</strong>
-                                  <span>{entry.allocationPercent.toFixed(1)}%</span>
-                                </div>
-                                <div className="collection-allocation-bar-track">
-                                  <div className="collection-allocation-bar-fill" style={{ width: `${entry.allocationPercent}%` }} />
-                                </div>
-                                <p>{formatUsd(entry.currentMarketValue)} value | ROI {formatPercentValue(entry.roi)}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </article>
-
-                        <article className="catalog-card collection-analytics-card">
-                          <h3>Collection Insights</h3>
-                          <div className="collection-insight-list">
-                            <div className="collection-insight-item">
-                              <span>Most Valuable Item</span>
-                              <strong>{mostValuableItem ? `${mostValuableItem.name} · ${formatUsd(mostValuableItem.currentMarketValue)}` : 'N/A'}</strong>
-                            </div>
-                            <div className="collection-insight-item">
-                              <span>Largest Gain</span>
-                              <strong>{largestGainItem ? `${largestGainItem.name} · ${formatUsd(largestGainItem.profitLoss)}` : 'N/A'}</strong>
-                            </div>
-                            <div className="collection-insight-item">
-                              <span>Largest Loss</span>
-                              <strong>{largestLossItem ? `${largestLossItem.name} · ${formatUsd(largestLossItem.profitLoss)}` : 'N/A'}</strong>
-                            </div>
-                          </div>
-                        </article>
-                      </section>
-
-                      <section className="collection-analytics-grid">
-                        <article className="catalog-card collection-analytics-card">
-                          <h3>Monthly Spending</h3>
-                          <div className="collection-metrics-list">
-                            {monthlyAnalytics.length === 0 ? (
-                              <p className="collection-muted">No monthly purchase data yet.</p>
-                            ) : (
-                              monthlyAnalytics.slice(-6).map((entry) => (
-                                <div key={`monthly-spending-${entry.label}`} className="collection-metric-row">
-                                  <strong>{entry.label}</strong>
-                                  <span>{formatUsd(entry.investedValue)}</span>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </article>
-
-                        <article className="catalog-card collection-analytics-card">
-                          <h3>Monthly Value Growth</h3>
-                          <div className="collection-metrics-list">
-                            {monthlyAnalytics.length === 0 ? (
-                              <p className="collection-muted">No monthly value data yet.</p>
-                            ) : (
-                              monthlyAnalytics.slice(-6).map((entry) => (
-                                <div key={`monthly-value-${entry.label}`} className="collection-metric-row">
-                                  <strong>{entry.label}</strong>
-                                  <span>{formatUsd(entry.currentMarketValue)}</span>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </article>
-                      </section>
-
-                      <article className="catalog-card collection-analytics-card">
-                        <h3>Custom Collection Performance</h3>
-                        <div className="collection-performance-list">
-                          {customCollectionPerformance.length === 0 ? (
-                            <p className="collection-muted">Create custom collections to compare value, ROI, and goal progress.</p>
-                          ) : (
-                            customCollectionPerformance.map((entry) => (
-                              <div key={`collection-performance-${entry.id}`} className="collection-performance-row">
-                                <div>
-                                  <strong>{entry.name}</strong>
-                                  <p>{entry.itemCount} items</p>
-                                </div>
-                                <div>
-                                  <span>{formatUsd(entry.currentMarketValue)}</span>
-                                  <p>Invested {formatUsd(entry.totalInvested)}</p>
-                                </div>
-                                <div>
-                                  <span>ROI {formatPercentValue(entry.roi)}</span>
-                                  <p>Completion {entry.completionPercent == null ? 'N/A' : `${entry.completionPercent.toFixed(1)}%`}</p>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </article>
-                    </div>
-                  ) : collectionViewTab === 'completion' ? (
-                    <div className="completion-main">
-                        {/* Breadcrumb */}
-                        {(completionNavCategory || completionNavSubcategory || completionNavFranchise || completionNavBrand || selectedCompletionSetId) && (
-                          <nav className="completion-breadcrumb" aria-label="Completion breadcrumb">
-                            <button type="button" className="completion-crumb" onClick={() => { setCompletionNavCategory(''); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>All categories</button>
-                            {completionNavCategory && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <button type="button" className={`completion-crumb${!completionNavSubcategory && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavCategory}</button>
-                              </>
-                            )}
-                            {completionNavSubcategory && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <button type="button" className={`completion-crumb${!completionNavFranchise && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavFranchise(''); setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavSubcategory}</button>
-                              </>
-                            )}
-                            {completionNavFranchise && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <button type="button" className={`completion-crumb${!completionNavBrand && !selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => { setCompletionNavBrand(''); setSelectedCompletionSetId('') }}>{completionNavFranchise}</button>
-                              </>
-                            )}
-                            {completionNavBrand && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <button type="button" className={`completion-crumb${!selectedCompletionSetId ? ' completion-crumb-current' : ''}`} onClick={() => setSelectedCompletionSetId('')}>{completionNavBrand}</button>
-                              </>
-                            )}
-                            {selectedCompletionSetId && selectedCompletionSet && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <button
-                                  type="button"
-                                  className={`completion-crumb${!completionNavSubset ? ' completion-crumb-current' : ''}`}
-                                  onClick={() => setCompletionNavSubset('')}
-                                >
-                                  {selectedCompletionSet.title}
-                                </button>
-                              </>
-                            )}
-                            {completionNavSubset && (
-                              <>
-                                <span className="completion-crumb-sep" aria-hidden="true">›</span>
-                                <span className="completion-crumb completion-crumb-current">
-                                  {completionSetSubsets.find(s => s.id === completionNavSubset)?.name || 'Subset'}
-                                </span>
-                              </>
-                            )}
-                          </nav>
-                        )}
-
-                        {/* Category context header — shown whenever a category is active and not in set detail */}
-                        {completionNavCategory && !selectedCompletionSetId && (
-                          <article className="catalog-card completion-context-header">
-                            <div className="completion-context-header-body">
-                              <h3 className="completion-context-name">{completionNavCategory}</h3>
-                              <div className="completion-context-meta">
-                                <span>{Object.keys(completionSubcategoryGroups).length} subcategor{Object.keys(completionSubcategoryGroups).length === 1 ? 'y' : 'ies'}</span>
-                                <span aria-hidden="true">·</span>
-                                <span>{completionCategoryRollup.setsStarted} set{completionCategoryRollup.setsStarted === 1 ? '' : 's'} started</span>
-                                <span aria-hidden="true">·</span>
-                                <span>{completionCategoryRollup.percent.toFixed(1)}% avg complete</span>
-                              </div>
-                            </div>
-                            <div className="collection-allocation-bar-track completion-context-bar">
-                              <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(completionCategoryRollup.percent, 100)}%` }} />
-                            </div>
-                          </article>
-                        )}
-
-                        {/* Content area — one of five states */}
-                        {selectedCompletionSetId ? (
-                          selectedCompletionSet ? (
-                            <div className="completion-set-sheet">
-                              <div className="completion-sheet-header">
-                                {(() => {
-                                  // Back goes to the deepest branching level above the orange leaf.
-                                  if (completionIsLego && selectedCompletionSet?._isLego) {
-                                    let label, onBack
-                                    if (completionProductLines.length > 1) {
-                                      label = completionNavSubtheme || completionNavBrand
-                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine('') }
-                                    } else if (completionSubthemes.length > 1) {
-                                      label = completionNavBrand
-                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine(''); setCompletionNavSubtheme('') }
-                                    } else {
-                                      label = completionNavFranchise || 'Back'
-                                      onBack = () => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); setCompletionNavProductLine(''); setCompletionNavSubtheme(''); setCompletionNavBrand('') }
-                                    }
-                                    return <button type="button" className="catalog-action-pill" onClick={onBack}>← {label}</button>
-                                  }
-                                  const soleCard = completionBrandSetCards.length === 1 && completionBrandSetCards[0]?.id === selectedCompletionSetId
-                                  return (
-                                    <button type="button" className="catalog-action-pill" onClick={() => { setCompletionNavSubset(''); setSelectedCompletionSetId(''); if (soleCard) setCompletionNavBrand('') }}>
-                                      ← {soleCard ? (completionNavFranchise || 'Back') : (completionNavBrand || 'All Sets')}
-                                    </button>
-                                  )
-                                })()}
-                                <div className="completion-sheet-title">
-                                  <h3>{selectedCompletionSet.title}{completionNavSubset ? ` — ${completionSetSubsets.find(s => s.id === completionNavSubset)?.name}` : ''}</h3>
-                                  <p>{selectedCompletionSet.ownedCount} / {selectedCompletionSet.totalItems} collected</p>
-                                </div>
-                                <div className="completion-sheet-pct">{selectedCompletionSet.completionPercent.toFixed(0)}%</div>
-                              </div>
-                              <div className="completion-sheet-progress-track">
-                                <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(selectedCompletionSet.completionPercent, 100)}%` }} />
-                              </div>
-
-                              {/* Subset picker — shown when set has subsets and none selected */}
-                              {completionSetSubsets.length > 0 && !completionNavSubset ? (
-                                <div className="completion-subset-grid">
-                                  <button
-                                    type="button"
-                                    className="catalog-card completion-subset-card"
-                                    onClick={() => setCompletionNavSubset('__all__')}
-                                  >
-                                    <strong>All Subsets</strong>
-                                    <p>{selectedCompletionSet.totalItems} cards · {selectedCompletionSet.completionPercent.toFixed(0)}% complete</p>
-                                  </button>
-                                  {completionSetSubsets.map(subset => {
-                                    const subItems = completionSetAllItems.filter(i => i.raw?.subcollectble_set_id === subset.id)
-                                    const subOwned = subItems.filter(i => Boolean(ownedItemsByCatalogId[i.item_id])).length
-                                    const subPct = subItems.length > 0 ? (subOwned / subItems.length) * 100 : 0
-                                    return (
-                                      <button
-                                        key={subset.id}
-                                        type="button"
-                                        className="catalog-card completion-subset-card"
-                                        onClick={() => setCompletionNavSubset(subset.id)}
-                                      >
-                                        <strong>{subset.name}</strong>
-                                        <p>{subOwned} / {subItems.length} · {subPct.toFixed(0)}% complete</p>
-                                        <div className="completion-sheet-progress-track" style={{ marginTop: 8 }}>
-                                          <div className="completion-sheet-progress-fill" style={{ width: `${Math.min(subPct, 100)}%` }} />
-                                        </div>
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              ) : selectedCompletionSetEntries.length === 0 ? (
-                                <p className="collection-muted completion-sheet-empty">No items tracked for this set yet.</p>
-                              ) : (
-                                <div className="completion-sheet-grid">
-                                  {selectedCompletionSetEntries.map((entry, index) => {
-                                    const na = (v) => (v && v !== 'N/A' ? v : '')
-                                    const r = entry.raw
-                                    const catalogItemObj = r ? {
-                                      id:                 r.item_id,
-                                      name:               entry.itemName,
-                                      description:        r.description || '',
-                                      release_year:       r.release_year || null,
-                                      category_id:        r.category_id,
-                                      subcategory_id:     r.subcategory_id,
-                                      franchise_id:       r.franchise_id,
-                                      collectible_set_id: r.collectible_set_id,
-                                      brand_id:           r.brand_id,
-                                      categoryName:       na(r.category),
-                                      subcategoryName:    na(r.subcategory),
-                                      brandName:          na(r.brand),
-                                      card_number:        r.card_number !== 'N/A' ? r.card_number : null,
-                                      print_count:        r.print_count,
-                                      metadata:           { image_url: entry.imageUrl, set: na(r.collectible_set) },
-                                      dynamic_fields:     {},
-                                      _subject_name:      na(r.subject),
-                                      _set_name:          na(r.collectible_set),
-                                      _print_type:        na(r.print_type),
-                                      _brand_name:        na(r.brand),
-                                      _franchise_name:    na(r.franchise),
-                                      _details:           r,
-                                      front_image_path:   r.front_image_path || null,
-                                    } : null
-                                    return (
-                                      <button
-                                        key={`sheet-${entry.id}`}
-                                        type="button"
-                                        className={`completion-sheet-item${entry.isOwned ? ' owned' : ' missing'}`}
-                                        onClick={() => catalogItemObj && setCompletionSheetPopup({ entry, catalogItemObj })}
-                                      >
-                                        <span className="completion-sheet-num">{index + 1}</span>
-                                        <div className="completion-sheet-figure">
-                                          {entry.imageUrl ? (
-                                            <img src={entry.imageUrl} alt={entry.itemName} className="completion-sheet-img" />
-                                          ) : (
-                                            <svg className="completion-sheet-silhouette" viewBox="0 0 40 72" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                                              <circle cx="20" cy="9" r="8" />
-                                              <rect x="10" y="19" width="20" height="24" rx="4" />
-                                              <rect x="6" y="19" width="8" height="18" rx="3" />
-                                              <rect x="26" y="19" width="8" height="18" rx="3" />
-                                              <rect x="11" y="43" width="8" height="20" rx="3" />
-                                              <rect x="21" y="43" width="8" height="20" rx="3" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                        <p className="completion-sheet-label">{entry.itemName}</p>
-                                        {entry.isOwned && entry.quantity > 1 && (
-                                          <span className="completion-sheet-qty">×{entry.quantity}</span>
-                                        )}
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          ) : null
-                        ) : completionNavBrand && completionIsLego && completionFacetStage === 'subtheme' ? (
-                          /* LEGO facet: Subtheme blocks */
-                          <section className="completion-block-grid">
-                            {completionSubthemes.map((st) => {
-                              const r = rollupCards(completionBrandSetCards.filter(c => c._subtheme === st))
-                              return (
-                                <article key={st} className="catalog-card completion-nav-block" role="button" tabIndex={0}
-                                  onClick={() => { setCompletionNavProductLine(''); setCompletionNavSubtheme(st) }}
-                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavProductLine(''); setCompletionNavSubtheme(st) } }}>
-                                  <div className="completion-nav-block-head"><strong>{st}</strong><span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span></div>
-                                  <div className="collection-allocation-bar-track"><div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} /></div>
-                                  <div className="completion-nav-block-meta"><span>{r.ownedCount} / {r.totalItems}</span></div>
-                                </article>
-                              )
-                            })}
-                          </section>
-                        ) : completionNavBrand && completionIsLego && completionFacetStage === 'productLine' ? (
-                          /* LEGO facet: Product Line blocks */
-                          <section className="completion-block-grid">
-                            {completionProductLines.map((pl) => {
-                              const r = rollupCards(completionAfterSubtheme.filter(c => c._productLine === pl))
-                              return (
-                                <article key={pl} className="catalog-card completion-nav-block" role="button" tabIndex={0}
-                                  onClick={() => setCompletionNavProductLine(pl)}
-                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavProductLine(pl) } }}>
-                                  <div className="completion-nav-block-head"><strong>{pl}</strong><span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span></div>
-                                  <div className="collection-allocation-bar-track"><div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} /></div>
-                                  <div className="completion-nav-block-meta"><span>{r.ownedCount} / {r.totalItems}</span></div>
-                                </article>
-                              )
-                            })}
-                          </section>
-                        ) : completionNavBrand ? (
-                          /* Leaf collection cards (single one auto-opens to the orange items) */
-                          (completionIsLego ? completionAfterProductLine : completionBrandSetCards).length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">No items here yet.</article>
-                          ) : (
-                            <section className="collection-goal-grid" aria-label="Sets">
-                              {(completionIsLego ? completionAfterProductLine : completionBrandSetCards).map((setCard) => (
-                                <article
-                                  key={`started-set-${setCard.id}`}
-                                  className="catalog-card collection-goal-card"
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={() => setSelectedCompletionSetId(setCard.id)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                      event.preventDefault()
-                                      setSelectedCompletionSetId(setCard.id)
-                                    }
-                                  }}
-                                >
-                                  <div className="collection-goal-card-head">
-                                    <div>
-                                      <h3>{setCard.title}</h3>
-                                      <p>{setCard.categoryName}</p>
-                                    </div>
-                                    <button type="button" className="catalog-action-pill" onClick={(e) => {
-                                      e.stopPropagation()
-                                      setSelectedCompletionSetId(setCard.id)
-                                    }}>
-                                      View
-                                    </button>
-                                  </div>
-                                  <div className="collection-goal-progress-row">
-                                    <strong>{setCard.ownedCount} / {setCard.totalItems}</strong>
-                                    <span>{setCard.completionPercent.toFixed(1)}% Complete</span>
-                                  </div>
-                                  <div className="collection-allocation-bar-track">
-                                    <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(setCard.completionPercent, 100)}%` }} />
-                                  </div>
-                                  <div className="collection-goal-metrics">
-                                    <span>Missing: {setCard.missingCount}</span>
-                                    <span>Owned Value: {formatUsd(setCard.ownedValue)}</span>
-                                  </div>
-                                </article>
-                              ))}
-                            </section>
-                          )
-                        ) : completionNavFranchise ? (
-                          /* Brand blocks */
-                          Object.keys(completionBrandGroups).length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">No sets started for this franchise yet.</article>
-                          ) : (
-                            <section className="completion-block-grid">
-                              {Object.entries(completionBrandGroups).sort(([a], [b]) => a.localeCompare(b)).map(([brandName, cards]) => {
-                                const r = rollupCards(cards)
-                                return (
-                                  <article
-                                    key={brandName}
-                                    className="catalog-card completion-nav-block"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => setCompletionNavBrand(brandName)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavBrand(brandName) } }}
-                                  >
-                                    <div className="completion-nav-block-head">
-                                      <strong>{brandName}</strong>
-                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
-                                    </div>
-                                    <div className="collection-allocation-bar-track">
-                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
-                                    </div>
-                                    <div className="completion-nav-block-meta">
-                                      <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
-                                    </div>
-                                  </article>
-                                )
-                              })}
-                            </section>
-                          )
-                        ) : completionNavSubcategory ? (
-                          /* Franchise blocks */
-                          Object.keys(completionFranchiseGroups).length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">No sets started in this subcategory yet.</article>
-                          ) : (
-                            <section className="completion-block-grid">
-                              {Object.entries(completionFranchiseGroups).sort(([a], [b]) => a.localeCompare(b)).map(([franchiseName, cards]) => {
-                                const r = rollupCards(cards)
-                                return (
-                                  <article
-                                    key={franchiseName}
-                                    className="catalog-card completion-nav-block"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => setCompletionNavFranchise(franchiseName)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavFranchise(franchiseName) } }}
-                                  >
-                                    <div className="completion-nav-block-head">
-                                      <strong>{franchiseName}</strong>
-                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
-                                    </div>
-                                    <div className="collection-allocation-bar-track">
-                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
-                                    </div>
-                                    <div className="completion-nav-block-meta">
-                                      <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
-                                    </div>
-                                  </article>
-                                )
-                              })}
-                            </section>
-                          )
-                        ) : completionNavCategory ? (
-                          /* Subcategory blocks */
-                          Object.keys(completionSubcategoryGroups).length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">No sets started in this category yet.</article>
-                          ) : (
-                            <section className="completion-block-grid">
-                              {Object.entries(completionSubcategoryGroups).sort(([a], [b]) => a.localeCompare(b)).map(([subcatName, cards]) => {
-                                const r = rollupCards(cards)
-                                return (
-                                  <article
-                                    key={subcatName}
-                                    className="catalog-card completion-nav-block"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => setCompletionNavSubcategory(subcatName)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavSubcategory(subcatName) } }}
-                                  >
-                                    <div className="completion-nav-block-head">
-                                      <strong>{subcatName}</strong>
-                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
-                                    </div>
-                                    <div className="collection-allocation-bar-track">
-                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
-                                    </div>
-                                    <div className="completion-nav-block-meta">
-                                      <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
-                                    </div>
-                                  </article>
-                                )
-                              })}
-                            </section>
-                          )
-                        ) : (
-                          /* Category blocks — default view */
-                          startedSetCards.length === 0 ? (
-                            <article className="catalog-card catalog-loading-panel">
-                              No started sets found yet. Add items to your collection to see set progress.
-                            </article>
-                          ) : (
-                            <section className="completion-block-grid">
-                              {Object.entries(completionCategoryGroups).sort(([a], [b]) => a.localeCompare(b)).map(([catName, cards]) => {
-                                const r = rollupCards(cards)
-                                return (
-                                  <article
-                                    key={catName}
-                                    className="catalog-card completion-nav-block"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => { setCompletionNavCategory(catName); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand('') }}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompletionNavCategory(catName); setCompletionNavSubcategory(''); setCompletionNavFranchise(''); setCompletionNavBrand('') } }}
-                                  >
-                                    <div className="completion-nav-block-head">
-                                      <strong>{catName}</strong>
-                                      <span className="completion-nav-block-pct">{r.percent.toFixed(1)}%</span>
-                                    </div>
-                                    <div className="collection-allocation-bar-track">
-                                      <div className="collection-allocation-bar-fill" style={{ width: `${Math.min(r.percent, 100)}%` }} />
-                                    </div>
-                                    <div className="completion-nav-block-meta">
-                                      <span>{r.ownedCount} / {r.totalItems}</span>
-                                      <span>{r.setsStarted} {r.setsStarted === 1 ? 'set' : 'sets'}</span>
-                                    </div>
-                                  </article>
-                                )
-                              })}
-                            </section>
-                          )
-                        )}
-                    </div>
-                  ) : (
-                    <>
-                      <section className="collection-summary-grid" aria-label="Collection summary">
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Unique Items</p>
-                          <strong>{collectionSummary.uniqueItems}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Total Copies</p>
-                          <strong>{collectionSummary.totalCopies}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Graded Copies</p>
-                          <strong>{collectionSummary.gradedCopies}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Total Invested</p>
-                          <strong>{formatUsd(collectionSummary.totalInvested)}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Collection Value</p>
-                          <strong>{formatUsd(collectionSummary.totalValue)}</strong>
-                        </article>
-                      </section>
-
-                      <section className="collection-list" aria-label="Collection items">
-                        {paginatedCollectionItems.map((item) => {
-                          const averageCost = item.pricedCopies > 0 ? item.totalInvested / item.pricedCopies : null
-                          const primaryAcquisitionType = Object.entries(item.acquisitionTypes || {}).sort((left, right) => right[1] - left[1])[0]?.[0] || ''
-                          const primaryLocationId = Array.isArray(item.locationIds) && item.locationIds.length > 0 ? item.locationIds[0] : ''
-
-                          return (
-                            <article key={`collection-item-${item.id}`} className="catalog-card collection-item-row">
-                              {item.imageUrl ? (
-                                <img className="collection-item-image" src={item.imageUrl} alt={item.name} loading="lazy" />
-                              ) : (
-                                <div className="collection-item-image collection-item-image-placeholder">No image</div>
-                              )}
-
-                              <div className="collection-item-body">
-                                <h3>{item.name}</h3>
-                                <p className="collection-item-meta">
-                                  {item.releaseYear ? `${item.releaseYear}` : 'Year N/A'}
-                                  {primaryAcquisitionType
-                                    ? ` | ${COLLECTION_ACQUISITION_TYPE_LABELS[primaryAcquisitionType] || primaryAcquisitionType}`
-                                    : ''}
-                                  {/* Taxonomy: franchise + item type surface for every
-                                      category (LEGO theme/type, Toy franchise/type). */}
-                                  {item.franchiseName ? ` | ${item.franchiseName}` : ''}
-                                  {item.setName ? ` | ${item.setName}` : ''}
-                                  {item.brandName ? ` | ${item.brandName}` : ''}
-                                  {item.categoryName ? ` | ${item.categoryName}` : ''}
-                                </p>
-                                <div className="collection-item-stats">
-                                  <span>Qty: {item.totalQuantity}</span>
-                                  <span>Certs: {item.certCount}</span>
-                                  <span>Avg Cost: {averageCost == null ? 'N/A' : formatUsd(averageCost)}</span>
-                                  <span>Invested: {formatUsd(item.totalInvested)}</span>
-                                </div>
-                                <p className="collection-item-organization-row">
-                                  Collection(s): {item.collectionNames.length > 0 ? item.collectionNames.join(', ') : 'Unassigned'}
-                                </p>
-                                <p className="collection-item-organization-row">
-                                  Location: {item.primaryLocationPath || 'Unassigned'}
-                                </p>
-                              </div>
-
-                              <div className="collection-item-actions">
-                                <select
-                                  value={primaryLocationId}
-                                  onChange={(event) => handleAssignStorageLocationToItem(item, event.target.value)}
-                                  disabled={isSavingCollectionOrganization}
-                                  aria-label={`Storage location for ${item.name}`}
-                                >
-                                  <option value="">Unassigned</option>
-                                  {storageLocations.map((location) => (
-                                    <option key={`item-location-${item.id}-${location.id}`} value={location.id}>
-                                      {storageLocationPathById[location.id] || location.name}
-                                    </option>
-                                  ))}
-                                </select>
-
-                                {assignableCustomCollections.map((collection) => {
-                                  const isAssigned = Array.isArray(item.collectionIds) && item.collectionIds.includes(collection.id)
-                                  return (
-                                    <button
-                                      key={`item-collection-${item.id}-${collection.id}`}
-                                      type="button"
-                                      className={`catalog-action-pill ${isAssigned ? 'active' : ''}`}
-                                      onClick={() => handleToggleCollectionMembership(item, collection.id)}
-                                      disabled={isSavingCollectionOrganization}
-                                    >
-                                      {isAssigned ? '✓ ' : ''}{collection.name}
-                                    </button>
-                                  )
-                                })}
-
-                                <button
-                                  type="button"
-                                  className="catalog-action-pill"
-                                  onClick={() => handleOpenCollectionItemDetails(item)}
-                                >
-                                  View Details
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="catalog-action-pill"
-                                  onClick={() => {
-                                    if (item.catalogItem) {
-                                      handleOpenCatalogItem(item.catalogItem)
-                                    }
-                                  }}
-                                  disabled={!item.catalogItem}
-                                >
-                                  View Catalog Card
-                                </button>
-
-                                {removeConfirmItemId === item.id ? (
-                                  <div className="collection-item-remove-confirm">
-                                    {item.totalQuantity > 1 ? (
-                                      <>
-                                        <span className="collection-item-remove-label">Remove:</span>
-                                        <button type="button" className="collection-item-remove-choice" onClick={() => handleRemoveCollectionItem(item, 'one')}>1 copy</button>
-                                        <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleRemoveCollectionItem(item, 'all')}>All {item.totalQuantity}</button>
-                                        <button type="button" className="collection-item-remove-cancel" onClick={() => setRemoveConfirmItemId('')}>Cancel</button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="collection-item-remove-label">Remove item?</span>
-                                        <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleRemoveCollectionItem(item, 'all')}>Yes</button>
-                                        <button type="button" className="collection-item-remove-cancel" onClick={() => setRemoveConfirmItemId('')}>No</button>
-                                      </>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill collection-item-remove-btn"
-                                    onClick={() => setRemoveConfirmItemId(item.id)}
-                                  >
-                                    Remove
-                                  </button>
-                                )}
-                              </div>
-                            </article>
-                          )
-                        })}
-                      </section>
-
-                      {collectionOverviewTotalPages > 1 ? (
-                        <div className="catalog-pagination" aria-label="Collection overview pagination">
-                          <button
-                            type="button"
-                            className="catalog-pagination-btn"
-                            onClick={() => setCollectionOverviewPage((currentPage) => Math.max(1, currentPage - 1))}
-                            disabled={collectionOverviewPage <= 1}
-                          >
-                            Previous
-                          </button>
-                          <span className="catalog-pagination-page">
-                            Page{' '}
-                            <input
-                              type="number"
-                              className="catalog-pagination-input"
-                              min={1}
-                              max={collectionOverviewTotalPages}
-                              value={collectionOverviewPageInput}
-                              onChange={(e) => setCollectionOverviewPageInput(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                              onBlur={() => {
-                                const n = parseInt(collectionOverviewPageInput, 10)
-                                if (!Number.isFinite(n)) { setCollectionOverviewPageInput(String(collectionOverviewPage)); return }
-                                const clamped = Math.min(collectionOverviewTotalPages, Math.max(1, n))
-                                setCollectionOverviewPage(clamped)
-                                setCollectionOverviewPageInput(String(clamped))
-                              }}
-                              aria-label="Go to page"
-                            />
-                            {' '}/ {collectionOverviewTotalPages}
-                          </span>
-                          <button
-                            type="button"
-                            className="catalog-pagination-btn"
-                            onClick={() => setCollectionOverviewPage((currentPage) => Math.min(collectionOverviewTotalPages, currentPage + 1))}
-                            disabled={collectionOverviewPage >= collectionOverviewTotalPages}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'collection_item' ? (
-          <section className="collection-screen" aria-label="Collection item details">
-            <div className="catalog-head">
-              <div>
-                <h1>{selectedCollectionItemDetails?.name || 'Collection Item'}</h1>
-                <p className="subtitle catalog-subtitle">Copy-level details for your owned card(s).</p>
-              </div>
-              <div className="catalog-actions">
-                <button type="button" className="catalog-action-pill" onClick={handleBackToCollection}>
-                  Back to My Collection
-                </button>
-              </div>
-            </div>
-
-            {!currentUser ? (
-              <div className="settings-empty-state">
-                <p className="subtitle">Log in to view your collection details.</p>
-                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>
-                  Log in
-                </button>
-              </div>
-            ) : !selectedCollectionItemDetails ? (
-              <div className="catalog-card catalog-loading-panel">
-                Could not find that item in your collection.
-              </div>
-            ) : (
-              <div className="collection-main-pane">
-                <article className="catalog-card collection-analytics-card owned-copy-detail">
-                  <div className="owned-copy-detail-head">
-                    <div>
-                      <p className="owned-copy-eyebrow">Owned Asset</p>
-                      <h3>{selectedCollectionItemDetails.name}</h3>
-                      <p className="collection-muted">
-                        {selectedCollectionItemCopyRows.length} owned cop{selectedCollectionItemCopyRows.length === 1 ? 'y' : 'ies'} | Total Qty {selectedCollectionItemDetails.totalQuantity}
-                      </p>
-                    </div>
-                    <div className="owned-copy-tabs" aria-label="Owned copy detail sections">
-                      {['Overview', 'Photos', 'History', 'Market', 'Collection', 'Listing'].map((tabLabel, tabIndex) => (
-                        <button key={tabLabel} type="button" className={`owned-copy-tab${tabIndex === 0 ? ' active' : ''}`}>
-                          {tabLabel}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {selectedCollectionItemCopyRows.length === 0 || !selectedCollectionCopyRow ? (
-                    <p className="collection-muted">No copy-level rows found for this item.</p>
-                  ) : (
-                    <>
-                      {selectedCollectionItemCopyRows.length > 1 ? (
-                        <section className="owned-copy-selector" aria-label="Owned copies">
-                          <div className="owned-copy-section-head">
-                            <span>Owned Copies</span>
-                          </div>
-                          <div className="owned-copy-selector-grid">
-                            {selectedCollectionItemCopyRows.map((copyRow, copyIndex) => {
-                              const copyMetadata = copyRow?.metadata && typeof copyRow.metadata === 'object' ? copyRow.metadata : {}
-                              const copyCondition = copyRow?.condition || (copyRow?.gradingCompany ? `${copyRow.gradingCompany}${copyRow.grade ? ` ${copyRow.grade}` : ''}` : 'Condition Not Set')
-                              const copyLocation = Array.isArray(copyRow?.locationPaths) && copyRow.locationPaths.length > 0 ? copyRow.locationPaths[0] : 'Location Not Set'
-                              const copyHasFrontPhoto = Boolean(copyRow?.frontImageUrl || copyMetadata.front_image_url || copyMetadata.user_image_url)
-                              const copyHasBackPhoto = Boolean(copyRow?.backImageUrl || copyMetadata.back_image_url)
-
-                              return (
-                                <button
-                                  key={copyRow.id || `copy-${copyIndex}`}
-                                  type="button"
-                                  className={`owned-copy-select-card${copyIndex === boundedSelectedCollectionCopyIndex ? ' active' : ''}`}
-                                  onClick={() => setSelectedCollectionCopyIndex(copyIndex)}
-                                >
-                                  <strong>Copy #{copyIndex + 1}</strong>
-                                  <span>{copyCondition}</span>
-                                  <small>{copyLocation}</small>
-                                  <em>{copyHasFrontPhoto && copyHasBackPhoto ? 'Photos Ready' : 'Photos Needed'}</em>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </section>
-                      ) : null}
-
-                      <div className="owned-copy-asset-layout">
-                        <aside className="owned-copy-photo-card">
-                          <div className="catalog-detail-image-frame">
-                            {selectedCollectionCopyImageUrl ? (
-                              <img
-                                src={selectedCollectionCopyImageUrl}
-                                alt={selectedCollectionItemDetails.name || 'Collection copy'}
-                                className="catalog-detail-market-image"
-                              />
-                            ) : (
-                              <div className="catalog-detail-market-image catalog-item-image-placeholder">Front photo missing</div>
-                            )}
-                          </div>
-                          <p className="catalog-detail-image-caption">
-                            Copy {boundedSelectedCollectionCopyIndex + 1} of {selectedCollectionItemCopyRows.length}
-                          </p>
-                        </aside>
-
-                        <div className="owned-copy-detail-stack">
-                          {selectedCollectionItemDetails.rarity_id && (
-                            <section className="owned-copy-hero-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: '10px 16px' }}>
-                              <p className="owned-copy-eyebrow" style={{ margin: 0 }}>Rarity</p>
-                              <strong style={{ fontSize: '1rem' }}>{catalogRarities.find(r => r.id === selectedCollectionItemDetails.rarity_id)?.name ?? 'Unknown'}</strong>
-                            </section>
-                          )}
-                          <section className="owned-copy-hero-card">
-                            <div>
-                              <p className="owned-copy-eyebrow">Condition</p>
-                              <h2>{selectedCollectionCopyCondition || 'Condition Not Set'}</h2>
-                              {selectedCopyConditionOptions.length > 0 && (
-                                <select
-                                  className="collection-filter-select"
-                                  style={{ marginTop: 6, maxWidth: 260 }}
-                                  value={selectedCollectionCopyRow.condition || ''}
-                                  disabled={isSavingCopyCondition}
-                                  onChange={(event) => handleUpdateCollectionCopyCondition(event.target.value)}
-                                >
-                                  <option value="">— Set condition —</option>
-                                  {selectedCopyConditionOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                              )}
-                              <p className="collection-muted">
-                                {selectedCollectionCopyRow.certNumber ? `Cert #${selectedCollectionCopyRow.certNumber}` : 'Uncertified copy'}
-                                {selectedCollectionCopyRow.acquisitionType
-                                  ? ` | ${COLLECTION_ACQUISITION_TYPE_LABELS[selectedCollectionCopyRow.acquisitionType] || selectedCollectionCopyRow.acquisitionType}`
-                                  : ''}
-                              </p>
-                            </div>
-                            <div className={`owned-copy-status-pill${selectedCollectionCopyIsListed ? ' listed' : ''}`}>
-                              {selectedCollectionCopyIsListed ? 'Listed For Sale' : 'Not Listed'}
-                            </div>
-                          </section>
-
-                          <section className="owned-copy-summary-grid">
-                            <div className="owned-copy-summary-card highlight">
-                              <span>Purchase Price</span>
-                              <strong>{selectedCollectionCopyRow.purchasePrice == null ? 'Not Recorded' : `${formatUsd(selectedCollectionCopyRow.purchasePrice)} CAD`}</strong>
-                            </div>
-                            <div className="owned-copy-summary-card highlight">
-                              <span>Current Market Value</span>
-                              <strong>{selectedCollectionCopyHasMarketValue ? `${formatUsd(selectedCollectionCopyRow.currentMarketValue)} CAD` : 'Market Data Not Available Yet'}</strong>
-                            </div>
-                            <div className="owned-copy-summary-card highlight">
-                              <span>Profit / Loss</span>
-                              <strong className={selectedCollectionCopyProfitLoss >= 0 ? 'collection-positive' : 'collection-negative'}>
-                                {selectedCollectionCopyHasMarketValue && selectedCollectionCopyRow.purchasePrice != null
-                                  ? `${selectedCollectionCopyProfitLoss >= 0 ? '+' : ''}${formatUsd(selectedCollectionCopyProfitLoss)}${selectedCollectionCopyProfitLossPercent == null ? '' : ` (${selectedCollectionCopyProfitLossPercent >= 0 ? '+' : ''}${selectedCollectionCopyProfitLossPercent.toFixed(0)}%)`}`
-                                  : 'Market Data Not Available Yet'}
-                              </strong>
-                            </div>
-                          </section>
-
-                          <section className="owned-copy-info-grid">
-                            <div className="owned-copy-info-card">
-                              <span>Collection</span>
-                              <strong>{selectedCollectionCopyCollection}</strong>
-                            </div>
-                            <div className="owned-copy-info-card">
-                              <span>Location</span>
-                              <strong>{selectedCollectionCopyLocation}</strong>
-                            </div>
-                            <div className="owned-copy-info-card">
-                              <span>Acquired</span>
-                              <strong>{selectedCollectionCopyAcquiredLabel}</strong>
-                            </div>
-                            <div className="owned-copy-info-card">
-                              <span>Listing Status</span>
-                              <strong>
-                                {selectedCollectionCopyIsListed
-                                  ? `Listed For Sale${selectedCollectionCopyListingPrice == null ? '' : ` | ${formatUsd(selectedCollectionCopyListingPrice)} CAD`}`
-                                  : 'Not Listed'}
-                              </strong>
-                            </div>
-                          </section>
-                        </div>
-                      </div>
-
-                      <div className="owned-copy-management-grid">
-                        <section className="owned-copy-panel">
-                          <div className="owned-copy-section-head">
-                            <span>Photos</span>
-                          </div>
-                          <div className="owned-copy-photo-grid">
-                            <div className="owned-copy-photo-upload">
-                              <div>
-                                <strong>Front Photo</strong>
-                                <p className={selectedCollectionCopyFrontImageUrl ? 'requirement-complete' : 'requirement-missing'}>
-                                  {selectedCollectionCopyFrontImageUrl ? '✓ Front Photo Uploaded' : '✗ Front Photo Missing'}
-                                </p>
-                              </div>
-                              <label className="catalog-action-pill" htmlFor="collection-copy-front-image-upload">
-                                {isUploadingCollectionCopyImage ? 'Uploading...' : 'Upload Front'}
-                              </label>
-                              <input
-                                id="collection-copy-front-image-upload"
-                                type="file"
-                                accept="image/*"
-                                onChange={(event) => handleUploadCollectionCopyImage(event, 'front')}
-                                disabled={isUploadingCollectionCopyImage}
-                                style={{ display: 'none' }}
-                              />
-                            </div>
-                            <div className="owned-copy-photo-upload">
-                              <div>
-                                <strong>Back Photo</strong>
-                                <p className={selectedCollectionCopyBackImageUrl ? 'requirement-complete' : 'requirement-missing'}>
-                                  {selectedCollectionCopyBackImageUrl ? '✓ Back Photo Uploaded' : '✗ Back Photo Missing'}
-                                </p>
-                              </div>
-                              <label className="catalog-action-pill" htmlFor="collection-copy-back-image-upload">
-                                {isUploadingCollectionCopyImage ? 'Uploading...' : 'Upload Back'}
-                              </label>
-                              <input
-                                id="collection-copy-back-image-upload"
-                                type="file"
-                                accept="image/*"
-                                onChange={(event) => handleUploadCollectionCopyImage(event, 'back')}
-                                disabled={isUploadingCollectionCopyImage}
-                                style={{ display: 'none' }}
-                              />
-                            </div>
-                          </div>
-                        </section>
-
-                        <section className="owned-copy-panel">
-                          <div className="owned-copy-section-head">
-                            <span>Listing</span>
-                          </div>
-                          <label className="catalog-detail-label" htmlFor="collection-copy-sale-price">Pricing (CAD)</label>
-                          <input
-                            id="collection-copy-sale-price"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={collectionCopySalePriceInput}
-                            onChange={(event) => setCollectionCopySalePriceInput(event.target.value)}
-                            placeholder="0.00"
-                          />
-
-                          {!canListSelectedCollectionCopy ? (
-                            <div className="owned-copy-requirements">
-                              <strong>Requirements Remaining</strong>
-                              {listingRequirementItems.map((requirement) => (
-                                <p key={requirement.label} className={requirement.complete ? 'requirement-complete' : 'requirement-missing'}>
-                                  {requirement.complete ? '✓' : '✗'} {requirement.label}
-                                </p>
-                              ))}
-                            </div>
-                          ) : null}
-
-                          {sellConnectedMinifigs.length > 0 ? (
-                            <div className="collection-minifig-checklist">
-                              <label>Include minifigs you own with this set?</label>
-                              <div className="collection-minifig-rows">
-                                {sellConnectedMinifigs.map(m => (
-                                  <label key={m.ownedCopyId} className="collection-minifig-check">
-                                    <input
-                                      type="checkbox"
-                                      checked={sellMinifigInclusion[m.ownedCopyId] ?? true}
-                                      onChange={e => setSellMinifigInclusion(prev => ({ ...prev, [m.ownedCopyId]: e.target.checked }))}
-                                    />
-                                    <span>{m.name}{m.condition ? ` · ${m.condition}` : ''}</span>
-                                  </label>
-                                ))}
-                              </div>
-                              <p className="catalog-admin-hint" style={{ marginTop: 4 }}>Only minifigs connected to this set that you own are shown.</p>
-                            </div>
-                          ) : null}
-
-                          <button
-                            type="button"
-                            className="catalog-action-pill owned-copy-list-button"
-                            onClick={handleListSelectedCollectionCopyForSale}
-                            disabled={isListingCollectionCopyForSale || !canListSelectedCollectionCopy}
-                          >
-                            {isListingCollectionCopyForSale
-                              ? 'Listing...'
-                              : canListSelectedCollectionCopy
-                                ? 'List This Copy For Sale'
-                                : 'Complete Listing Requirements'}
-                          </button>
-                        </section>
-                      </div>
-
-                      {collectionItemDetailActionError ? <p className="auth-error inline-error">{collectionItemDetailActionError}</p> : null}
-                      {collectionItemDetailActionMessage ? <p className="auth-banner">{collectionItemDetailActionMessage}</p> : null}
-                    </>
-                  )}
-                </article>
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'wishlist' ? (
-          <section className="collection-screen" aria-label="My Wishlist">
-            <div className="catalog-head">
-              <div>
-                <h1>My Wishlist</h1>
-                <p className="subtitle catalog-subtitle">Items you want — add them to your collection when you get them.</p>
-              </div>
-              <div className="catalog-actions">
-                <button type="button" className="catalog-action-pill" onClick={handleOpenCatalog}>
-                  Browse Catalog
-                </button>
-              </div>
-            </div>
-
-            {!currentUser ? (
-              <div className="settings-empty-state">
-                <p className="subtitle">Log in to view your wishlist.</p>
-                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>
-                  Log in
-                </button>
-              </div>
-            ) : (
-              <div className="collection-layout">
-                <aside className="catalog-card collection-sidebar" aria-label="Wishlist filters">
-                  <div className="collection-sidebar-section">
-                    <p className="collection-sidebar-title">My Wishlist</p>
-                    <button
-                      type="button"
-                      className={`collection-sidebar-link ${wishlistCategoryFilter === 'all' ? 'active' : ''}`}
-                      onClick={() => { setWishlistCategoryFilter('all'); setWishlistPage(1) }}
-                    >
-                      All Items
-                    </button>
-                    {wishlistCategories.map(cat => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        className={`collection-sidebar-link ${wishlistCategoryFilter === cat.id ? 'active' : ''}`}
-                        onClick={() => { setWishlistCategoryFilter(cat.id); setWishlistPage(1) }}
-                      >
-                        {cat.name}
-                      </button>
-                    ))}
-                  </div>
-                </aside>
-
-                <div className="collection-main-pane">
-                  <div className="collection-topbar">
-                    <input
-                      type="search"
-                      placeholder="Search wishlist…"
-                      value={wishlistSearchQuery}
-                      onChange={e => { setWishlistSearchQuery(e.target.value); setWishlistPage(1) }}
-                    />
-                    <div className="collection-tab-row" role="tablist" aria-label="Wishlist views">
-                      <button
-                        type="button"
-                        className={`collection-tab-button ${wishlistViewTab === 'overview' ? 'active' : ''}`}
-                        onClick={() => setWishlistViewTab('overview')}
-                      >
-                        Overview
-                      </button>
-                    </div>
-                  </div>
-
-                  {isWishlistLoading ? (
-                    <div className="catalog-card catalog-loading-panel">Loading your wishlist...</div>
-                  ) : wishlistLoadError ? (
-                    <div className="catalog-card catalog-loading-panel">{wishlistLoadError}</div>
-                  ) : wishlistItems.length === 0 ? (
-                    <div className="settings-empty-state">
-                      <p className="subtitle">Your wishlist is empty. Browse the catalog and add items you want.</p>
-                      <button type="button" className="auth-submit" onClick={handleOpenCatalog}>
-                        Browse Catalog
-                      </button>
-                    </div>
-                  ) : filteredWishlistItems.length === 0 ? (
-                    <div className="catalog-card catalog-loading-panel">No items match your filters.</div>
-                  ) : (
-                    <>
-                      <section className="collection-summary-grid" aria-label="Wishlist summary">
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Total Wishlisted</p>
-                          <strong>{wishlistSummary.totalItems}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Categories</p>
-                          <strong>{wishlistSummary.uniqueCategories}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Unique Sets</p>
-                          <strong>{wishlistSummary.uniqueSets}</strong>
-                        </article>
-                        <article className="catalog-card collection-summary-card">
-                          <p className="collection-summary-label">Est. Price to Complete</p>
-                          <strong>{wishlistSummary.pricedCount > 0 ? formatUsd(wishlistSummary.estimatedTotal) : '—'}</strong>
-                          {wishlistSummary.pricedCount > 0 && wishlistSummary.pricedCount < wishlistSummary.filteredCount && (
-                            <p style={{ fontSize: '0.72rem', color: '#667', marginTop: 2 }}>
-                              {wishlistSummary.pricedCount} of {wishlistSummary.filteredCount} priced
-                            </p>
-                          )}
-                        </article>
-                      </section>
-
-                      <section className="collection-list" aria-label="Wishlist items">
-                        {paginatedWishlistItems.map(item => (
-                          <article key={`wishlist-item-${item.id}`} className="catalog-card collection-item-row">
-                            {item.imageUrl ? (
-                              <img className="collection-item-image" src={item.imageUrl} alt={item.name} loading="lazy" />
-                            ) : (
-                              <div className="collection-item-image collection-item-image-placeholder">No image</div>
-                            )}
-
-                            <div className="collection-item-body">
-                              <h3>{item.name}</h3>
-                              <p className="collection-item-meta">
-                                {[item.releaseYear, item.setName, item.categoryName].filter(Boolean).join(' | ')}
-                              </p>
-                              <div className="collection-item-stats">
-                                <span>Est. Price: {item.market_price != null && Number(item.market_price) > 0 ? formatUsd(item.market_price) : '—'}</span>
-                              </div>
-                              {ownedCatalogItemCounts[item.id] > 0 && (
-                                <p className="collection-item-meta" style={{ color: '#1a4ecf', fontWeight: 600 }}>
-                                  You own {ownedCatalogItemCounts[item.id]}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="collection-item-actions">
-                              <button
-                                type="button"
-                                className="catalog-action-pill"
-                                onClick={() => {
-                                  setSelectedCatalogItem(item)
-                                  handleOpenAddToCollectionModal(item.id)
-                                }}
-                              >
-                                Collect
-                              </button>
-
-                              <button
-                                type="button"
-                                className="catalog-action-pill"
-                                onClick={() => handleOpenCatalogItem(item)}
-                              >
-                                View Catalog Card
-                              </button>
-
-                              {wishlistRemoveConfirmId === item.id ? (
-                                <div className="collection-item-remove-confirm">
-                                  <span className="collection-item-remove-label">Remove from wishlist?</span>
-                                  <button type="button" className="collection-item-remove-choice collection-item-remove-all" onClick={() => handleWishlistRemove(item.id)}>Yes</button>
-                                  <button type="button" className="collection-item-remove-cancel" onClick={() => setWishlistRemoveConfirmId('')}>No</button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="catalog-action-pill collection-item-remove-btn"
-                                  onClick={() => setWishlistRemoveConfirmId(item.id)}
-                                >
-                                  Remove
-                                </button>
-                              )}
-                            </div>
-                          </article>
-                        ))}
-                      </section>
-
-                      {wishlistTotalPages > 1 && (
-                        <div className="catalog-pagination" aria-label="Wishlist pagination">
-                          <button
-                            type="button"
-                            className="catalog-pagination-btn"
-                            onClick={() => setWishlistPage(p => Math.max(1, p - 1))}
-                            disabled={wishlistPage <= 1}
-                          >
-                            Previous
-                          </button>
-                          <span className="catalog-pagination-page">Page {wishlistPage} / {wishlistTotalPages}</span>
-                          <button
-                            type="button"
-                            className="catalog-pagination-btn"
-                            onClick={() => setWishlistPage(p => Math.min(wishlistTotalPages, p + 1))}
-                            disabled={wishlistPage >= wishlistTotalPages}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'catalog' ? (
-          <section className="catalog-screen" aria-label="Catalog">
-            <div className="catalog-sticky-top">
-            <div className="catalog-head">
-              <div>
-                <h1>{t('catalogPageTitle')}</h1>
-                <p className="subtitle catalog-subtitle">{t('catalogPageSubtitle')}</p>
-              </div>
-
-              <div className="catalog-actions">
-                <label className="catalog-sort-wrap" htmlFor="catalog-sort-select">
-                  <span>{t('sortLabel')}</span>
-                  <select
-                    id="catalog-sort-select"
-                    value={catalogSortKey}
-                    onChange={(event) => setCatalogSortKey(event.target.value)}
-                  >
-                    <option value="newest_year">{t('sortNewestYear')}</option>
-                    <option value="oldest_year">Oldest Year</option>
-                    <option value="subject_az">Subject A–Z</option>
-                    <option value="card_number_asc">Card # (Low–High)</option>
-                    <option value="card_number_desc">Card # (High–Low)</option>
-                  </select>
-                </label>
-
-                <button type="button" className="catalog-action-pill">
-                  {t('suggestItemAction')}
-                </button>
-                {isPlatformAdmin && (
-                  <>
-                    <button
-                      type="button"
-                      className="catalog-action-pill"
-                      onClick={() => {
-                        setCatalogAdminFormError('')
-                        setCatalogAdminItemDescription('')
-                        setCatalogAdminCardNumber('')
-                        setCatalogAdminPrintCount('')
-                        setCatalogAdminRealFranchiseId('')
-                        setCatalogAdminSubjectIds([])
-                        setCatalogAdminTeamIds([])
-                        setCatalogAdminPrintTypeId('')
-                        setCatalogAdminCardTypeIds([])
-                        setCatalogAdminSubsetId('')
-                        setCatalogAdminFranchiseId('')
-                        setCatalogAdminBrandId('')
-                        setCatalogAdminFrontImageFile(null)
-                        setCatalogAdminBackImageFile(null)
-                        setIsCatalogItemModalOpen(true)
-                      }}
-                    >
-                      {t('addItemAction')}
-                    </button>
-                    <button
-                      type="button"
-                      className="catalog-action-pill"
-                      onClick={() => setIsCatalogAdminPanelOpen(true)}
-                    >
-                      Manage Catalog
-                    </button>
-                    <button
-                      type="button"
-                      className={`catalog-action-pill${isCatalogBulkEditMode ? ' active' : ''}`}
-                      onClick={() => {
-                        setIsCatalogBulkEditMode((current) => !current)
-                        if (isCatalogBulkEditMode) setCatalogBulkSelectedIds(new Set())
-                      }}
-                    >
-                      {isCatalogBulkEditMode ? 'Exit Bulk Edit' : 'Bulk Edit'}
-                    </button>
-                    <button
-                      type="button"
-                      className="catalog-action-pill"
-                      disabled={imageQueueLoading || imageQueueCount === 0}
-                      title="Step through every catalogue item that has no image"
-                      onClick={startImageQueue}
-                    >
-                      {imageQueueLoading ? 'Loading…' : `Image Queue${imageQueueCount != null ? ` (${imageQueueCount})` : ''}`}
-                    </button>
-                  </>
-                )}
-                <button type="button" className="catalog-action-pill">
-                  {t('mySuggestionsAction')}
-                </button>
-                <button
-                  type="button"
-                  className="catalog-action-pill"
-                  onClick={() => {
-                    setCatalogPage(1)
-                    setCatalogReloadToken((currentToken) => currentToken + 1)
-                  }}
-                >
-                  {t('refreshAction')}
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Add bar */}
-            {currentUser && (
-              <div className="quick-add-bar">
-                <label className="quick-add-toggle-wrap">
-                  <span className="quick-add-label">Quick Add</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={!!quickAddMode}
-                    className={`quick-add-switch${quickAddMode ? ' quick-add-switch--on' : ''}`}
-                    onClick={() => setQuickAddMode(m => m ? '' : 'gift')}
-                  />
-                </label>
-                {quickAddMode && (
-                  <div className="quick-add-options">
-                    <button
-                      type="button"
-                      className={`quick-add-mode-btn${quickAddMode === 'gift' ? ' quick-add-mode-btn--active' : ''}`}
-                      onClick={() => setQuickAddMode('gift')}
-                    >
-                      Gift
-                    </button>
-                    <button
-                      type="button"
-                      className={`quick-add-mode-btn${quickAddMode === 'purchase' ? ' quick-add-mode-btn--active' : ''}`}
-                      onClick={() => setQuickAddMode('purchase')}
-                    >
-                      Purchase
-                    </button>
-                    {quickAddMode === 'purchase' && (
-                      <div className="quick-add-price-wrap">
-                        <span className="quick-add-price-symbol">$</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="0.00"
-                          className="quick-add-price-input"
-                          value={quickAddPrice}
-                          onChange={e => setQuickAddPrice(e.target.value)}
-                        />
-                      </div>
-                    )}
-                    <span className="quick-add-hint">
-                      {quickAddMode === 'gift'
-                        ? 'Click Collect to instantly add as a gift'
-                        : quickAddPrice
-                          ? `Click Collect to instantly add at $${Number(quickAddPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : 'Enter a price then click Collect'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-            </div>
-
-            <div className={`catalog-layout${catalogViewMode === 'list' ? ' catalog-layout-list-mode' : ''}`}>
-              <aside className="catalog-card catalog-filters" aria-label="Catalog filters">
-                <div className="catalog-card-head">
-                  <h2>{t('filtersLabel')}</h2>
-                  <button
-                    type="button"
-                    className="catalog-clear-btn"
-                    onClick={() => {
-                      setCatalogCategory('all')
-                      setCatalogSubcategory('')
-                      setCatalogFranchise('all')
-                      setCatalogFranchiseSearch('')
-                      setCatalogBrandId('')
-                      setCatalogTeamId('')
-                      setCatalogSetId('')
-                      setCatalogSubsetId('')
-                      setCatalogSubthemeId('')
-                      setCatalogProductLineId('')
-                      setCatalogSeriesId('')
-                      setCatalogPrintTypeId('')
-                      setCatalogCardTypeIds([])
-                      setCatalogSubjectId('')
-                      setCatalogSubjectSearch('')
-                      setCatalogSubjectResults([])
-                      setCatalogAlbumSearch('')
-                      setCatalogAlbumResults([])
-                      setCatalogMinYear('')
-                      setCatalogMaxYear('')
-                    }}
-                  >
-                    {t('clearAction')}
-                  </button>
-                </div>
-
-                {/* Subject — typeahead search (category-scoped when a category is selected) */}
-                <label>{catalogSidebarLabels.subject}</label>
-                <div className="catalog-admin-subject-search-wrap">
-                  <input
-                    type="text"
-                    value={catalogSubjectSearch}
-                    placeholder={catalogSubjectSearching ? 'Searching…' : `Search ${catalogSidebarLabels.subject.toLowerCase()}…`}
-                    style={{ width: '100%' }}
-                    onChange={(event) => {
-                      setCatalogSubjectSearch(event.target.value)
-                      if (!event.target.value) { setCatalogSubjectId(''); setCatalogSubjectResults([]) }
-                    }}
-                  />
-                  {catalogSubjectResults.length > 0 && (
-                    <div className="catalog-admin-subject-results">
-                      {catalogSubjectResults.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          className="catalog-admin-subject-result"
-                          onClick={() => {
-                            setCatalogSubjectId(s.id)
-                            setCatalogSubjectSearch(s.name)
-                            setCatalogSubjectResults([])
-                          }}
-                        >
-                          {s.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {catalogSubjectId && (
-                    <div className="catalog-admin-subject-selected">
-                      <span style={{ fontSize: '0.82rem' }}>{catalogSubjectSearch}</span>
-                      <button
-                        type="button"
-                        style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
-                        onClick={() => { setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogSubjectResults([]) }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Category — standalone */}
-                <label htmlFor="catalog-category">{t('categoryLabel')}</label>
-                <select
-                  id="catalog-category"
-                  value={catalogCategory}
-                  onChange={(event) => {
-                    setCatalogCategory(event.target.value)
-                    setCatalogSubcategory('')
-                    if (event.target.value !== 'Music') { setCatalogAlbumSearch(''); setCatalogAlbumResults([]); setCatalogSetId('') }
-                  }}
-                >
-                  <option value="all">All</option>
-                  {catalogCategoryOptions.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
-
-                {/* Subcategory — cascades from category */}
-                <label htmlFor="catalog-subcategory">{catalogSidebarLabels.subcategory}</label>
-                <select
-                  id="catalog-subcategory"
-                  value={catalogSubcategory}
-                  disabled={catalogCategory === 'all'}
-                  onChange={(event) => setCatalogSubcategory(event.target.value)}
-                >
-                  <option value="">{catalogCategory === 'all' ? t('selectCategoryFirst') : 'All'}</option>
-                  {catalogSubcategoryOptions.map((subcategory) => (
-                    <option key={subcategory} value={subcategory}>{subcategory}</option>
-                  ))}
-                </select>
-
-                {/* Franchise — global typeahead; works even when category/subcategory are not selected */}
-                {!catalogSidebarLabels.hideFranchise && (
-                  <>
-                    <label>{catalogSidebarLabels.franchise}</label>
-                    <div className="catalog-admin-subject-search-wrap">
-                      <input
-                        type="text"
-                        list="catalog-franchise-options"
-                        value={catalogFranchiseSearch}
-                        placeholder="Search franchise/theme…"
-                        style={{ width: '100%' }}
-                        onChange={(event) => {
-                          const nextValue = event.target.value
-                          setCatalogFranchiseSearch(nextValue)
-                          const exact = catalogFranchiseOptions.find((franchise) => franchise.name.toLowerCase() === nextValue.trim().toLowerCase())
-                          if (exact) {
-                            setCatalogFranchise(exact.id)
-                            setCatalogFranchiseSearch(exact.name)
-                            return
-                          }
-                          if (!nextValue.trim()) {
-                            setCatalogFranchise('all')
-                          }
-                        }}
-                      />
-                      <datalist id="catalog-franchise-options">
-                        {catalogFranchiseOptions.map((franchise) => (
-                          <option key={franchise.id} value={franchise.name} />
-                        ))}
-                      </datalist>
-                    </div>
-                  </>
-                )}
-
-                {/* Brand — filtered to Music franchise brands when Music is selected */}
-                <label htmlFor="catalog-brand">{catalogSidebarLabels.brand}</label>
-                <select
-                  id="catalog-brand"
-                  value={catalogBrandId}
-                  disabled={!selectedCatalogFranchiseRecord}
-                  onChange={(event) => setCatalogBrandId(event.target.value)}
-                >
-                  <option value="">{selectedCatalogFranchiseRecord ? 'All' : 'Select franchise first'}</option>
-                  {catalogFranchiseLinkedBrands.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-
-                {/* Team — cascades from franchise, only shown when options exist */}
-                {catalogTeams.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-team">Team</label>
-                    <select
-                      id="catalog-team"
-                      value={catalogTeamId}
-                      onChange={(event) => setCatalogTeamId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogTeams.map((t) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Collectible Set — typeahead for Music, dropdown for others */}
-                {catalogCategory === 'Music' ? (
-                  <>
-                    <label>{catalogSidebarLabels.collectibleSet}</label>
-                    <div className="catalog-admin-subject-search-wrap">
-                      <input
-                        type="text"
-                        value={catalogSetId ? (catalogAlbumSearch || '') : catalogAlbumSearch}
-                        placeholder={catalogAlbumSearching ? 'Searching…' : 'Search albums…'}
-                        style={{ width: '100%' }}
-                        onChange={(e) => {
-                          setCatalogAlbumSearch(e.target.value)
-                          if (!e.target.value) setCatalogSetId('')
-                        }}
-                      />
-                      {catalogAlbumResults.length > 0 && (
-                        <div className="catalog-admin-subject-results">
-                          {catalogAlbumResults.map((a) => (
-                            <button
-                              key={a.id}
-                              type="button"
-                              className="catalog-admin-subject-result"
-                              onClick={() => {
-                                setCatalogSetId(a.id)
-                                setCatalogAlbumSearch(a.name)
-                                setCatalogAlbumResults([])
-                              }}
-                            >
-                              {a.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {catalogSetId && (
-                        <div className="catalog-admin-subject-selected">
-                          <span style={{ fontSize: '0.82rem' }}>{catalogAlbumSearch}</span>
-                          <button
-                            type="button"
-                            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#5f7294', fontSize: '0.9rem' }}
-                            onClick={() => { setCatalogSetId(''); setCatalogAlbumSearch(''); setCatalogAlbumResults([]) }}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : catalogSets.length > 0 ? (
-                  <>
-                    <label htmlFor="catalog-set">{catalogSidebarLabels.collectibleSet}</label>
-                    <select
-                      id="catalog-set"
-                      value={catalogSetId}
-                      onChange={(event) => setCatalogSetId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogSets.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </>
-                ) : null}
-
-                {/* Subcollectible Set — cascades from set */}
-                {catalogSubsets.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-subset">{catalogSidebarLabels.subset}</label>
-                    <select
-                      id="catalog-subset"
-                      value={catalogSubsetId}
-                      onChange={(event) => setCatalogSubsetId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogSubsets.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Subtheme (faceted subsets) — cascades from Theme */}
-                {catalogSubthemeOptions.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-subtheme">{catalogSidebarLabels.subset}</label>
-                    <select
-                      id="catalog-subtheme"
-                      value={catalogSubthemeId}
-                      onChange={(event) => setCatalogSubthemeId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogSubthemeOptions.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Product Line (faceted) — cascades from Subtheme */}
-                {catalogProductLineOptions.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-productline">{catalogSidebarLabels.productLine}</label>
-                    <select
-                      id="catalog-productline"
-                      value={catalogProductLineId}
-                      onChange={(event) => setCatalogProductLineId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogProductLineOptions.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Series (facet) — scoped to Subcategory */}
-                {catalogSeriesOptions.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-series">Series</label>
-                    <select
-                      id="catalog-series"
-                      value={catalogSeriesId}
-                      onChange={(event) => setCatalogSeriesId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      {catalogSeriesOptions.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Print Type — cascades from subset */}
-                {catalogPrintTypes.length > 0 && (
-                  <>
-                    <label htmlFor="catalog-print-type">Print Type</label>
-                    <select
-                      id="catalog-print-type"
-                      value={catalogPrintTypeId}
-                      onChange={(event) => setCatalogPrintTypeId(event.target.value)}
-                    >
-                      <option value="">All</option>
-                      <option value="__none__">No print type</option>
-                      {catalogPrintTypes.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-
-                {/* Card Treatment — checkboxes (cards only, filtered by subcategory) */}
-                {CARD_CONDITION_CATEGORIES.has(catalogCategory) && (() => {
-                  const isMtgFilter = catalogSubcategory === 'Magic: The Gathering'
-                  const filterCardTypes = catalogAllCardTypes.filter(c => {
-                    if (c.name === 'Normal') return false
-                    return isMtgFilter ? MTG_CARD_TREATMENT_NAMES.has(c.name) : SPORTS_CARD_TYPE_NAMES.has(c.name)
-                  })
-                  if (!filterCardTypes.length) return null
-                  return (
-                    <div>
-                      <label>Card Treatment</label>
-                      <div className="catalog-admin-team-list catalog-filter-cardtype-grid">
-                        {filterCardTypes.map(c => (
-                          <label key={c.id} className="catalog-admin-team-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={catalogCardTypeIds.includes(c.id)}
-                              onChange={e => setCatalogCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))}
-                            />
-                            <span>{c.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                {/* Rarity — dropdown (MTG only) */}
-                {catalogSubcategory === 'Magic: The Gathering' && catalogRarities.length > 0 && (
-                  <div>
-                    <label htmlFor="catalog-rarity">Rarity</label>
-                    <select id="catalog-rarity" value={catalogRarityId} onChange={e => setCatalogRarityId(e.target.value)}>
-                      <option value="">All</option>
-                      {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                {/* Year range */}
-                <div className="catalog-year-grid">
-                  <label htmlFor="catalog-min-year">
-                    {t('minYearLabel')}
-                    <input
-                      id="catalog-min-year"
-                      type="number"
-                      min="1900"
-                      max="2100"
-                      placeholder="e.g. 1990"
-                      value={catalogMinYear}
-                      onChange={(event) => setCatalogMinYear(event.target.value)}
-                    />
-                  </label>
-                  <label htmlFor="catalog-max-year">
-                    {t('maxYearLabel')}
-                    <input
-                      id="catalog-max-year"
-                      type="number"
-                      min="1900"
-                      max="2100"
-                      placeholder="e.g. 2025"
-                      value={catalogMaxYear}
-                      onChange={(event) => setCatalogMaxYear(event.target.value)}
-                    />
-                  </label>
-                </div>
-              </aside>
-
-              <div className="catalog-main-pane">
-                {isCatalogLoading ? (
-                  <div className="catalog-card catalog-loading-panel">{t('loadingCatalog')}</div>
-                ) : catalogLoadError ? (
-                  <div className="catalog-card catalog-loading-panel">{catalogLoadError}</div>
-                ) : filteredCatalogItems.length === 0 ? (
-                  <div className="catalog-card catalog-loading-panel">No catalog items found.</div>
-                ) : (
-                  <div>
-                    <div className="catalog-view-bar">
-                      <span className="catalog-view-count">{catalogTotalItemCount.toLocaleString()} items</span>
-                      {isPlatformAdmin && isCatalogBulkEditMode && (
-                        <div className="catalog-bulk-toolbar" role="group" aria-label="Bulk edit selection controls">
-                          <button
-                            type="button"
-                            className="catalog-action-pill"
-                            onClick={handleSelectAllCatalogPageItems}
-                            disabled={paginatedCatalogItemIds.length === 0 || allVisibleCatalogItemsSelected}
-                          >
-                            Select Page
-                          </button>
-                          <button
-                            type="button"
-                            className="catalog-action-pill"
-                            onClick={handleClearCatalogBulkSelection}
-                            disabled={catalogBulkSelectedIds.size === 0}
-                          >
-                            Clear
-                          </button>
-                          <span className="catalog-bulk-count">{catalogBulkSelectedIds.size} selected</span>
-                        </div>
-                      )}
-                      <div className="catalog-view-toggle">
-                        <button
-                          type="button"
-                          className={`catalog-view-btn${catalogViewMode === 'grid' ? ' active' : ''}`}
-                          onClick={() => setCatalogViewMode('grid')}
-                          title="Grid view"
-                          aria-label="Grid view"
-                        >
-                          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
-                            <rect x="1" y="1" width="6" height="6" rx="1.5"/>
-                            <rect x="9" y="1" width="6" height="6" rx="1.5"/>
-                            <rect x="1" y="9" width="6" height="6" rx="1.5"/>
-                            <rect x="9" y="9" width="6" height="6" rx="1.5"/>
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          className={`catalog-view-btn${catalogViewMode === 'list' ? ' active' : ''}`}
-                          onClick={() => setCatalogViewMode('list')}
-                          title="List view"
-                          aria-label="List view"
-                        >
-                          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
-                            <rect x="1" y="2" width="14" height="2.5" rx="1.25"/>
-                            <rect x="1" y="6.75" width="14" height="2.5" rx="1.25"/>
-                            <rect x="1" y="11.5" width="14" height="2.5" rx="1.25"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    {isPlatformAdmin && isCatalogBulkEditMode && (
-                      <section className="catalog-card catalog-bulk-edit-panel" aria-label="Bulk edit fields">
-                        <div className="catalog-bulk-edit-head">
-                          <h3>Bulk Update Selected Items</h3>
-                          <p>Change collectible set for all selected items in one action. Franchise is not changed.</p>
-                        </div>
-                        <div className="catalog-bulk-edit-grid">
-                          <label htmlFor="catalog-bulk-brand">Brand</label>
-                          <select
-                            id="catalog-bulk-brand"
-                            value={catalogBulkEditValues.brand_id}
-                            disabled={selectedCatalogBulkFranchiseIds.length !== 1}
-                            onChange={(event) => setCatalogBulkEditValues((current) => ({
-                              ...current,
-                              brand_id: event.target.value,
-                              collectible_set_id: '',
-                            }))}
-                          >
-                            <option value="">{selectedCatalogBulkFranchiseIds.length === 1 ? 'Choose brand' : 'Select items from one franchise'}</option>
-                            {catalogBulkBrandOptions.map((brand) => (
-                              <option key={brand.id} value={brand.id}>{brand.name}</option>
-                            ))}
-                          </select>
-
-                          <label htmlFor="catalog-bulk-set">Collectible Set</label>
-                          <select
-                            id="catalog-bulk-set"
-                            value={catalogBulkEditValues.collectible_set_id}
-                            disabled={selectedCatalogBulkFranchiseIds.length !== 1 || !catalogBulkEditValues.brand_id}
-                            onChange={(event) => setCatalogBulkEditValues((current) => ({ ...current, collectible_set_id: event.target.value }))}
-                          >
-                            <option value="">{selectedCatalogBulkFranchiseIds.length === 1 && catalogBulkEditValues.brand_id ? 'Choose collectible set' : 'Choose brand first'}</option>
-                            {catalogBulkSetOptions.map((setRow) => (
-                              <option key={setRow.id} value={setRow.id}>{setRow.name}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {(catalogBulkEditError || catalogBulkEditMessage) && (
-                          <p className={`catalog-bulk-edit-feedback${catalogBulkEditError ? ' error' : ' success'}`}>
-                            {catalogBulkEditError || catalogBulkEditMessage}
-                          </p>
-                        )}
-
-                        <div className="catalog-bulk-edit-actions">
-                          <button
-                            type="button"
-                            className="catalog-action-pill"
-                            onClick={handleApplyCatalogBulkEdit}
-                            disabled={isApplyingCatalogBulkEdit || catalogBulkSelectedIds.size === 0}
-                          >
-                            {isApplyingCatalogBulkEdit ? 'Applying…' : `Apply to ${catalogBulkSelectedIds.size} item${catalogBulkSelectedIds.size === 1 ? '' : 's'}`}
-                          </button>
-                        </div>
-                      </section>
-                    )}
-
-                    {catalogViewMode === 'grid' ? (
-                      <div className="catalog-results-grid">
-                        {paginatedCatalogItems.map((item) => {
-                          const categoryName     = catalogCategoryById[item.category_id] || ''
-                          const franchiseName    = item._set_name || catalogItemNumbers[item.id] || 'Unassigned set'
-                          const franchiseBrandName = item._franchise_name || ''
-                          const subsetName       = item._details?.subcollectible_set || ''
-                          const isCard           = CARD_CONDITION_CATEGORIES.has(categoryName)
-                          const brandName        = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || 'Unknown brand' : '')
-                          const isMusic          = categoryName === 'Music'
-                          const itemCardLabels   = getCategoryLabels(categoryName)
-                          const imageUrl         = item.front_image_path
-                            ? item.front_image_path.startsWith('http')
-                              ? item.front_image_path
-                              : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
-                            : ''
-
-                          return (
-                            <article
-                              key={item.id}
-                              className={`catalog-card catalog-item-card${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-item-card-selected' : ''}`}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => handleOpenCatalogItem(item)}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault()
-                                  handleOpenCatalogItem(item)
-                                }
-                              }}
-                            >
-                              {isPlatformAdmin && isCatalogBulkEditMode && (
-                                <label
-                                  className="catalog-bulk-select-toggle"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={catalogBulkSelectedIds.has(item.id)}
-                                    onChange={() => handleToggleCatalogBulkSelect(item.id)}
-                                    aria-label={`Select ${item.name || 'catalog item'}`}
-                                  />
-                                </label>
-                              )}
-                              {imageUrl ? (
-                                <img className="catalog-item-image" src={imageUrl} alt={item.name || 'Catalog item'} loading="lazy" />
-                              ) : (
-                                <div className="catalog-item-image catalog-item-image-placeholder">No image</div>
-                              )}
-                              <div className="catalog-item-content">
-                                <h3>{isMusic ? franchiseName : (item.name || 'Untitled item')}</h3>
-                                <p className="catalog-item-meta">{isMusic ? (item.name || 'Untitled item') : franchiseName}</p>
-                                {isMusic
-                                  ? (catalogSubcategoryById[item.subcategory_id] ? <p className="catalog-item-brand">Format: {catalogSubcategoryById[item.subcategory_id]}</p> : null)
-                                  : isCard
-                                    ? (subsetName ? <p className="catalog-item-brand">Subset: {subsetName}</p> : null)
-                                    : (franchiseBrandName ? <p className="catalog-item-brand">Franchise: {franchiseBrandName}</p> : null)}
-                                {brandName ? <p className="catalog-item-brand">{itemCardLabels.brand}: {brandName}</p> : null}
-                                {item.release_year ? <p className="catalog-item-year">{item.release_year}</p> : null}
-                              </div>
-                            </article>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="catalog-list-view">
-                        {paginatedCatalogItems.map((item) => {
-                          const categoryName    = catalogCategoryById[item.category_id] || ''
-                          const subcategoryName = catalogSubcategoryById[item.subcategory_id] || ''
-                          const setName         = item._set_name || ''
-                          const brandName       = item._brand_name || (item.brand_id ? catalogBrandById[item.brand_id] || '' : '')
-                          const isMusic         = categoryName === 'Music'
-                          const ownedCount      = ownedCatalogItemCounts[item.id] || 0
-                          const stats           = catalogListStats[item.id] || null
-                          const pricing         = catalogListPricing[item.id] || {}
-                          const isWishlisted    = wishlistItemIds.has(item.id)
-                          const imageUrl        = item.front_image_path
-                            ? item.front_image_path.startsWith('http')
-                              ? item.front_image_path
-                              : supabase.storage.from('item-images').getPublicUrl(item.front_image_path).data?.publicUrl
-                            : ''
-                          const tags = isMusic ? [
-                            item.name || null,
-                            subcategoryName,
-                            item.release_year ? String(item.release_year) : null,
-                          ].filter(Boolean) : [
-                            item.card_number ? item.card_number : null,
-                            categoryName,
-                            subcategoryName !== categoryName ? subcategoryName : null,
-                            setName,
-                            item.release_year ? String(item.release_year) : null,
-                          ].filter(Boolean)
-                          const toggleWishlist = async () => {
-                            if (!currentUser?.id) { handleOpenCatalogItem(item); return }
-                            if (isWishlisted) {
-                              setWishlistItemIds((prev) => { const next = new Set(prev); next.delete(item.id); return next })
-                              await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('catalog_item_id', item.id)
-                              setCatalogListStats((prev) => { const s = prev[item.id]; return s ? { ...prev, [item.id]: { ...s, wanted_count: Math.max(0, Number(s.wanted_count) - 1) } } : prev })
-                            } else {
-                              setWishlistItemIds((prev) => new Set([...prev, item.id]))
-                              await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: item.id }, { onConflict: 'user_id,catalog_item_id', ignoreDuplicates: true })
-                              setCatalogListStats((prev) => { const s = prev[item.id]; return s ? { ...prev, [item.id]: { ...s, wanted_count: Number(s.wanted_count) + 1 } } : prev })
-                            }
-                          }
-                          const collect = () => {
-                            if (quickAddMode) { performQuickAdd(item) }
-                            else {
-                              setSelectedCatalogItem({ ...item, categoryName: catalogCategoryById[item.category_id] || '', subcategoryName: catalogSubcategoryById[item.subcategory_id] || '', setName: item._set_name || '', brandName: item._brand_name || '', imageUrl: item.metadata?.image_url || '' })
-                              handleOpenAddToCollectionModal(item.id)
-                            }
-                          }
-
-                          return (
-                            <article
-                              key={item.id}
-                              className={`catalog-list-row catalog-list-row-lego${isCatalogBulkEditMode && catalogBulkSelectedIds.has(item.id) ? ' catalog-list-row-selected' : ''}`}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => handleOpenCatalogItem(item)}
-                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenCatalogItem(item) } }}
-                            >
-                              {isPlatformAdmin && isCatalogBulkEditMode && (
-                                <label
-                                  className="catalog-bulk-select-toggle catalog-bulk-select-toggle-list"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={catalogBulkSelectedIds.has(item.id)}
-                                    onChange={() => handleToggleCatalogBulkSelect(item.id)}
-                                    aria-label={`Select ${item.name || 'catalog item'}`}
-                                  />
-                                </label>
-                              )}
-                              {/* Name above the photo for every category (was LEGO-only). */}
-                              <h3 className="catalog-list-name catalog-list-name-top">{isMusic ? (setName || 'Untitled item') : (item.name || 'Untitled item')}</h3>
-                              <div className="catalog-list-thumb">
-                                {imageUrl
-                                  ? <img src={imageUrl} alt={item.name || 'Item'} loading="lazy" />
-                                  : <div className="catalog-list-thumb-placeholder" />}
-                              </div>
-                              <div className="catalog-list-body">
-                                {/* Shared structured meta for ALL categories, labelled per
-                                    category. Building Blocks renders exactly as before
-                                    (Theme / Year / Pieces / Item Type) because its labels
-                                    resolve to those; Toys gets Franchise / Year / Item Type. */}
-                                {(() => {
-                                  const rowLabels = getCategoryLabels(categoryName)
-                                  const pieces = item._details?.piece_count
-                                  const metaRows = [
-                                    { label: rowLabels.franchise, value: item._franchise_name },
-                                    { label: 'Year', value: item.release_year },
-                                    { label: 'Pieces', value: pieces != null && pieces !== '' ? pieces : '' },
-                                    { label: rowLabels.brand, value: brandName },
-                                  ].filter(r => r.label && r.value)
-                                  if (!metaRows.length) return null
-                                  return (
-                                    <div className="catalog-list-lego-meta">
-                                      {metaRows.map(r => (
-                                        <p key={r.label} className="cll-row"><span className="cll-label">{r.label}</span><span>{r.value}</span></p>
-                                      ))}
-                                    </div>
-                                  )
-                                })()}
-                              </div>
-                              <div className="catalog-list-purchase">
-                                <p className="catalog-list-purchase-heading">Ownership</p>
-                                <div className="catalog-list-stat-rows">
-                                  <span className="catalog-list-stat-label">Owned:</span>
-                                  <span className="catalog-list-stat-value catalog-list-stat-owned">
-                                    {stats && stats.owned_count != null ? stats.owned_count : '—'}
-                                  </span>
-                                  <span className="catalog-list-stat-label">Available:</span>
-                                  <span className="catalog-list-stat-value catalog-list-stat-available">
-                                    {stats ? stats.available_count : '—'}
-                                  </span>
-                                  <span className="catalog-list-stat-label">Wanted:</span>
-                                  <span className="catalog-list-stat-value catalog-list-stat-wanted">
-                                    {stats ? stats.wanted_count : '—'}
-                                  </span>
-                                </div>
-                                {/* Own / want controls for EVERY category (was LEGO-only).
-                                    Only the noun adapts: "set" for Building Blocks. */}
-                                <div className="catalog-list-purchase-checks" onClick={(e) => e.stopPropagation()}>
-                                  <button type="button" className="catalog-ownwant-btn" onClick={collect}>
-                                    <span className={`catalog-ownwant-count${ownedCount > 0 ? ' has' : ''}`}>{ownedCount}</span>
-                                    <span>{ownedCount > 0 ? 'I own another' : `I own this ${categoryName === 'Building Blocks' ? 'set' : 'item'}`}</span>
-                                  </button>
-                                  <label className={`catalog-ownwant-check want${isWishlisted ? ' checked' : ''}`}>
-                                    <input type="checkbox" checked={isWishlisted} onChange={toggleWishlist} />
-                                    <span>I want this {categoryName === 'Building Blocks' ? 'set' : 'item'}</span>
-                                  </label>
-                                </div>
-                              </div>
-                              {/* Pricing + buy panel for EVERY category (was LEGO-only).
-                                  Only the marketplace links differ, since BrickLink and
-                                  Brick Owl are LEGO-specific; eBay applies to all. */}
-                              <div className="catalog-list-ownwant" onClick={(e) => e.stopPropagation()}>
-                                <div className="catalog-list-pricing">
-                                  <p className="cll-pricing-head">Pricing</p>
-                                  <div className="cll-price-row"><span className="cll-price-label">Value</span><span className="cll-price-val">{pricing.market != null ? formatUsd(Number(pricing.market)) : '—'}</span></div>
-                                  <div className={`cll-price-row${hasCollectorPlusAccess ? '' : ' cll-price-locked'}`}><span className="cll-price-label">Local Value</span><span className="cll-price-val">{hasCollectorPlusAccess ? (pricing.local != null ? formatUsd(Number(pricing.local)) : '—') : 'Collector+'}</span></div>
-                                  <div className="cll-price-row"><span className="cll-price-label">Retail</span><span className="cll-price-val">{pricing.retail != null ? formatUsd(Number(pricing.retail)) : '—'}</span></div>
-                                </div>
-                                <div className="catalog-list-buy">
-                                  <span className="catalog-list-buy-label">Buy this item</span>
-                                  {categoryName === 'Building Blocks' && (
-                                    <>
-                                      <a
-                                        className="catalog-list-buy-link"
-                                        href={item.card_number
-                                          ? `https://www.bricklink.com/v2/catalog/catalogitem.page?M=${encodeURIComponent(item.card_number)}`
-                                          : `https://www.bricklink.com/v2/search.page?q=${encodeURIComponent(item._subject_name || item.name || '')}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        BrickLink
-                                      </a>
-                                      <a
-                                        className="catalog-list-buy-link"
-                                        href={`https://www.brickowl.com/search/catalog?query=${encodeURIComponent(item._subject_name || item.name || '')}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        Brick Owl
-                                      </a>
-                                    </>
-                                  )}
-                                  <a
-                                    className="catalog-list-buy-link"
-                                    href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent((item._subject_name || item.name || '') + (item.card_number ? ' ' + item.card_number : ''))}&_sacat=0`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    eBay
-                                  </a>
-                                </div>
-                              </div>
-                            </article>
-                          )
-                        })}
-                      </div>
-                    )}
-                    <div className="catalog-pagination" aria-label="Catalog pagination">
-                      <button
-                        type="button"
-                        className="catalog-pagination-btn"
-                        onClick={() => setCatalogPage((currentPage) => Math.max(1, currentPage - 1))}
-                        disabled={catalogPage <= 1}
-                      >
-                        Previous
-                      </button>
-                      <span className="catalog-pagination-page">
-                        Page{' '}
-                        <input
-                          type="number"
-                          className="catalog-pagination-input"
-                          min={1}
-                          max={catalogTotalPages}
-                          value={catalogPageInput}
-                          onChange={(e) => setCatalogPageInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                          onBlur={() => {
-                            const n = parseInt(catalogPageInput, 10)
-                            if (!Number.isFinite(n)) { setCatalogPageInput(String(catalogPage)); return }
-                            const clamped = Math.min(catalogTotalPages, Math.max(1, n))
-                            setCatalogPage(clamped)
-                            setCatalogPageInput(String(clamped))
-                          }}
-                          aria-label="Go to page"
-                        />
-                        {' '}/ {catalogTotalPages}
-                      </span>
-                      <button
-                        type="button"
-                        className="catalog-pagination-btn"
-                        onClick={() => setCatalogPage((currentPage) => Math.min(catalogTotalPages, currentPage + 1))}
-                        disabled={catalogPage >= catalogTotalPages}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <aside className="catalog-card catalog-context" aria-label="Catalog context">
-                {selectedCatalogFranchiseRecord ? (
-                  <div className="catalog-theme-panel">
-                    <div className="catalog-theme-hero">
-                      {catalogThemeImageUrl
-                        ? <img className="catalog-theme-logo" src={catalogThemeImageUrl} alt={selectedCatalogFranchiseRecord.name} loading="lazy" />
-                        : <div className="catalog-theme-logo catalog-theme-logo-empty" aria-hidden="true" />}
-                      <div className="catalog-theme-head">
-                        <h2 className="catalog-theme-name">{selectedCatalogFranchiseRecord.name}</h2>
-                        {catalogThemeStats?.release_year ? <p className="catalog-theme-year">{catalogThemeStats.release_year}</p> : null}
-                      </div>
-                    </div>
-                    {catalogThemeShortDesc ? <p className="catalog-theme-desc">{catalogThemeShortDesc}</p> : null}
-                    <div className="catalog-theme-stats">
-                      <p className="catalog-theme-stat"><span>Total Items</span><strong>{catalogThemeStats?.total_items != null ? Number(catalogThemeStats.total_items).toLocaleString() : '—'}</strong></p>
-                    </div>
-
-                    <h3 className="catalog-theme-subhead">Community</h3>
-                    <div className="catalog-theme-stats">
-                      <p className="catalog-theme-stat"><span>Own at least one</span><strong>{themeStatPct(catalogThemeStats?.owner_pct)}</strong></p>
-                      <p className="catalog-theme-stat"><span>Avg. completion</span><strong>{themeStatPct(catalogThemeStats?.avg_completion)}</strong></p>
-                      <p className="catalog-theme-stat"><span>Most collected set</span><strong>{themeStatName(catalogThemeStats?.most_collected)}</strong></p>
-                      <p className="catalog-theme-stat"><span>Rarest item</span><strong>{themeStatName(catalogThemeStats?.rarest)}</strong></p>
-                      <p className="catalog-theme-stat"><span>Most wishlisted item</span><strong>{themeStatName(catalogThemeStats?.most_wishlisted)}</strong></p>
-                      <p className="catalog-theme-stat"><span>Total Theme Value</span><strong>{catalogThemeStats?.total_value != null ? formatUsd(Number(catalogThemeStats.total_value)) : '—'}</strong></p>
-                      <p className="catalog-theme-stat"><span>Most valuable item</span><strong>{catalogThemeStats?.most_valuable?.name ? `${catalogThemeStats.most_valuable.name}${catalogThemeStats.most_valuable.value != null ? ` (${formatUsd(Number(catalogThemeStats.most_valuable.value))})` : ''}` : '—'}</strong></p>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <h2>{t('contextTitle')}</h2>
-                    {hasCatalogActiveContext ? (
-                      <div className="catalog-context-list" aria-label="Active catalog filters">
-                        {catalogActiveContextRows.map((row) => (
-                          <p key={row.label} className="catalog-context-row">
-                            <span>{row.label}</span>
-                            <strong>{row.value}</strong>
-                          </p>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>{t('contextHint')}</p>
-                    )}
-                    {catalogContextThemeText ? <p>{catalogContextThemeText}</p> : null}
-                    <div className="catalog-context-stats" aria-label="Catalog scope stats">
-                      <p><span>Matching Items</span><strong>{catalogTotalItemCount.toLocaleString()}</strong></p>
-                      <p><span>Franchises</span><strong>{catalogFranchiseOptions.length.toLocaleString()}</strong></p>
-                      <p><span>Brands</span><strong>{catalogFranchiseLinkedBrands.length.toLocaleString()}</strong></p>
-                      <p><span>Teams</span><strong>{catalogTeams.length.toLocaleString()}</strong></p>
-                      <p><span>Collectible Sets</span><strong>{catalogSets.length.toLocaleString()}</strong></p>
-                    </div>
-                  </>
-                )}
-              </aside>
-            </div>
-
-            <button type="button" className="catalog-floating-toggle" aria-label={t('filtersLabel')}>
-              &#9783;
-            </button>
-
-            {isCatalogAdminPanelOpen && isPlatformAdmin && (
-              <CatalogAdminPanel
-                categories={catalogAdminCategories}
-                onClose={() => setIsCatalogAdminPanelOpen(false)}
-              />
-            )}
-
-            {isCatalogItemModalOpen && isPlatformAdmin && (
-              <div className="auth-overlay" onClick={() => setIsCatalogItemModalOpen(false)}>
-                <section className="auth-modal catalog-item-modal" onClick={(event) => event.stopPropagation()}>
-                  <button type="button" className="close-auth" onClick={() => setIsCatalogItemModalOpen(false)}>
-                    &#10005;
-                  </button>
-                  <h3>{t('adminCreateItem')}</h3>
-                  <div className="bulk-import-tabs">
-                    <button type="button" className={`bulk-import-tab${!bulkImportMode && !bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(false); setBulkPhotoMode(false) }}>Single Item</button>
-                    <button type="button" className={`bulk-import-tab${bulkImportMode && !bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkImportMode(true); setBulkPhotoMode(false); setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>Bulk Import</button>
-                    <button type="button" className={`bulk-import-tab${bulkPhotoMode ? ' bulk-import-tab-active' : ''}`} onClick={() => { setBulkPhotoMode(true); setBulkImportMode(false); setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null) }}>Bulk Photos</button>
-                  </div>
-                  {bulkPhotoMode ? (
-                    <div className="bulk-import-container">
-                      {bulkPhotoRows.length === 0 ? (
-                        <div className="bulk-import-step1">
-                          <p className="catalog-admin-section-title">1. Select the Collectible Set</p>
-                          <div className="catalog-admin-two-col">
-                            <div>
-                              <label>Category</label>
-                              <select value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId('') }}>
-                                <option value="">Select category…</option>
-                                {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                            </div>
-                            {(() => { const _bl = getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || ''); return (<>
-                            <div>
-                              <label>{_bl.subcategory}</label>
-                              <select value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); if (!_bl.hideFranchise) setCatalogAdminRealFranchiseId('') }} disabled={!catalogAdminCategoryId}>
-                                <option value="">Select subcategory…</option>
-                                {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </div>
-                            {!_bl.hideFranchise && (<div>
-                              <label>{_bl.franchise}</label>
-                              <select value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminSubcategoryId}>
-                                <option value="">None</option>
-                                {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                              </select>
-                            </div>)}
-                            <div>
-                              <label>{_bl.brand}</label>
-                              <select value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId('') }} disabled={!catalogAdminRealFranchiseId}>
-                                <option value="">None</option>
-                                {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label>{_bl.collectibleSet}</label>
-                              <select value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId('') }} disabled={!catalogAdminBrandId}>
-                                <option value="">None</option>
-                                {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </div>
-                            {catalogAdminSubsets.length > 0 && (
-                              <div>
-                                <label>{_bl.subset}</label>
-                                <select value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
-                                  <option value="">None</option>
-                                  {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                </select>
-                              </div>
-                            )}
-                            </>) })()}
-                          </div>
-                          {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 && (
-                            <>
-                              <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Print Type</p>
-                              <select
-                                value={bulkPhotoPrintTypeId}
-                                onChange={e => setBulkPhotoPrintTypeId(e.target.value)}
-                                style={{ maxWidth: 280 }}
-                              >
-                                <option value="">All print types</option>
-                                <option value="__none__">No print type</option>
-                                {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                              </select>
-                              <p className="catalog-admin-hint" style={{ marginTop: 4, marginBottom: 0 }}>Selecting a print type filters card matching to that variant only.</p>
-                            </>
-                          )}
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>{CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 ? '3' : '2'}. Card Side</p>
-                          <div className="bulk-photo-side-toggle">
-                            <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 0 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(0)}>Front</button>
-                            <button type="button" className={`bulk-photo-side-btn${bulkPhotoPosition === 1 ? ' bulk-photo-side-btn--active' : ''}`} onClick={() => setBulkPhotoPosition(1)}>Back</button>
-                          </div>
-                          <p className="catalog-admin-hint" style={{ marginTop: 6, marginBottom: 0 }}>OCR text will be pre-filled into the card's description — edit or clear it during review before approving.</p>
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>{CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAdminPrintTypes.length > 0 ? '4' : '3'}. Upload Folder of Images</p>
-                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Images are OCR-scanned to match subject name. You approve or deny each match before saving.</p>
-                          <label className={`bulk-import-upload-area${!catalogAdminFranchiseId ? ' bulk-import-upload-area--disabled' : ''}`}>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              webkitdirectory=""
-                              style={{ display: 'none' }}
-                              disabled={!catalogAdminFranchiseId}
-                              onChange={e => handleBulkPhotoFolder(e.target.files)}
-                            />
-                            <span className="bulk-import-upload-icon">&#8679;</span>
-                            <span>{catalogAdminFranchiseId ? 'Click to choose folder of images' : 'Select a Collectible Set first'}</span>
-                          </label>
-                        </div>
-                      ) : bulkPhotoAnalyzing ? (
-                        <div className="bulk-photo-analyzing">
-                          <p className="catalog-admin-section-title">Scanning images with OCR…</p>
-                          <div className="bulk-photo-progress-bar">
-                            <div className="bulk-photo-progress-fill" style={{ width: `${bulkPhotoAnalyzeProgress.total ? (bulkPhotoAnalyzeProgress.done / bulkPhotoAnalyzeProgress.total) * 100 : 0}%` }} />
-                          </div>
-                          <p className="catalog-admin-hint">{bulkPhotoAnalyzeProgress.done} / {bulkPhotoAnalyzeProgress.total} images analysed</p>
-                        </div>
-                      ) : bulkPhotoPhase === 'review' ? (() => {
-                        const skipped = bulkPhotoRows.filter(r => r.status === 'skipped')
-                        const errors  = bulkPhotoRows.filter(r => r.status === 'error')
-                        const saved   = bulkPhotoRows.filter(r => r.status === 'saved')
-                        return (
-                          <div className="bulk-photo-skipped-review">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                              <p className="catalog-admin-section-title" style={{ margin: 0 }}>Step 3 of 3 — Review</p>
-                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null); setBulkPhotoPrintTypeId('') }}>Start Over</button>
-                            </div>
-                            <p className="catalog-admin-hint" style={{ marginBottom: 12 }}>
-                              {saved.length} saved{errors.length > 0 ? `, ${errors.length} errors` : ''}{skipped.length > 0 ? `, ${skipped.length} skipped` : ''}
-                            </p>
-                            {errors.map(row => (
-                              <div key={row._id} className="bulk-photo-skipped-row">
-                                {row.preview && <img src={row.preview} alt="" className="bulk-photo-skipped-thumb" />}
-                                <div className="bulk-photo-skipped-info">
-                                  <span className="bulk-photo-skipped-filename">{row.filename}</span>
-                                  {row.matchedItem && <span className="catalog-admin-hint"> — {row.matchedItem.subject || ''}</span>}
-                                  <span className="bulk-photo-skipped-reason"> · Error: {row.errorMsg}</span>
-                                </div>
-                              </div>
-                            ))}
-                            {skipped.map(row => (
-                              <div key={row._id} className="bulk-photo-skipped-row">
-                                {row.preview && <img src={row.preview} alt="" className="bulk-photo-skipped-thumb" />}
-                                <div className="bulk-photo-skipped-info">
-                                  <span className="bulk-photo-skipped-filename">{row.filename}</span>
-                                  {row.matchedItem && <span className="catalog-admin-hint"> — {row.matchedItem.subject || ''}</span>}
-                                  {row.errorMsg
-                                    ? <span className="bulk-photo-skipped-reason"> · {row.errorMsg}</span>
-                                    : <span className="catalog-admin-hint"> — no match found</span>}
-                                </div>
-                              </div>
-                            ))}
-                            {skipped.length === 0 && errors.length === 0 && <p className="catalog-admin-hint">All images saved successfully.</p>}
-                          </div>
-                        )
-                      })() : (() => {
-                        const phaseRows = bulkPhotoRows
-                          .map((r, i) => ({ ...r, _origIdx: i }))
-                          .filter(r => bulkPhotoPhase === 'update' ? r.hasExistingImage : !r.hasExistingImage)
-                        const cur = bulkPhotoRows[bulkPhotoIdx] || {}
-                        const approvedCount = bulkPhotoRows.filter(r => r.status === 'approved').length
-                        const phasePendingCount = phaseRows.filter(r => r.status === 'pending').length
-                        const phaseDone = phasePendingCount === 0
-                        return (
-                          <div className="bulk-import-review">
-                            <div className="bulk-photo-phase-header">
-                              {bulkPhotoPhase === 'new'
-                                ? 'Step 1 of 3 — Cards without an existing photo'
-                                : 'Step 2 of 3 — Cards that already have a photo (will be replaced)'}
-                            </div>
-                            <div className="bulk-import-topbar">
-                              <span className="bulk-import-stats">
-                                {phaseRows.length} in this step &nbsp;·&nbsp;
-                                <span className="bulk-stat-approved">{phaseRows.filter(r => r.status === 'approved').length} approved</span> &nbsp;·&nbsp;
-                                <span className="bulk-stat-skipped">{phaseRows.filter(r => r.status === 'skipped').length} skipped</span>
-                                {phasePendingCount > 0 && <>&nbsp;·&nbsp;{phasePendingCount} remaining</>}
-                              </span>
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                                {bulkPhotoSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkPhotoSaveError}</span>}
-                                <button
-                                  type="button"
-                                  className="catalog-action-pill"
-                                  disabled={bulkPhotoIsSaving}
-                                  onClick={bulkPhotoApproveAll}
-                                >
-                                  Approve All
-                                </button>
-                                <button
-                                  type="button"
-                                  className="catalog-action-pill"
-                                  disabled={bulkPhotoIsSaving}
-                                  onClick={() => setBulkPhotoRows(rows => rows.map(r => ({ ...r, description: '' })))}
-                                >
-                                  Clear All Descriptions
-                                </button>
-                                {bulkPhotoPhase === 'update' && (
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill catalog-admin-submit-finish"
-                                    disabled={approvedCount === 0 || bulkPhotoIsSaving}
-                                    onClick={handleBulkPhotoSave}
-                                  >
-                                    {bulkPhotoIsSaving ? `Saving… ${bulkPhotoSaveProgress}/${approvedCount}` : `Save ${approvedCount} Approved & Finish`}
-                                  </button>
-                                )}
-                                {bulkPhotoPhase === 'new' && phaseDone && (
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill catalog-admin-submit-finish"
-                                    onClick={() => {
-                                      const firstUpdate = bulkPhotoRows.findIndex(r => r.status === 'pending' && r.hasExistingImage)
-                                      setBulkPhotoPhase('update')
-                                      if (firstUpdate >= 0) { setBulkPhotoIdx(firstUpdate); setBulkPhotoManualSearch('') }
-                                    }}
-                                  >
-                                    Next: Update Existing Photos →
-                                  </button>
-                                )}
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkPhotoRows([]); setBulkPhotoIdx(0); setBulkPhotoManualSearch(''); setBulkPhotoPhase(null); setBulkPhotoPrintTypeId('') }}>Start Over</button>
-                              </div>
-                            </div>
-                            <div className="bulk-import-split">
-                              <div className="bulk-import-list">
-                                {phaseRows.map(row => (
-                                  <button
-                                    key={row._id}
-                                    type="button"
-                                    className={`bulk-import-list-row${row._origIdx === bulkPhotoIdx ? ' bulk-import-list-row-active' : ''} bulk-import-list-row-${row.status}`}
-                                    onClick={() => { setBulkPhotoIdx(row._origIdx); setBulkPhotoManualSearch('') }}
-                                  >
-                                    {row.preview && <img src={row.preview} alt="" className="bulk-photo-list-thumb" />}
-                                    <span className="bulk-import-row-icon">
-                                      {row.status === 'pending'  ? (row.matchedItem ? '?' : '!') :
-                                       row.status === 'approved' ? '✓' :
-                                       row.status === 'skipped'  ? '–' :
-                                       row.status === 'saved'    ? '✅' : '✗'}
-                                    </span>
-                                    <span className="bulk-import-row-label" style={{ fontSize: '0.75rem' }}>
-                                      {row.matchedItem
-                                        ? [row.matchedItem.card_number ? `#${row.matchedItem.card_number}` : null, row.matchedItem.subject || null, row.matchedItem.print_type || null].filter(Boolean).join(' — ')
-                                        : row.filename}
-                                    </span>
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="bulk-import-editor">
-                                {phaseDone ? (
-                                  <p className="catalog-admin-hint" style={{ padding: 16 }}>
-                                    {bulkPhotoPhase === 'new'
-                                      ? 'All new-photo cards reviewed. Click "Next: Update Existing Photos →" above.'
-                                      : 'All cards reviewed. Click "Save Approved & Finish" above.'}
-                                  </p>
-                                ) : (
-                                  <>
-                                    <p className="bulk-import-editor-rowlabel">{cur.filename}</p>
-                                    {cur.preview && <img src={cur.preview} alt="card" className="bulk-photo-preview" />}
-                                    <div className="bulk-import-editor-fields" style={{ marginTop: 12 }}>
-                                      <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                        <label>Match</label>
-                                        {cur.matchedItem ? (
-                                          <span className="catalog-admin-subject-tag">
-                                            {cur.matchedItem.card_number && <strong>#{cur.matchedItem.card_number}</strong>}
-                                            {' '}{cur.matchedItem.subject || ''}
-                                            {cur.matchedItem.print_type && <span style={{ marginLeft: 4 }}>— {cur.matchedItem.print_type}</span>}
-                                            <span className="catalog-admin-hint" style={{ marginLeft: 6 }}>{cur.matchType === 'manual' ? 'manual' : 'name match'}</span>
-                                            <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: null, matchType: null }); setBulkPhotoManualSearch('') }}>✕</button>
-                                          </span>
-                                        ) : (
-                                          <div>
-                                            <p className="catalog-admin-hint" style={{ marginBottom: 6 }}>No match found. Search to assign manually:</p>
-                                            <input
-                                              className="catalog-admin-inline-input"
-                                              style={{ width: '100%', marginBottom: 4 }}
-                                              placeholder="Type a subject name…"
-                                              value={bulkPhotoManualSearch}
-                                              onChange={e => setBulkPhotoManualSearch(e.target.value)}
-                                              autoComplete="off"
-                                            />
-                                            {bulkPhotoManualResults.length > 0 && (
-                                              <div className="catalog-admin-subject-results">
-                                                {bulkPhotoManualResults.map(it => (
-                                                  <button key={it.item_id} type="button" className="catalog-admin-subject-result"
-                                                    onClick={() => { updateBulkPhotoRow(bulkPhotoIdx, { matchedItem: it, matchType: 'manual' }); setBulkPhotoManualSearch(''); setBulkPhotoManualResults([]) }}>
-                                                    {it.card_number && <strong style={{ marginRight: 6 }}>#{it.card_number}</strong>}
-                                                    <span style={{ textTransform: 'uppercase' }}>{it.subject || '—'}</span>
-                                                    {it.print_type && <span className="catalog-admin-hint" style={{ marginLeft: 6 }}>— {it.print_type}</span>}
-                                                  </button>
-                                                ))}
-                                              </div>
-                                            )}
-                                            {bulkPhotoManualSearch.trim().length >= 2 && bulkPhotoManualResults.length === 0 && (
-                                              <p className="catalog-admin-hint" style={{ padding: '4px 0' }}>No items found.</p>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                        <label>Description <span className="catalog-admin-hint">(from OCR — edit or clear before approving)</span></label>
-                                        <textarea
-                                          rows={4}
-                                          className="catalog-admin-inline-input"
-                                          style={{ width: '100%', fontFamily: 'inherit' }}
-                                          value={cur.description || ''}
-                                          onChange={e => updateBulkPhotoRow(bulkPhotoIdx, { description: e.target.value })}
-                                          placeholder={bulkPhotoPosition === 0 ? 'No text detected on front' : 'No text detected on back'}
-                                        />
-                                      </div>
-                                    </div>
-                                    {cur.errorMsg && <p className="catalog-admin-error" style={{ marginTop: 8 }}>{cur.errorMsg}</p>}
-                                    <div className="bulk-import-actions">
-                                      <button type="button" className="catalog-admin-inline-cancel" onClick={bulkPhotoSkip} disabled={cur.status === 'saved'}>Skip</button>
-                                      <button type="button" className="catalog-action-pill catalog-admin-submit-finish" onClick={bulkPhotoApprove} disabled={cur.status === 'saved'}>
-                                        {cur.status === 'approved' ? 'Approved ✓' : cur.status === 'saved' ? 'Saved ✅' : 'Approve'}
-                                      </button>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  ) : bulkImportMode ? (
-                    <div className="bulk-import-container">
-                      {bulkImportRows.length === 0 ? (
-                        /* Step 1: pick set + upload CSV */
-                        <div className="bulk-import-step1">
-                          <p className="catalog-admin-section-title">1. Select Category &amp; Subcategory</p>
-                          <div className="catalog-admin-two-col">
-                            <div>
-                              <label>Category</label>
-                              <select value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId('') }}>
-                                <option value="">Select category…</option>
-                                {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <label>Subcategory</label>
-                              <select value={catalogAdminSubcategoryId} onChange={e => setCatalogAdminSubcategoryId(e.target.value)} disabled={!catalogAdminCategoryId}>
-                                <option value="">Select subcategory…</option>
-                                {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </div>
-                          </div>
-                          <p className="catalog-admin-section-title" style={{ marginTop: 20 }}>2. Upload CSV or Excel</p>
-                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Columns recognised: <code>subject_name, franchise, brand, collectible_set, card_number, team, print_count, piece_count, release_year, description, upc, bricklink_id, rebrickable_fig_id, card_treatments, rarity, parent_set</code></p>
-                          <p className="catalog-admin-hint" style={{ marginBottom: 8 }}>Franchise, brand, and collectible set will be created automatically if they don't exist yet.</p>
-                          <label className="bulk-import-upload-area">
-                            <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style={{ display: 'none' }} onChange={e => handleBulkImportFile(e.target.files?.[0])} />
-                            <span className="bulk-import-upload-icon">&#8679;</span>
-                            <span>Click to choose CSV or Excel file</span>
-                          </label>
-                        </div>
-                      ) : (
-                        /* Step 2: review queue */
-                        (() => {
-                          const cur = bulkImportRows[bulkImportIdx] || {}
-                          const bulkLabels = getCategoryLabels(selectedCatalogAdminCategoryName)
-                          // A LEGO row is a minifig (no packaging) unless it's a set —
-                          // identified by a set number, numeric BrickLink id, or "Sets" brand.
-                          const bulkRowIsSet = !!(cur.lego_set_number?.trim() || (cur.bricklink_id?.trim() && /^\d/.test(cur.bricklink_id.trim())) || /^sets?$/i.test((cur.brand_name || '').trim()))
-                          const bulkIsMinifig = selectedCatalogAdminCategoryName === 'Building Blocks' && !bulkRowIsSet
-                          const _legoPreviewCode = (() => {
-                            if (selectedCatalogAdminCategoryName !== 'Building Blocks') return ''
-                            // Sets don't get minifig codes — detect by lego_set_number or numeric BrickLink ID
-                            const curBlId = cur.bricklink_id?.trim() || ''
-                            if (cur.lego_set_number?.trim() || (curBlId && /^\d/.test(curBlId))) return ''
-                            if (cur.minifig_code) return cur.minifig_code
-                            const charName = cur.subjectObj?.name || cur.subject_name || ''
-                            const shorthand = deriveMinifigShorthand(charName)
-                            if (!shorthand) return ''
-                            const colSetLower = (cur.collectible_set_name || '').toLowerCase().trim()
-                            const propEntry = colSetLower
-                              ? legoPropertyRegistry.find(p =>
-                                  p.full_name.toLowerCase() === colSetLower ||
-                                  p.full_name.toLowerCase().includes(colSetLower) ||
-                                  colSetLower.includes(p.full_name.toLowerCase()))
-                              : null
-                            const themeAbbrev = propEntry?.theme_abbreviation || ''
-                            const propAbbrev  = propEntry?.abbreviation || ''
-                            if (!themeAbbrev || !propAbbrev) return `??-??-${shorthand}-??`
-                            return `${themeAbbrev}-${propAbbrev}-${shorthand}-??`
-                          })()
-                          const approvedCount = bulkImportRows.filter(r => r.status === 'approved').length
-                          const savedCount    = bulkImportRows.filter(r => r.status === 'saved').length
-                          const skippedCount  = bulkImportRows.filter(r => r.status === 'skipped').length
-                          const errorCount    = bulkImportRows.filter(r => r.status === 'error').length
-                          const allDone       = bulkImportRows.every(r => r.status !== 'pending')
-                          return (
-                            <div className="bulk-import-review">
-                              {bulkImportSheetSummary && (
-                                <div className="bulk-import-sheet-summary">
-                                  <strong>{bulkImportSheetSummary.length} sheets read.</strong>{' '}
-                                  {bulkImportSheetSummary.map((s, i) => (
-                                    <span key={s.sheet} className={s.included ? 'sheet-included' : 'sheet-skipped'}>
-                                      {i > 0 ? ' · ' : ''}{s.sheet}: {s.included ? `${s.usable} imported` : 'skipped (no item/subject column)'}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="bulk-import-topbar">
-                                <span className="bulk-import-stats">
-                                  {bulkImportRows.length} rows &nbsp;·&nbsp;
-                                  <span className="bulk-stat-approved">{approvedCount} approved</span> &nbsp;·&nbsp;
-                                  <span className="bulk-stat-skipped">{skippedCount} skipped</span>
-                                  {errorCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-error">{errorCount} errors</span></>}
-                                  {savedCount > 0 && <>&nbsp;·&nbsp;<span className="bulk-stat-saved">{savedCount} saved</span></>}
-                                </span>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                                  {bulkImportSaveError && <span className="catalog-admin-error" style={{ fontSize: '0.8rem' }}>{bulkImportSaveError}</span>}
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill"
-                                    disabled={bulkImportIsSaving}
-                                    onClick={() => setBulkImportRows(rows => rows.map(r => r.status === 'pending' ? { ...r, status: r.existingMatch ? 'skipped' : 'approved' } : r))}
-                                  >
-                                    Approve All
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill"
-                                    disabled={bulkImportIsSaving}
-                                    onClick={() => setBulkImportRows(rows => rows.map(r => ({ ...r, description: '' })))}
-                                  >
-                                    Clear All Descriptions
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="catalog-action-pill catalog-admin-submit-finish"
-                                    disabled={approvedCount === 0 || bulkImportIsSaving}
-                                    onClick={handleBulkImportSave}
-                                  >
-                                    {bulkImportIsSaving ? `Saving… ${bulkImportSaveProgress}/${approvedCount}` : `Save ${approvedCount} Approved`}
-                                  </button>
-                                  <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportRows([]); setBulkImportIdx(0); setBulkImportSheetSummary(null) }}>Start Over</button>
-                                </div>
-                              </div>
-                              <div className="bulk-import-split">
-                                <div className="bulk-import-list">
-                                  {bulkImportRows.map((row, i) => (
-                                    <button
-                                      key={row._id}
-                                      type="button"
-                                      className={`bulk-import-list-row${i === bulkImportIdx ? ' bulk-import-list-row-active' : ''} bulk-import-list-row-${row.status}`}
-                                      onClick={() => { setBulkImportIdx(i); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}
-                                    >
-                                      <span className="bulk-import-row-icon">
-                                        {row.status === 'pending'  ? (row.existingMatch ? '⚠' : '○') :
-                                         row.status === 'approved' ? '✓' :
-                                         row.status === 'skipped'  ? '–' :
-                                         row.status === 'saved'    ? '✅' : '✗'}
-                                      </span>
-                                      <span className="bulk-import-row-label">{row.item_name || row.subjectObj?.name || row.subject_name || `Row ${i + 1}`}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                                <div className="bulk-import-editor">
-                                  {allDone && !bulkImportIsSaving ? (
-                                    <p className="catalog-admin-hint" style={{ padding: 16 }}>All rows reviewed. Save approved items above.</p>
-                                  ) : (
-                                    <>
-                                      <p className="bulk-import-editor-rowlabel">Row {bulkImportIdx + 1} of {bulkImportRows.length}</p>
-                                      {cur.existingMatch && (
-                                        <div style={{ margin: '0 0 10px 0', padding: '8px 12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 6, fontSize: '0.8rem', color: '#856404' }}>
-                                          ⚠ Already in the catalog{cur.existingMatch.lego_set_number ? ` — set ${cur.existingMatch.lego_set_number}` : cur.existingMatch.rebrickable_fig_id ? ` — ${cur.existingMatch.rebrickable_fig_id}` : cur.existingMatch.card_number ? ` — card #${cur.existingMatch.card_number}` : ''}. It will be skipped on save unless you edit it.
-                                        </div>
-                                      )}
-                                      {cur._unknownCols?.length > 0 && (
-                                        <div style={{ margin: '0 0 10px 0', padding: '8px 12px', background: '#e7f0ff', border: '1px solid #9ec1ff', borderRadius: 6, fontSize: '0.8rem', color: '#1a3a7a' }}>
-                                          Unmapped column{cur._unknownCols.length > 1 ? 's' : ''}: <strong>{cur._unknownCols.join(', ')}</strong>. These aren't imported — rename them to a known field or ignore.
-                                        </div>
-                                      )}
-                                      <div className="bulk-import-editor-fields">
-                                        {selectedCatalogAdminCategoryName === 'Toys' ? (<>
-                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                            <label>Subject</label>
-                                            <div className="catalog-admin-subject-search-wrap">
-                                              <input
-                                                type="text"
-                                                value={cur.subjectObj ? cur.subjectObj.name : (cur.item_name || '')}
-                                                onChange={e => {
-                                                  const v = e.target.value
-                                                  // Subject IS the item name — keep both in step and drop any
-                                                  // previously-matched subject so it re-resolves as you type.
-                                                  updateBulkRow(bulkImportIdx, { item_name: v, subject_name: v, subjectObj: null })
-                                                  setBulkImportSubjectSearch(v)
-                                                }}
-                                                placeholder="e.g. Imperial Speeder Bike"
-                                                autoComplete="off"
-                                              />
-                                              {!cur.subjectObj && bulkImportSubjectResults.length > 0 && (
-                                                <div className="catalog-admin-subject-results">
-                                                  {bulkImportSubjectResults.map(s => (
-                                                    <button key={s.id} type="button" className="catalog-admin-subject-result"
-                                                      onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: s, subject_name: s.name, item_name: s.name }); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>
-                                                      <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                                      <span className="catalog-admin-hint"> · {s.type}</span>
-                                                    </button>
-                                                  ))}
-                                                </div>
-                                              )}
-                                            </div>
-                                            {cur.subjectObj ? (
-                                              <span className="bulk-subject-state bulk-subject-existing">
-                                                ✓ Using existing subject{cur.subjectObj.type ? ` · ${cur.subjectObj.type}` : ''}
-                                                <button type="button" className="bulk-import-subject-search-link" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: null }); setBulkImportSubjectSearch(cur.subjectObj.name) }}>change</button>
-                                              </span>
-                                            ) : (cur.item_name || '').trim() ? (
-                                              <span className="bulk-subject-state bulk-subject-new">＋ Will create a new subject</span>
-                                            ) : null}
-                                          </div>
-                                          <div className="bulk-import-editor-field"><label>Franchise</label><input type="text" value={cur.franchise_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { franchise_name: e.target.value })} placeholder="e.g. Star Wars" /></div>
-                                          <div className="bulk-import-editor-field"><label>Subfranchise</label><input type="text" value={cur.subtheme_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { subtheme_name: e.target.value })} placeholder="e.g. Age of Rebellion" /></div>
-                                          <div className="bulk-import-editor-field"><label>Product Line</label><input type="text" value={cur.product_line_names || ''} onChange={e => updateBulkRow(bulkImportIdx, { product_line_names: e.target.value })} placeholder="e.g. Micro Galaxy Squadron" /></div>
-                                          <div className="bulk-import-editor-field"><label>Property</label><input type="text" value={cur.property_names || ''} onChange={e => updateBulkRow(bulkImportIdx, { property_names: e.target.value })} placeholder="e.g. Return of the Jedi" /></div>
-                                          <div className="bulk-import-editor-field"><label>Brand/Manufacturer</label><input type="text" value={cur.manufacturer_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { manufacturer_name: e.target.value })} placeholder="e.g. Jazwares" /></div>
-                                          <div className="bulk-import-editor-field"><label>Item Type</label><input type="text" value={cur.brand_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { brand_name: e.target.value })} placeholder="e.g. Vehicle" /></div>
-                                          <div className="bulk-import-editor-field"><label>Series</label><input type="text" value={cur.series_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { series_name: e.target.value })} placeholder="e.g. Series 1" /></div>
-                                          <div className="bulk-import-editor-field"><label>ID Number</label><input type="text" value={cur.lego_set_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { lego_set_number: e.target.value })} placeholder="Manufacturer / catalogue #" /></div>
-                                          <div className="bulk-import-editor-field"><label>Piece Count</label><input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} /></div>
-                                          <div className="bulk-import-editor-field"><label>Retail Price</label><input type="number" step="0.01" min="0" value={cur.retail_price || ''} onChange={e => updateBulkRow(bulkImportIdx, { retail_price: e.target.value })} /></div>
-                                          <div className="bulk-import-editor-field"><label>Release Year</label><input type="number" min="1900" max="2100" value={cur.release_year || ''} onChange={e => updateBulkRow(bulkImportIdx, { release_year: e.target.value })} /></div>
-                                          <div className="bulk-import-editor-field"><label>Availability</label><input type="text" value={cur.availability || ''} onChange={e => updateBulkRow(bulkImportIdx, { availability: e.target.value })} placeholder="e.g. Retired" /></div>
-                                          <div className="bulk-import-editor-field"><label>Barcode/UPC</label><input type="text" value={cur.upc || ''} onChange={e => updateBulkRow(bulkImportIdx, { upc: e.target.value })} /></div>
-                                          <div className="bulk-import-editor-field"><label>Includes</label><input type="text" value={cur.includes || ''} onChange={e => updateBulkRow(bulkImportIdx, { includes: e.target.value })} placeholder="child IDs (comma-separated)" /></div>
-                                          <div className="bulk-import-editor-field"><label>Included In</label><input type="text" value={cur.parent_set_bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { parent_set_bricklink_id: e.target.value })} placeholder="parent IDs (comma-separated)" /></div>
-                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide"><label>Description</label><textarea rows={2} value={cur.description || ''} onChange={e => updateBulkRow(bulkImportIdx, { description: e.target.value })} /></div>
-                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide bulk-import-image-field">
-                                            <label>Photo</label>
-                                            <div className="bulk-import-image-row">
-                                              {(cur.image_preview || cur.image_url) && <img src={cur.image_preview || cur.image_url} alt="preview" className="bulk-import-image-thumb" onError={e => { e.target.style.display = 'none' }} />}
-                                              <div className="bulk-import-image-controls">
-                                                <input type="text" placeholder="Image URL (from CSV or paste)" value={cur.image_url || ''} onChange={e => updateBulkRow(bulkImportIdx, { image_url: e.target.value, image_file: null, image_preview: '' })} />
-                                                <span className="bulk-import-image-or">or</span>
-                                                <label className="bulk-import-image-upload-btn">Upload file<input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (!f) return; updateBulkRow(bulkImportIdx, { image_file: f, image_preview: URL.createObjectURL(f), image_url: '' }) }} /></label>
-                                                {(cur.image_file || cur.image_url) && <button type="button" className="bulk-import-image-clear" onClick={() => updateBulkRow(bulkImportIdx, { image_file: null, image_preview: '', image_url: '' })}>✕</button>}
-                                              </div>
-                                            </div>
-                                          </div>
-                                        </>) : (<>
-                                        <div className="bulk-import-editor-field">
-                                          <label>Item Name <span className="catalog-admin-hint">(= Subject)</span></label>
-                                          <input type="text" value={cur.item_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { item_name: e.target.value, subject_name: e.target.value, subjectObj: null })} placeholder="e.g. City of Atlantis" />
-                                        </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>{bulkLabels.franchise}</label>
-                                          <input type="text" value={cur.franchise_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { franchise_name: e.target.value })} placeholder="e.g. Star Wars" />
-                                        </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>{bulkLabels.brand}</label>
-                                          <input type="text" value={cur.brand_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { brand_name: e.target.value })} placeholder="e.g. LEGO" />
-                                        </div>
-                                        {!bulkIsMinifig && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>{bulkLabels.collectibleSet}</label>
-                                            <input type="text" value={cur.collectible_set_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { collectible_set_name: e.target.value })} placeholder={selectedCatalogAdminCategoryName === 'Building Blocks' ? 'e.g. Box / Polybag' : 'e.g. UCS Millennium Falcon'} />
-                                          </div>
-                                        )}
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && _legoPreviewCode && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Minifig Code <span className="catalog-admin-hint">{cur.minifig_code ? '(from CSV)' : '(preview — # assigned on save)'}</span></label>
-                                            <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.9rem' }}>{_legoPreviewCode}</span>
-                                          </div>
-                                        )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>{bulkLabels.subject} <span className="catalog-admin-hint">(optional)</span></label>
-                                          {cur.subjectObj ? (
-                                            <div className="catalog-admin-subject-tags">
-                                              <span className="catalog-admin-subject-tag">
-                                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{cur.subjectObj.name}</span>
-                                                <span className="catalog-admin-hint"> · {cur.subjectObj.type}</span>
-                                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: null }); setBulkImportSubjectSearch(cur.subject_name || '') }}>✕</button>
-                                              </span>
-                                            </div>
-                                          ) : cur.subject_name && !bulkImportSubjectSearch ? (
-                                            <div className="catalog-admin-subject-tags">
-                                              <span className="catalog-admin-subject-tag bulk-import-subject-new">
-                                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{cur.subject_name}</span>
-                                                <span className="catalog-admin-hint"> · will create</span>
-                                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => { updateBulkRow(bulkImportIdx, { subject_name: '' }); setBulkImportSubjectSearch('') }}>✕</button>
-                                              </span>
-                                              <button type="button" className="bulk-import-subject-search-link" onClick={() => setBulkImportSubjectSearch(cur.subject_name)}>Search existing instead</button>
-                                            </div>
-                                          ) : (
-                                            <div className="catalog-admin-subject-search-wrap">
-                                              <input
-                                                className="catalog-admin-inline-input"
-                                                style={{ width: '100%' }}
-                                                placeholder="Search subjects…"
-                                                value={bulkImportSubjectSearch}
-                                                onChange={e => setBulkImportSubjectSearch(e.target.value)}
-                                                autoComplete="off"
-                                              />
-                                              {bulkImportSubjectResults.length > 0 && (
-                                                <div className="catalog-admin-subject-results">
-                                                  {bulkImportSubjectResults.map(s => (
-                                                    <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => { updateBulkRow(bulkImportIdx, { subjectObj: s, subject_name: s.name }); setBulkImportSubjectSearch(''); setBulkImportSubjectResults([]) }}>
-                                                      <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                                      <span className="catalog-admin-hint"> · {s.type}</span>
-                                                    </button>
-                                                  ))}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                        {bulkImportSpeciesList.length > 0 && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Species</label>
-                                            <select value={cur.species_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { species_id: e.target.value })}>
-                                              <option value="">Unknown</option>
-                                              {bulkImportSpeciesList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                            </select>
-                                          </div>
-                                        )}
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' ? (
-                                          <>
-                                            <div className="bulk-import-editor-field">
-                                              <label>{bulkLabels.subset} {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(match a theme first)</span>}</label>
-                                              <select value={cur.subset_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subset_id: e.target.value, product_line_ids: [] })} disabled={!catalogAdminRealFranchiseId}>
-                                                <option value="">None</option>
-                                                {catalogAdminSubsetsList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                              </select>
-                                              {!cur.subset_id && cur.subtheme_name?.trim() && <span className="catalog-admin-hint">CSV: “{cur.subtheme_name}” — will create on save</span>}
-                                            </div>
-                                            <div className="bulk-import-editor-field">
-                                              <label>{bulkLabels.productLine}</label>
-                                              {cur.subset_id ? (
-                                                catalogAdminProductLinesList.length > 0 ? (
-                                                  <div className="catalog-admin-team-list">
-                                                    {catalogAdminProductLinesList.map(p => {
-                                                      const checked = (cur.product_line_ids || []).includes(p.id)
-                                                      return (
-                                                        <label key={p.id} className="catalog-admin-team-checkbox">
-                                                          <input type="checkbox" checked={checked} onChange={() => updateBulkRow(bulkImportIdx, { product_line_ids: checked ? (cur.product_line_ids || []).filter(id => id !== p.id) : [...(cur.product_line_ids || []), p.id] })} />
-                                                          <span>{p.name}</span>
-                                                        </label>
-                                                      )
-                                                    })}
-                                                  </div>
-                                                ) : <span className="catalog-admin-hint">No product lines yet for this {bulkLabels.subset.toLowerCase()}.</span>
-                                              ) : <span className="catalog-admin-hint">Select a {bulkLabels.subset.toLowerCase()} first.</span>}
-                                              {cur.product_line_names?.trim() && <span className="catalog-admin-hint">CSV: “{cur.product_line_names}” — matched/created on save</span>}
-                                            </div>
-                                          </>
-                                        ) : (
-                                          <div className="bulk-import-editor-field">
-                                            <label>{bulkLabels.subset}</label>
-                                            <select value={cur.subcollectble_set_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { subcollectble_set_id: e.target.value })}>
-                                              <option value="">None</option>
-                                              {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                            </select>
-                                          </div>
-                                        )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>Series <span className="catalog-admin-hint">(optional)</span></label>
-                                          <input type="text" value={cur.series_name || ''} onChange={e => updateBulkRow(bulkImportIdx, { series_name: e.target.value })} placeholder="e.g. UCS, Topps Chrome" />
-                                        </div>
-                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
-                                        <div className="bulk-import-editor-field">
-                                          <label>Print Type</label>
-                                          <select value={cur.print_type_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_type_id: e.target.value })}>
-                                            <option value="">None</option>
-                                            {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                          </select>
-                                          {bulkImportCreatingPrintType ? (
-                                            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                                              <input
-                                                type="text"
-                                                className="catalog-admin-inline-input"
-                                                placeholder="Print type name…"
-                                                value={bulkImportNewPrintTypeName}
-                                                onChange={e => setBulkImportNewPrintTypeName(e.target.value)}
-                                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleBulkCreatePrintType() } }}
-                                                autoFocus
-                                              />
-                                              <button type="button" className="catalog-admin-inline-save" onClick={handleBulkCreatePrintType}>Add</button>
-                                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => { setBulkImportCreatingPrintType(false); setBulkImportNewPrintTypeName('') }}>✕</button>
-                                            </div>
-                                          ) : (
-                                            <button type="button" className="catalog-admin-create-inline-link" style={{ marginTop: 2 }} onClick={() => setBulkImportCreatingPrintType(true)}>＋ New print type</button>
-                                          )}
-                                        </div>
-                                        )}
-                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogRarities.length > 0 && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Rarity</label>
-                                            <select value={cur.rarity_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rarity_id: e.target.value })}>
-                                              <option value="">None</option>
-                                              {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                                            </select>
-                                          </div>
-                                        )}
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>BrickLink ID</label>
-                                            <input type="text" value={cur.bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { bricklink_id: e.target.value })} placeholder="e.g. col473" />
-                                          </div>
-                                        )}
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Rebrickable ID</label>
-                                            <input type="text" value={cur.rebrickable_fig_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { rebrickable_fig_id: e.target.value })} placeholder="e.g. fig-001234" />
-                                          </div>
-                                        )}
-                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) ? (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Print Count</label>
-                                            <input type="number" min="1" value={cur.print_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { print_count: e.target.value })} />
-                                          </div>
-                                        ) : (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Piece Count</label>
-                                            <input type="number" min="1" value={cur.piece_count || ''} onChange={e => updateBulkRow(bulkImportIdx, { piece_count: e.target.value })} />
-                                          </div>
-                                        )}
-                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Card Number</label>
-                                            <input type="text" value={cur.card_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { card_number: e.target.value })} />
-                                          </div>
-                                        )}
-                                        <div className="bulk-import-editor-field">
-                                          <label>Release Year</label>
-                                          <input type="number" min="1932" max="2100" value={cur.release_year || ''} onChange={e => updateBulkRow(bulkImportIdx, { release_year: e.target.value })} />
-                                        </div>
-                                        <div className="bulk-import-editor-field">
-                                          <label>UPC</label>
-                                          <input type="text" value={cur.upc || ''} onChange={e => updateBulkRow(bulkImportIdx, { upc: e.target.value })} />
-                                        </div>
-                                        {CARD_CONDITION_CATEGORIES.has(selectedCatalogAdminCategoryName) && catalogAllCardTypes.filter(ct => ct.name !== 'Normal').length > 0 && (
-                                          <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                            <label>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></label>
-                                            <div className="catalog-admin-team-list">
-                                              {catalogAllCardTypes.filter(ct => ct.name !== 'Normal').map(ct => (
-                                                <label key={ct.id} className="catalog-admin-team-checkbox">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={(cur.card_type_ids || []).includes(ct.id)}
-                                                    onChange={e => updateBulkRow(bulkImportIdx, { card_type_ids: e.target.checked ? [...(cur.card_type_ids || []), ct.id] : (cur.card_type_ids || []).filter(id => id !== ct.id) })}
-                                                  />
-                                                  <span>{ct.name}</span>
-                                                </label>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                          <label>Factions / Affiliation</label>
-                                          {(cur.team_ids || []).length > 0 && (
-                                            <div className="catalog-admin-subject-tags" style={{ marginBottom: 4 }}>
-                                              {(cur.team_ids || []).map(tid => {
-                                                const tm = catalogAdminTeams.find(t => t.id === tid)
-                                                if (!tm) return null
-                                                return (
-                                                  <span key={tid} className="catalog-admin-subject-tag">
-                                                    <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{tm.name}</span>
-                                                    <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => updateBulkRow(bulkImportIdx, { team_ids: (cur.team_ids || []).filter(id => id !== tid) })}>✕</button>
-                                                  </span>
-                                                )
-                                              })}
-                                            </div>
-                                          )}
-                                          <div className="catalog-admin-subject-search-wrap">
-                                            <input
-                                              className="catalog-admin-inline-input"
-                                              style={{ width: '100%' }}
-                                              placeholder="Search factions…"
-                                              value={bulkImportTeamSearch}
-                                              onChange={e => setBulkImportTeamSearch(e.target.value)}
-                                              autoComplete="off"
-                                            />
-                                            {bulkImportTeamSearch.trim().length > 0 && (() => {
-                                              const q = bulkImportTeamSearch.trim().toLowerCase()
-                                              const selected = new Set(cur.team_ids || [])
-                                              const results = catalogAdminTeams.filter(t => !selected.has(t.id) && t.name.toLowerCase().includes(q))
-                                              if (!results.length) return null
-                                              return (
-                                                <div className="catalog-admin-subject-results">
-                                                  {results.map(t => (
-                                                    <button key={t.id} type="button" className="catalog-admin-subject-result" onClick={() => { updateBulkRow(bulkImportIdx, { team_ids: [...(cur.team_ids || []), t.id] }); setBulkImportTeamSearch('') }}>
-                                                      <span style={{ textTransform: 'uppercase' }}>{t.name}</span>
-                                                    </button>
-                                                  ))}
-                                                </div>
-                                              )
-                                            })()}
-                                          </div>
-                                        </div>
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>LEGO Set Number <span className="catalog-admin-hint">(e.g. 75357 — no variant suffix)</span></label>
-                                            <input type="text" value={cur.lego_set_number || ''} onChange={e => updateBulkRow(bulkImportIdx, { lego_set_number: e.target.value })} placeholder="e.g. 75357" />
-                                          </div>
-                                        )}
-                                        {selectedCatalogAdminCategoryName === 'Building Blocks' && (
-                                          <div className="bulk-import-editor-field">
-                                            <label>Parent Set <span className="catalog-admin-hint">(BrickLink ID or set number of the set this minifig comes in)</span></label>
-                                            <input type="text" value={cur.parent_set_bricklink_id || ''} onChange={e => updateBulkRow(bulkImportIdx, { parent_set_bricklink_id: e.target.value })} placeholder="e.g. 75357-1 or 75357" />
-                                          </div>
-                                        )}
-                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide">
-                                          <label>Description</label>
-                                          <textarea rows={2} value={cur.description || ''} onChange={e => updateBulkRow(bulkImportIdx, { description: e.target.value })} />
-                                        </div>
-                                        <div className="bulk-import-editor-field bulk-import-editor-field--wide bulk-import-image-field">
-                                          <label>Photo</label>
-                                          <div className="bulk-import-image-row">
-                                            {(cur.image_preview || cur.image_url) && (
-                                              <img
-                                                src={cur.image_preview || cur.image_url}
-                                                alt="preview"
-                                                className="bulk-import-image-thumb"
-                                                onError={e => { e.target.style.display = 'none' }}
-                                              />
-                                            )}
-                                            <div className="bulk-import-image-controls">
-                                              <input
-                                                type="text"
-                                                placeholder="Image URL (from CSV or paste)"
-                                                value={cur.image_url || ''}
-                                                onChange={e => updateBulkRow(bulkImportIdx, { image_url: e.target.value, image_file: null, image_preview: '' })}
-                                              />
-                                              <span className="bulk-import-image-or">or</span>
-                                              <label className="bulk-import-image-upload-btn">
-                                                Upload file
-                                                <input
-                                                  type="file"
-                                                  accept="image/*"
-                                                  style={{ display: 'none' }}
-                                                  onChange={e => {
-                                                    const f = e.target.files?.[0]
-                                                    if (!f) return
-                                                    const preview = URL.createObjectURL(f)
-                                                    updateBulkRow(bulkImportIdx, { image_file: f, image_preview: preview, image_url: '' })
-                                                  }}
-                                                />
-                                              </label>
-                                              {(cur.image_file || cur.image_url) && (
-                                                <button type="button" className="bulk-import-image-clear" onClick={() => updateBulkRow(bulkImportIdx, { image_file: null, image_preview: '', image_url: '' })}>✕</button>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
-                                        </>)}
-                                      </div>
-                                      {cur.errorMsg && <p className="catalog-admin-error" style={{ marginTop: 8 }}>{cur.errorMsg}</p>}
-                                      <div className="bulk-import-actions">
-                                        <button type="button" className="catalog-admin-inline-cancel" onClick={bulkImportSkip} disabled={cur.status === 'saved'}>Skip</button>
-                                        <button type="button" className="catalog-action-pill catalog-admin-submit-finish" onClick={bulkImportApprove} disabled={cur.status === 'saved'}>
-                                          {cur.status === 'approved' ? 'Approved ✓' : cur.status === 'saved' ? 'Saved ✅' : 'Approve'}
-                                        </button>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )
-                        })()
-                      )}
-                    </div>
-                  ) : (
-                  <form className="catalog-admin-form" onSubmit={e => e.preventDefault()}>
-
-                    <p className="catalog-admin-section-title">Classification</p>
-                    <div className="catalog-admin-two-col">
-                      <div>
-                        <label htmlFor="cai-category">Category</label>
-                        <select id="cai-category" value={catalogAdminCategoryId} onChange={e => { setCatalogAdminCategoryId(e.target.value); setCatalogAdminSubcategoryId(''); setCatalogAdminFormError('') }}>
-                          <option value="">Select category…</option>
-                          {catalogAdminCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        {catalogAdminInlineCreate.field === 'category' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Category name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'category', value: '', subjectType: 'player' })}>+ New Category</button>}
-                      </div>
-                      <div>
-                        <label htmlFor="cai-subcategory">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subcategory}</label>
-                        <select id="cai-subcategory" value={catalogAdminSubcategoryId} onChange={e => { setCatalogAdminSubcategoryId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminCategoryId}>
-                          <option value="">Select subcategory…</option>
-                          {catalogAdminSubcategories.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        {catalogAdminCategoryId && (catalogAdminInlineCreate.field === 'subcategory' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subcategory name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subcategory', value: '', subjectType: 'player' })}>+ New Subcategory</button>)}
-                      </div>
-                      {!getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').hideFranchise && (
-                      <div>
-                        <label htmlFor="cai-franchise">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').franchise}</label>
-                        <select id="cai-franchise" value={catalogAdminRealFranchiseId} onChange={e => { setCatalogAdminRealFranchiseId(e.target.value); setCatalogAdminBrandId(''); setCatalogAdminSubjectIds([]); setCatalogAdminSubjectSearch(''); setCatalogAdminSubjectResults([]); setCatalogAdminTeamIds([]); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminFormError('') }}>
-                          <option value="">None</option>
-                          {catalogAdminRealFranchises.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                        </select>
-                        {catalogAdminInlineCreate.field === 'franchise' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Franchise name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'franchise', value: '', subjectType: 'player' })}>+ New Franchise</button>}
-                      </div>
-                      )}
-                      {/* Item Type — non-LEGO keeps it early because "Set" cascades from it.
-                          The LEGO branch renders it after Product Line (taxonomy order). */}
-                      {selectedCatalogAdminCategoryName !== 'Building Blocks' && (
-                      <div>
-                        <label htmlFor="cai-brand">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').brand}</label>
-                        <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminPackagingId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminRealFranchiseId}>
-                          <option value="">None</option>
-                          {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
-                        {catalogAdminInlineCreate.field === 'brand' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Brand name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'brand', value: '', subjectType: 'player' })}>+ New Brand</button>}
-                      </div>
-                      )}
-                      {selectedCatalogAdminCategoryName === 'Building Blocks' ? (
-                        <>
-                          {/* Subtheme (subset) — depends on Theme (franchise) */}
-                          <div>
-                            <label htmlFor="cai-subtheme">{getCategoryLabels('Building Blocks').subset} {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a theme first)</span>}</label>
-                            <select id="cai-subtheme" value={catalogAdminSubsetSel} onChange={e => { setCatalogAdminSubsetSel(e.target.value); setCatalogAdminProductLineIds([]); setCatalogAdminFormError('') }} disabled={!catalogAdminRealFranchiseId}>
-                              <option value="">None</option>
-                              {catalogAdminSubsetsList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                            {catalogAdminRealFranchiseId && (catalogAdminInlineCreate.field === 'subtheme' ? (
-                              <div className="catalog-admin-inline-create">
-                                <input autoFocus className="catalog-admin-inline-input" placeholder="Subtheme name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                              </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subtheme', value: '', subjectType: 'player' })}>+ New Subtheme</button>)}
-                          </div>
-                          {/* Product Line — under the Theme; Subtheme optional */}
-                          <div>
-                            <label htmlFor="cai-productline">{getCategoryLabels(selectedCatalogAdminCategoryName).property} {!catalogAdminRealFranchiseId ? <span className="catalog-admin-hint">(select a theme first)</span> : (!catalogAdminSubsetSel && <span className="catalog-admin-hint">(all — or pick a subfranchise to narrow)</span>)}</label>
-                            <select id="cai-productline" value={catalogAdminProductLineIds[0] || ''} onChange={e => setCatalogAdminProductLineIds(e.target.value ? [e.target.value] : [])} disabled={!catalogAdminRealFranchiseId}>
-                              <option value="">None</option>
-                              {catalogAdminProductLinesList.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
-                            </select>
-                            {catalogAdminRealFranchiseId && (catalogAdminInlineCreate.field === 'property' ? (
-                              <div className="catalog-admin-inline-create">
-                                <input autoFocus className="catalog-admin-inline-input" placeholder="Property name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                              </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'property', value: '', subjectType: 'player' })}>+ New {getCategoryLabels(selectedCatalogAdminCategoryName).property}</button>)}
-                          </div>
-                          {/* Item Type — taxonomy order: after Product Line, before Series */}
-                          <div>
-                            <label htmlFor="cai-brand">{getCategoryLabels('Building Blocks').brand}</label>
-                            <select id="cai-brand" value={catalogAdminBrandId} onChange={e => { setCatalogAdminBrandId(e.target.value); setCatalogAdminFranchiseId(''); setCatalogAdminSubsetId(''); setCatalogAdminPrintTypeId(''); setCatalogAdminPackagingId(''); setCatalogAdminFormError('') }}>
-                              <option value="">None</option>
-                              {catalogAdminBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                            </select>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                      <div>
-                        <label htmlFor="cai-set">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').collectibleSet}</label>
-                        <select id="cai-set" value={catalogAdminFranchiseId} onChange={e => { setCatalogAdminFranchiseId(e.target.value); setCatalogAdminSubsetId(''); setCatalogAdminFormError('') }} disabled={!catalogAdminBrandId}>
-                          <option value="">None</option>
-                          {catalogAdminFranchises.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        {catalogAdminInlineCreate.field === 'set' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Set name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'set', value: '', subjectType: 'player' })}>+ New Set</button>}
-                      </div>
-                      <div>
-                        <label htmlFor="cai-subset">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subset} {!catalogAdminFranchiseId && <span className="catalog-admin-hint">(select a set first)</span>}</label>
-                        <select id="cai-subset" value={catalogAdminSubsetId} onChange={e => setCatalogAdminSubsetId(e.target.value)} disabled={!catalogAdminFranchiseId}>
-                          <option value="">None</option>
-                          {catalogAdminSubsets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                        {catalogAdminFranchiseId && (catalogAdminInlineCreate.field === 'subset' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subset name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'subset', value: '', subjectType: 'player' })}>+ New Subset</button>)}
-                      </div>
-                        </>
-                      )}
-                      {/* Series (facet) — subcategory-scoped, optional, all categories */}
-                      <div>
-                          <label htmlFor="cai-series">Series {catalogAdminSubcategoryId ? <span className="catalog-admin-hint">(optional)</span> : <span className="catalog-admin-hint">(select a subcategory first)</span>}</label>
-                          <select id="cai-series" value={catalogAdminSeriesId} onChange={e => setCatalogAdminSeriesId(e.target.value)} disabled={!catalogAdminSubcategoryId}>
-                            <option value="">None</option>
-                            {catalogAdminSeriesList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                          </select>
-                          {catalogAdminSubcategoryId && (catalogAdminInlineCreate.field === 'series' ? (
-                            <div className="catalog-admin-inline-create">
-                              <input autoFocus className="catalog-admin-inline-input" placeholder="Series name (e.g. UCS, Topps Chrome)" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                              <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                              <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                              {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                            </div>
-                          ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'series', value: '', subjectType: 'player' })}>+ New Series</button>)}
-                      </div>
-                      {/* Packaging — metadata, not a classification; sits last.
-                          Sets only: minifigs have no packaging. */}
-                      {selectedCatalogAdminCategoryName === 'Building Blocks'
-                        && catalogAdminBrands.find(b => b.id === catalogAdminBrandId)?.name !== 'Minifigs' && (
-                        <div>
-                          <label htmlFor="cai-packaging">{getCategoryLabels('Building Blocks').collectibleSet}</label>
-                          <select id="cai-packaging" value={catalogAdminPackagingId} onChange={e => setCatalogAdminPackagingId(e.target.value)}>
-                            <option value="">None</option>
-                            {catalogAdminPackagingList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                        </div>
-                      )}
-                    </div>
-
-                    <p className="catalog-admin-section-title">{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subject}</p>
-                    <div className="catalog-admin-two-col">
-                      <div>
-                        <label>{getCategoryLabels(catalogAdminCategories.find(c => c.id === catalogAdminCategoryId)?.name || '').subject}</label>
-                        {catalogAdminSubjectIds.length > 0 && (
-                          <div className="catalog-admin-subject-tags">
-                            {catalogAdminSubjectIds.map(s => (
-                              <span key={s.id} className="catalog-admin-subject-tag">
-                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{s.name}</span>
-                                <span className="catalog-admin-hint"> · {s.type}</span>
-                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => handleCatalogAdminRemoveSubject(s.id)}>✕</button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <div className="catalog-admin-subject-search-wrap">
-                          <input
-                            className="catalog-admin-inline-input"
-                            style={{ width: '100%' }}
-                            placeholder="Search subjects to add…"
-                            value={catalogAdminSubjectSearch}
-                            onChange={e => setCatalogAdminSubjectSearch(e.target.value)}
-                            autoComplete="off"
-                          />
-                          {catalogAdminSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
-                          {catalogAdminSubjectResults.length > 0 && (
-                            <div className="catalog-admin-subject-results">
-                              {catalogAdminSubjectResults.map(s => (
-                                <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogAdminSelectSubject(s)}>
-                                  <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                  <span className="catalog-admin-hint"> · {s.type}</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        {catalogAdminInlineCreate.field === 'subject' ? (
-                          <div className="catalog-admin-inline-create" style={{ marginTop: 6 }}>
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Subject name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }) }} />
-                            <select value={catalogAdminInlineCreate.subjectType} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, subjectType: e.target.value, speciesId: '' }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
-                              <option value="player">Player</option>
-                              <option value="character">Character</option>
-                              <option value="comic">Comic</option>
-                              <option value="artist">Artist</option>
-                              <option value="set">Set</option>
-                            </select>
-                            {catalogAdminInlineCreate.subjectType === 'character' && (
-                              <select value={catalogAdminInlineCreate.speciesId} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, speciesId: e.target.value }))} className="catalog-admin-inline-input" style={{ width: 'auto' }}>
-                                <option value="">No species</option>
-                                {catalogAdminSpecies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            )}
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : <button type="button" className="catalog-admin-inline-toggle" style={{ marginTop: 4 }} onClick={() => setCatalogAdminInlineCreate({ field: 'subject', value: catalogAdminSubjectSearch, subjectType: 'player', speciesId: '', error: '' })}>+ New Subject</button>}
-                      </div>
-                      <div>
-                        <label>Team / Affiliation {!catalogAdminRealFranchiseId && <span className="catalog-admin-hint">(select a franchise first)</span>}</label>
-                        {catalogAdminRealFranchiseId ? (
-                          catalogAdminTeams.length > 0 ? (
-                            <div className="catalog-admin-team-list">
-                              {catalogAdminTeams.map(tm => (
-                                <label key={tm.id} className="catalog-admin-team-checkbox">
-                                  <input type="checkbox" checked={catalogAdminTeamIds.includes(tm.id)} onChange={e => setCatalogAdminTeamIds(prev => e.target.checked ? [...prev, tm.id] : prev.filter(id => id !== tm.id))} />
-                                  <span style={{ textTransform: 'uppercase' }}>{tm.name}</span>
-                                </label>
-                              ))}
-                            </div>
-                          ) : <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No teams in this franchise yet.</p>
-                        ) : null}
-                        {catalogAdminInlineCreate.field === 'team' ? (
-                          <div className="catalog-admin-inline-create">
-                            <input autoFocus className="catalog-admin-inline-input" placeholder="Team name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' }) }} />
-                            <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                            <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', speciesId: '', error: '' })}>Cancel</button>
-                            {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                          </div>
-                        ) : catalogAdminRealFranchiseId ? <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'team', value: '', subjectType: 'player', speciesId: '', error: '' })}>+ New Team</button> : null}
-                      </div>
-                    </div>
-
-                    <p className="catalog-admin-section-title">Item Info</p>
-                    <div className="catalog-admin-two-col">
-                      <div>
-                        <label htmlFor="cai-bricklink-id">BrickLink ID <span className="catalog-admin-hint">{selectedCatalogAdminCategoryName === 'Building Blocks' ? '(e.g. col473 or 75192)' : '(optional)'}</span></label>
-                        <input id="cai-bricklink-id" type="text" value={catalogAdminBricklinkId} onChange={e => setCatalogAdminBricklinkId(e.target.value)} placeholder={selectedCatalogAdminCategoryName === 'Building Blocks' ? 'e.g. col473' : ''} />
-                      </div>
-                      <div>
-                        <label htmlFor="cai-release-year">Release Year</label>
-                        <input id="cai-release-year" type="number" min="1932" max="2100" value={catalogAdminReleaseYear} onChange={e => setCatalogAdminReleaseYear(e.target.value)} placeholder="e.g. 2023" />
-                      </div>
-                    </div>
-
-                    <p className="catalog-admin-section-title">
-                      {selectedCatalogAdminCategoryName === 'Building Blocks' ? 'Set / Minifig Details' : 'Card Details'}
-                    </p>
-                    <div className="catalog-admin-two-col">
-                      {selectedCatalogAdminCategoryName === 'Building Blocks' ? (
-                        <>
-                          <div>
-                            <label htmlFor="cai-rebrickable-id">Rebrickable ID <span className="catalog-admin-hint">(e.g. fig-001234)</span></label>
-                            <input id="cai-rebrickable-id" type="text" value={catalogAdminRebrickableId} onChange={e => setCatalogAdminRebrickableId(e.target.value)} placeholder="e.g. fig-001234" />
-                          </div>
-                          <div>
-                            <label htmlFor="cai-upc">UPC <span className="catalog-admin-hint">(barcode)</span></label>
-                            <input id="cai-upc" type="text" value={catalogAdminUpc} onChange={e => setCatalogAdminUpc(e.target.value)} placeholder="e.g. 673419376358" />
-                          </div>
-                          <div>
-                            <label htmlFor="cai-piece-count">Piece Count</label>
-                            <input id="cai-piece-count" type="number" min="1" value={catalogAdminPieceCount} onChange={e => setCatalogAdminPieceCount(e.target.value)} placeholder="e.g. 1989" />
-                          </div>
-                          <div>
-                            <label htmlFor="cai-set-number">Set Number <span className="catalog-admin-hint">(sets — e.g. 75192)</span></label>
-                            <input id="cai-set-number" type="text" value={catalogAdminLegoSetNumber} onChange={e => setCatalogAdminLegoSetNumber(e.target.value)} placeholder="e.g. 75192" />
-                          </div>
-                          <div>
-                            <label htmlFor="cai-retail-price">Retail Price <span className="catalog-admin-hint">(MSRP, CAD)</span></label>
-                            <input id="cai-retail-price" type="number" min="0" step="0.01" value={catalogAdminRetailPrice} onChange={e => setCatalogAdminRetailPrice(e.target.value)} placeholder="e.g. 169.99" />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div>
-                            <label htmlFor="cai-print-type">Print Type {!catalogAdminSubsetId && <span className="catalog-admin-hint">(select a subset first)</span>}</label>
-                            <select id="cai-print-type" value={catalogAdminPrintTypeId} onChange={e => setCatalogAdminPrintTypeId(e.target.value)} disabled={!catalogAdminSubsetId}>
-                              <option value="">None</option>
-                              {catalogAdminPrintTypes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                            {catalogAdminInlineCreate.field === 'printType' ? (
-                              <div className="catalog-admin-inline-create">
-                                <input autoFocus className="catalog-admin-inline-input" placeholder="Print type name" value={catalogAdminInlineCreate.value} onChange={e => setCatalogAdminInlineCreate(v => ({ ...v, value: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCatalogAdminInlineSave() } if (e.key === 'Escape') setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player' }) }} />
-                                <button type="button" className="catalog-admin-inline-save" disabled={!catalogAdminInlineCreate.value.trim() || isSavingCatalogAdminInline} onClick={handleCatalogAdminInlineSave}>{isSavingCatalogAdminInline ? '…' : 'Save'}</button>
-                                <button type="button" className="catalog-admin-inline-cancel" onClick={() => setCatalogAdminInlineCreate({ field: '', value: '', subjectType: 'player', error: '' })}>Cancel</button>
-                                {catalogAdminInlineCreate.error && <span className="catalog-admin-inline-error">{catalogAdminInlineCreate.error}</span>}
-                              </div>
-                            ) : <button type="button" className="catalog-admin-inline-toggle" onClick={() => setCatalogAdminInlineCreate({ field: 'printType', value: '', subjectType: 'player' })}>+ New Print Type</button>}
-                          </div>
-                          <div>
-                            <label>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></label>
-                            {(() => {
-                              const createCardTypes = catalogAdminCardTypes.filter(c => {
-                                if (c.name === 'Normal') return false
-                                return catalogAdminIsMtg ? MTG_CARD_TREATMENT_NAMES.has(c.name) : SPORTS_CARD_TYPE_NAMES.has(c.name)
-                              })
-                              return createCardTypes.length > 0 ? (
-                                <div className="catalog-admin-team-list">
-                                  {createCardTypes.map(c => (
-                                    <label key={c.id} className="catalog-admin-team-checkbox">
-                                      <input type="checkbox" checked={catalogAdminCardTypeIds.includes(c.id)}
-                                        onChange={e => setCatalogAdminCardTypeIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id))} />
-                                      <span>{c.name}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                              ) : null
-                            })()}
-                          </div>
-                          {catalogRarities.length > 0 && (
-                            <div>
-                              <label htmlFor="cai-rarity">Rarity</label>
-                              <select id="cai-rarity" value={catalogAdminRarityId} onChange={e => setCatalogAdminRarityId(e.target.value)}>
-                                <option value="">— Select —</option>
-                                {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                              </select>
-                            </div>
-                          )}
-                          {catalogAdminIsMtg && (
-                            <div>
-                              <label htmlFor="cai-mtg-type">Card Type</label>
-                              <select id="cai-mtg-type" value={catalogAdminMtgCardTypeId} onChange={e => setCatalogAdminMtgCardTypeId(e.target.value)}>
-                                <option value="">— Select —</option>
-                                {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                              </select>
-                            </div>
-                          )}
-                          <div>
-                            <label htmlFor="cai-card-number">Card Number</label>
-                            <input id="cai-card-number" type="text" value={catalogAdminCardNumber} onChange={e => setCatalogAdminCardNumber(e.target.value)} placeholder="e.g. 150" />
-                          </div>
-                          <div>
-                            <label htmlFor="cai-print-count">Print Count</label>
-                            <input id="cai-print-count" type="number" min="1" value={catalogAdminPrintCount} onChange={e => setCatalogAdminPrintCount(e.target.value)} placeholder="e.g. 99" />
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    <p className="catalog-admin-section-title">Notes</p>
-                    <label htmlFor="cai-description">Description</label>
-                    <textarea id="cai-description" rows={3} value={catalogAdminItemDescription} onChange={e => { setCatalogAdminItemDescription(e.target.value); setCatalogAdminFormError('') }} placeholder="Optional notes about this card" />
-
-                    <p className="catalog-admin-section-title">Images</p>
-                    <div className="catalog-admin-two-col">
-                      <div>
-                        <label className="catalog-admin-image-slot-label">Front <span className="catalog-admin-hint">(optional)</span></label>
-                        <label className="catalog-admin-image-pick">
-                          {catalogAdminFrontImageFile
-                            ? <><span className="catalog-admin-image-pick-name">{catalogAdminFrontImageFile.name}</span><span className="catalog-admin-image-pick-change">Change</span></>
-                            : <><span className="catalog-admin-image-pick-icon">+</span><span>Add front image</span></>
-                          }
-                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { setCatalogAdminFrontImageFile(e.target.files?.[0] || null); e.target.value = '' }} />
-                        </label>
-                        {catalogAdminFrontImageFile && <button type="button" className="catalog-admin-inline-cancel" style={{ marginTop: 4 }} onClick={() => setCatalogAdminFrontImageFile(null)}>Remove</button>}
-                      </div>
-                      <div>
-                        <label className="catalog-admin-image-slot-label">Back <span className="catalog-admin-hint">(optional)</span></label>
-                        <label className="catalog-admin-image-pick">
-                          {catalogAdminBackImageFile
-                            ? <><span className="catalog-admin-image-pick-name">{catalogAdminBackImageFile.name}</span><span className="catalog-admin-image-pick-change">Change</span></>
-                            : <><span className="catalog-admin-image-pick-icon">+</span><span>Add back image</span></>
-                          }
-                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { setCatalogAdminBackImageFile(e.target.files?.[0] || null); e.target.value = '' }} />
-                        </label>
-                        {catalogAdminBackImageFile && <button type="button" className="catalog-admin-inline-cancel" style={{ marginTop: 4 }} onClick={() => setCatalogAdminBackImageFile(null)}>Remove</button>}
-                      </div>
-                    </div>
-
-                    {catalogAdminFormError && <p className="catalog-admin-error">{catalogAdminFormError}</p>}
-
-                    <div className="catalog-admin-form-footer">
-                      <button type="button" className="catalog-action-pill catalog-admin-submit" disabled={isCreatingCatalogItem} onClick={() => handleCreateCatalogItemInApp('another')}>
-                        {isCreatingCatalogItem ? '…' : '+ Add Another'}
-                      </button>
-                      <button type="button" className="catalog-action-pill catalog-admin-submit catalog-admin-submit-finish" disabled={isCreatingCatalogItem} onClick={() => handleCreateCatalogItemInApp('finish')}>
-                        {isCreatingCatalogItem ? 'Saving…' : 'Finish'}
-                      </button>
-                    </div>
-                  </form>
-                  )}
-                </section>
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'plans' ? (
-          <section className="plans-screen" aria-label="Subscription plans">
-            <h1>{tx('Subscription Plans')}</h1>
-            <p className="subtitle">{tx('Choose the right tier for your collecting journey.')}</p>
-
-            {profile && (
-              <section className="mx-auto mb-4 grid max-w-[1420px] grid-cols-1 gap-2 rounded-xl border border-[#cfdcf1] bg-white/75 p-3 text-left shadow-[0_6px_18px_rgba(18,32,61,0.08)] sm:grid-cols-2 lg:grid-cols-5">
-                <div>
-                  <p className="m-0 text-[0.73rem] font-bold uppercase tracking-[0.05em] text-[#5f7088]">Current plan</p>
-                  <p className="m-0 mt-1 text-sm font-extrabold text-[#12315b]">{getPlanDisplayLabel(profile)}</p>
-                </div>
-                <div>
-                  <p className="m-0 text-[0.73rem] font-bold uppercase tracking-[0.05em] text-[#5f7088]">Started date</p>
-                  <p className="m-0 mt-1 text-sm font-bold text-[#23416d]">{formatDate(profile.subscription_started_at)}</p>
-                </div>
-                <div>
-                  <p className="m-0 text-[0.73rem] font-bold uppercase tracking-[0.05em] text-[#5f7088]">Next billing date</p>
-                  <p className="m-0 mt-1 text-sm font-bold text-[#23416d]">{formatDate(profile.subscription_current_period_end)}</p>
-                </div>
-                <div>
-                  <p className="m-0 text-[0.73rem] font-bold uppercase tracking-[0.05em] text-[#5f7088]">Billing cycle</p>
-                  <p className="m-0 mt-1 text-sm font-bold text-[#23416d]">{profile.billing_cycle || 'monthly'}</p>
-                </div>
-                <div>
-                  <p className="m-0 text-[0.73rem] font-bold uppercase tracking-[0.05em] text-[#5f7088]">Renewal status</p>
-                  <p className="m-0 mt-1 text-sm font-bold text-[#23416d]">{renewalStatus}</p>
-                </div>
-              </section>
-            )}
-
-            {authMessage && <p className="auth-banner">{authMessage}</p>}
-            {isPlansLoading && <p className="auth-banner">{tx('Loading plans...')}</p>}
-            {plansError && <p className="auth-error inline-error">{plansError}</p>}
-
-            {!isPlansLoading && !plansError && (
-              <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                {subscriptionPlans.map((plan) => {
-                  const isCurrentTier =
-                    profile?.subscription_tier === plan.tier ||
-                    (plan.tier === 'event_organizer' && Boolean(profile?.has_event_organizer))
-                  const actionMeta = getPlanActionMeta(plan)
-                  const hasCollectorPlusInCart = cartItems.some((item) => item.tier === 'collector_plus')
-                  const effectivePriceCents =
-                    plan.tier === 'event_organizer' && (profile?.subscription_tier === 'collector_plus' || hasCollectorPlusInCart)
-                      ? 1000
-                      : plan.monthly_price_cents
-                  return (
-                    <SubscriptionCard
-                      key={plan.tier}
-                      plan={{
-                        ...plan,
-                        monthly_price_cents: effectivePriceCents,
-                      }}
-                      isCurrentTier={isCurrentTier}
-                      actionLabel={actionMeta.label}
-                      actionDisabled={actionMeta.disabled || isUpdatingPlan}
-                      statusBadge={actionMeta.statusBadge}
-                      statusBadgeTone={actionMeta.statusBadgeTone}
-                      actionHint={actionMeta.hint}
-                      onChoose={() => handlePlanAction(plan, actionMeta.intent)}
-                      formatPlanPrice={formatPlanPrice}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'catalog_item' ? (
-          <section className="catalog-detail-screen" aria-label="Catalog item detail">
-            <div className="catalog-detail-head">
-              <button
-                type="button"
-                className="catalog-action-pill"
-                onClick={() => { setCurrentScreen(catalogItemOrigin || 'catalog') }}
-              >
-                {catalogItemOrigin === 'profile' ? '← Back to Profile' : '← Back to Catalog'}
-              </button>
-
-              {catalogSetNavItems.length > 1 && (
-                <div className="catalog-detail-set-nav">
-                  <button
-                    type="button"
-                    className="catalog-detail-set-nav-btn"
-                    disabled={catalogSetNavIndex <= 0}
-                    onClick={() => {
-                      const prev = catalogSetNavItems[catalogSetNavIndex - 1]
-                      if (!prev) return
-                      const r = prev.raw
-                      const na = (v) => (v && v !== 'N/A' ? v : '')
-                      handleOpenCatalogItem({
-                        id: r.item_id,
-                        name: prev.name,
-                        description: r.description || '',
-                        release_year: r.release_year || null,
-                        category_id: r.category_id,
-                        subcategory_id: r.subcategory_id,
-                        franchise_id: r.franchise_id,
-                        brand_id: r.brand_id,
-                        collectible_set_id: r.collectible_set_id,
-                        card_number: r.card_number !== 'N/A' ? r.card_number : null,
-                        metadata: { image_url: prev.imageUrl },
-                        _subject_name: na(r.subject),
-                        _set_name: na(r.collectible_set),
-                        _print_type: na(r.print_type),
-                        _details: r,
-                        front_image_path: r.front_image_path || null,
-                      })
-                    }}
-                  >
-                    ‹ Prev
-                  </button>
-                  <span className="catalog-detail-set-nav-pos">
-                    {catalogSetNavIndex >= 0 ? `${catalogSetNavIndex + 1} / ${catalogSetNavItems.length}` : `— / ${catalogSetNavItems.length}`}
-                  </span>
-                  <button
-                    type="button"
-                    className="catalog-detail-set-nav-btn"
-                    disabled={catalogSetNavIndex < 0 || catalogSetNavIndex >= catalogSetNavItems.length - 1}
-                    onClick={() => {
-                      const next = catalogSetNavItems[catalogSetNavIndex + 1]
-                      if (!next) return
-                      const r = next.raw
-                      const na = (v) => (v && v !== 'N/A' ? v : '')
-                      handleOpenCatalogItem({
-                        id: r.item_id,
-                        name: next.name,
-                        description: r.description || '',
-                        release_year: r.release_year || null,
-                        category_id: r.category_id,
-                        subcategory_id: r.subcategory_id,
-                        franchise_id: r.franchise_id,
-                        brand_id: r.brand_id,
-                        collectible_set_id: r.collectible_set_id,
-                        card_number: r.card_number !== 'N/A' ? r.card_number : null,
-                        metadata: { image_url: next.imageUrl },
-                        _subject_name: na(r.subject),
-                        _set_name: na(r.collectible_set),
-                        _print_type: na(r.print_type),
-                        _details: r,
-                        front_image_path: r.front_image_path || null,
-                      })
-                    }}
-                  >
-                    Next ›
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {selectedCatalogItem ? (
-              <>
-                <header className="catalog-detail-title-row">
-                  <div className="catalog-detail-title-block">
-                    <h1 className="catalog-detail-title">
-                      {selectedCatalogItemCategoryLabels.hideFranchise
-                        ? (selectedCatalogItem._details?.collectible_set || selectedCatalogItem.name || 'N/A')
-                        : (selectedCatalogItem._details?.subject || selectedCatalogItem.name || 'N/A')}
-                    </h1>
-                    <div className="catalog-detail-meta-list">
-                      {selectedCatalogItem._details?.card_number && (
-                        <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">Card Number</span> #{selectedCatalogItem._details.card_number}
-                        </span>
-                      )}
-                      {(selectedCatalogItem._details?.release_year ?? selectedCatalogItem.release_year) && (
-                        <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">Release Year</span> {selectedCatalogItem._details?.release_year ?? selectedCatalogItem.release_year}
-                        </span>
-                      )}
-                    </div>
-                    <div className="catalog-detail-meta-list">
-                      {selectedCatalogItem._details?.subcategory && (
-                        <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.subcategory}</span>
-                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
-                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
-                            setCatalogSubcategory(selectedCatalogItem._details.subcategory)
-                            setCatalogFranchise('all')
-                            setCatalogSetId('')
-                            setCurrentScreen('catalog')
-                          }}>{selectedCatalogItem._details.subcategory}</button>
-                        </span>
-                      )}
-                      {selectedCatalogItem._details?.franchise && !selectedCatalogItemCategoryLabels.hideFranchise && (
-                        <span className="catalog-detail-meta-item">
-                          <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.franchise}</span>
-                          <button type="button" className="catalog-detail-meta-link" onClick={() => {
-                            setCatalogCategory(selectedCatalogItem._details.category || 'all')
-                            setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
-                            setCatalogFranchise(selectedCatalogItem._details.franchise_id || selectedCatalogItem._details.franchise || 'all')
-                            setCatalogSetId('')
-                            setCurrentScreen('catalog')
-                          }}>{selectedCatalogItem._details.franchise}</button>
-                        </span>
-                      )}
-                      {selectedCatalogItemCategoryLabels.hideFranchise
-                        ? (selectedCatalogItem._details?.subject && (
-                            <span className="catalog-detail-meta-item">
-                              <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.subject}</span>
-                              <span className="catalog-detail-info-value">{selectedCatalogItem._details.subject}</span>
-                            </span>
-                          ))
-                        : (selectedCatalogItem._details?.collectible_set && (
-                            <span className="catalog-detail-meta-item">
-                              <span className="catalog-detail-label">{selectedCatalogItemCategoryLabels.collectibleSet}</span>
-                              <button type="button" className="catalog-detail-meta-link" onClick={() => {
-                                setCatalogCategory(selectedCatalogItem._details.category || 'all')
-                                setCatalogSubcategory(selectedCatalogItem._details.subcategory || '')
-                                setCatalogFranchise(selectedCatalogItem._details.franchise_id || selectedCatalogItem._details.franchise || 'all')
-                                setCatalogSetId(selectedCatalogItem._details.collectible_set_id || '')
-                                setCurrentScreen('catalog')
-                              }}>{selectedCatalogItem._details.collectible_set}</button>
-                            </span>
-                          ))
-                      }
-                    </div>
-                  </div>
-                  <div className="catalog-detail-actions">
-                    {isPlatformAdmin && !isCatalogItemEditMode && (
-                      <button type="button" className="catalog-detail-btn catalog-detail-btn-edit" onClick={handleOpenCatalogItemEdit}>
-                        Edit Item
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="catalog-detail-btn catalog-detail-btn-collect"
-                      onClick={() => quickAddMode ? performQuickAdd(selectedCatalogItem) : handleOpenAddToCollectionModal(selectedCatalogItem?.id)}
-                    >
-                      {quickAddMode ? (quickAddMode === 'gift' ? 'Collect (Gift)' : 'Collect (Purchase)') : 'Add to My Collection'}
-                    </button>
-                    <button
-                      type="button"
-                      className="catalog-detail-btn catalog-detail-btn-wishlist"
-                      onClick={async () => {
-                        if (!currentUser?.id || !selectedCatalogItem?.id) return
-                        const itemId = selectedCatalogItem.id
-                        if (wishlistItemIds.has(itemId)) {
-                          setWishlistItemIds(prev => { const next = new Set(prev); next.delete(itemId); return next })
-                          await supabase.from('wishlist_items').delete().eq('user_id', currentUser.id).eq('catalog_item_id', itemId)
-                        } else {
-                          setWishlistItemIds(prev => new Set([...prev, itemId]))
-                          await supabase.from('wishlist_items').upsert({ user_id: currentUser.id, catalog_item_id: itemId }, { onConflict: 'user_id,catalog_item_id', ignoreDuplicates: true })
-                        }
-                      }}
-                    >
-                      {wishlistItemIds.has(selectedCatalogItem?.id) ? 'Wishlisted' : 'Add to My Wishlist'}
-                    </button>
-                    <a href="#" className="catalog-detail-owned-link" onClick={(event) => event.preventDefault()}>
-                      You own {ownershipCount} of these items
-                    </a>
-                  </div>
-                </header>
-
-                <div className="catalog-detail-tabs" role="tablist" aria-label="Item detail tabs">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={catalogDetailViewTab === 'overview'}
-                    className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'overview' ? 'active' : ''}`}
-                    onClick={() => setCatalogDetailViewTab('overview')}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={catalogDetailViewTab === 'reviews'}
-                    className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'reviews' ? 'active' : ''}`}
-                    onClick={() => setCatalogDetailViewTab('reviews')}
-                  >
-                    Reviews ({catalogDetailReviews.length})
-                  </button>
-                  {(() => {
-                    const relCount = catalogDetailIncludes.length + catalogDetailIncludedIn.length
-                    return (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={catalogDetailViewTab === 'related'}
-                        className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'related' ? 'active' : ''}`}
-                        onClick={() => setCatalogDetailViewTab('related')}
-                      >
-                        Related Items{relCount ? ` (${relCount})` : ''}
-                      </button>
-                    )
-                  })()}
-                  {isPlatformAdmin && (
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={catalogDetailViewTab === 'manageImages'}
-                      className={`catalog-detail-tab-btn ${catalogDetailViewTab === 'manageImages' ? 'active' : ''}`}
-                      onClick={() => setCatalogDetailViewTab('manageImages')}
-                    >
-                      Manage Images{catalogItemImages.length ? ` (${catalogItemImages.length})` : ''}
-                    </button>
-                  )}
-                </div>
-
-                {catalogDetailViewTab === 'overview' ? (
-                  <>
-                    {isCatalogItemEditMode && (
-                      <section className="catalog-card catalog-detail-section catalog-item-edit-panel">
-                    <div className="catalog-item-edit-header">
-                      <h3>Edit Item</h3>
-                      <div className="catalog-item-edit-header-actions">
-                        <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={isSavingCatalogItem} onClick={handleSaveCatalogItem}>
-                          {isSavingCatalogItem ? 'Saving…' : 'Save Changes'}
-                        </button>
-                        <button type="button" className="catalog-admin-inline-cancel" onClick={() => setIsCatalogItemEditMode(false)}>Cancel</button>
-                      </div>
-                    </div>
-                    {catalogItemEditError && <p className="catalog-admin-form-error">{catalogItemEditError}</p>}
-                    <div className="catalog-item-edit-grid">
-                      {(() => {
-                        const editCatName = catalogCategories.find(c => c.id === catalogItemEditValues.category_id)?.name || ''
-                        const editCatLabels = getCategoryLabels(editCatName)
-                        const editIsLego = editCatName === 'Building Blocks'
-                        const editBrandName = (catalogItemEditLookups.brands.find(b => b.id === catalogItemEditValues.brand_id) || catalogBrands.find(b => b.id === catalogItemEditValues.brand_id))?.name || ''
-                        const editIsMinifig = editBrandName === 'Minifigs'   // minifigs have no packaging
-                        return [
-                          ['Category',                    'category_id',          catalogCategories,                false],
-                          [editCatLabels.subcategory,     'subcategory_id',       catalogSubcategories,             false],
-                          [editCatLabels.franchise,       'franchise_id',         catalogItemEditLookups.franchises, false],
-                          [editCatLabels.brand,           'brand_id',             catalogItemEditLookups.brands,    false],
-                          !editIsMinifig && [editCatLabels.collectibleSet,  'collectible_set_id',   catalogItemEditLookups.sets,      false],
-                          editIsLego
-                            ? [editCatLabels.subset,      'subset_id',            catalogItemEditLookups.subthemes, false]
-                            : [editCatLabels.subset,      'subcollectble_set_id', catalogItemEditLookups.subsets,   false],
-                          ...(editIsLego ? [[editCatLabels.productLine, 'product_line_id', catalogItemEditLookups.productLines, false]] : []),
-                          ['Series',                      'series_id',            catalogItemEditLookups.series,    false],
-                          !editIsLego && ['Print Type',   'print_type_id',        catalogItemEditLookups.printTypes, false],
-                        ].filter(Boolean)
-                      })().map(([label, field, options, upper]) => (
-                        <label key={field} className="catalog-item-edit-field">
-                          <span>{label}</span>
-                          <select value={catalogItemEditValues[field] || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, [field]: e.target.value }))} style={upper ? { textTransform: 'uppercase' } : {}}>
-                            <option value="">— None —</option>
-                            {(options || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                          </select>
-                        </label>
-                      ))}
-                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
-                        <span>Subject(s)</span>
-                        {catalogItemEditSubjectIds.length > 0 && (
-                          <div className="catalog-admin-subject-tags">
-                            {catalogItemEditSubjectIds.map(s => (
-                              <span key={s.id} className="catalog-admin-subject-tag">
-                                <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{s.name}</span>
-                                <span className="catalog-admin-hint"> · {s.type}</span>
-                                <button type="button" className="catalog-admin-subject-tag-remove" onClick={() => handleCatalogItemEditRemoveSubject(s.id)}>✕</button>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <div className="catalog-admin-subject-search-wrap">
-                          <input className="catalog-admin-inline-input" style={{ width: '100%' }} placeholder="Search subjects to add…" value={catalogItemEditSubjectSearch} onChange={e => setCatalogItemEditSubjectSearch(e.target.value)} autoComplete="off" />
-                          {catalogItemEditSubjectIsSearching && <p className="catalog-admin-hint">Searching…</p>}
-                          {catalogItemEditSubjectResults.length > 0 && (
-                            <div className="catalog-admin-subject-results">
-                              {catalogItemEditSubjectResults.map(s => (
-                                <button key={s.id} type="button" className="catalog-admin-subject-result" onClick={() => handleCatalogItemEditSelectSubject(s)}>
-                                  <span style={{ textTransform: 'uppercase' }}>{s.name}</span>
-                                  <span className="catalog-admin-hint"> · {s.type}</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <label className="catalog-item-edit-field">
-                        <span>Card Number</span>
-                        <input type="text" value={catalogItemEditValues.card_number || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, card_number: e.target.value }))} />
-                      </label>
-                      <label className="catalog-item-edit-field">
-                        <span>Print Count</span>
-                        <input type="number" min="1" value={catalogItemEditValues.print_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, print_count: e.target.value }))} />
-                      </label>
-                      <label className="catalog-item-edit-field">
-                        <span>Release Year</span>
-                        <input type="number" min="1932" max="2100" value={catalogItemEditValues.release_year ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, release_year: e.target.value }))} placeholder="e.g. 2023" />
-                      </label>
-                      <label className="catalog-item-edit-field">
-                        <span>Retail Price</span>
-                        <input type="number" min="0" step="0.01" value={catalogItemEditValues.retail_price ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, retail_price: e.target.value }))} placeholder="e.g. 19.99" />
-                      </label>
-                      <label className="catalog-item-edit-field">
-                        <span>Value (Market Price)</span>
-                        <input type="number" min="0" step="0.01" value={catalogItemEditValues.market_price ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, market_price: e.target.value }))} placeholder="e.g. 24.99" />
-                      </label>
-                      {catalogRarities.length > 0 && (
-                        <label className="catalog-item-edit-field">
-                          <span>Rarity</span>
-                          <select value={catalogItemEditRarityId} onChange={e => setCatalogItemEditRarityId(e.target.value)}>
-                            <option value="">— None —</option>
-                            {catalogRarities.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                          </select>
-                        </label>
-                      )}
-                      {selectedCatalogItem?.categoryName === 'Building Blocks' && (<>
-                        <label className="catalog-item-edit-field">
-                          <span>BrickLink ID</span>
-                          <input type="text" value={catalogItemEditValues.bricklink_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, bricklink_id: e.target.value }))} placeholder="e.g. col473 or 75192" />
-                        </label>
-                        <label className="catalog-item-edit-field">
-                          <span>Rebrickable ID</span>
-                          <input type="text" value={catalogItemEditValues.rebrickable_fig_id || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, rebrickable_fig_id: e.target.value }))} placeholder="e.g. fig-001234" />
-                        </label>
-                        <label className="catalog-item-edit-field">
-                          <span>UPC</span>
-                          <input type="text" value={catalogItemEditValues.upc || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, upc: e.target.value }))} placeholder="Barcode" />
-                        </label>
-                        <label className="catalog-item-edit-field">
-                          <span>Piece Count</span>
-                          <input type="number" min="1" value={catalogItemEditValues.piece_count ?? ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, piece_count: e.target.value }))} />
-                        </label>
-                      </>)}
-                      <label className="catalog-item-edit-field catalog-item-edit-field--wide">
-                        <span>Description</span>
-                        <textarea rows={3} value={catalogItemEditValues.description || ''} onChange={e => setCatalogItemEditValues(v => ({ ...v, description: e.target.value }))} />
-                      </label>
-                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
-                        <span>Teams / Affiliation</span>
-                        {catalogItemEditLookups.teams.length > 0 ? (
-                          <div className="catalog-admin-team-list">
-                            {catalogItemEditLookups.teams.map(t => (
-                              <label key={t.id} className="catalog-admin-team-checkbox">
-                                <input type="checkbox" checked={catalogItemEditTeamIds.includes(t.id)} onChange={e => setCatalogItemEditTeamIds(prev => e.target.checked ? [...prev, t.id] : prev.filter(id => id !== t.id))} />
-                                <span style={{ textTransform: 'uppercase' }}>{t.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>{catalogItemEditValues.franchise_id ? 'No teams in this franchise' : 'Select a franchise to see teams'}</p>
-                        )}
-                      </div>
-                      {CARD_CONDITION_CATEGORIES.has(selectedCatalogItem?.categoryName) && (
-                        <div className="catalog-item-edit-field catalog-item-edit-field--wide">
-                          <span>Card Treatments <span className="catalog-admin-hint">(none = Normal)</span></span>
-                          {(() => {
-                            const editCardTypes = catalogItemEditLookups.cardTypes.filter(ct => ct.name !== 'Normal')
-                            return editCardTypes.length > 0 ? (
-                              <div className="catalog-admin-team-list">
-                                {editCardTypes.map(ct => (
-                                  <label key={ct.id} className="catalog-admin-team-checkbox">
-                                    <input type="checkbox" checked={catalogItemEditCardTypeIds.includes(ct.id)}
-                                      onChange={e => setCatalogItemEditCardTypeIds(prev => e.target.checked ? [...prev, ct.id] : prev.filter(id => id !== ct.id))} />
-                                    <span>{ct.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            ) : <p className="catalog-admin-hint" style={{ margin: '4px 0' }}>No card treatments defined.</p>
-                          })()}
-                          {catalogItemIsMtg && (
-                            <>
-                              <span style={{ marginTop: 10, display: 'block', fontWeight: 600, fontSize: '0.88rem', color: 'var(--detail-label)' }}>Card Type</span>
-                              <select value={catalogItemEditMtgCardTypeId} onChange={e => setCatalogItemEditMtgCardTypeId(e.target.value)} style={{ marginTop: 4 }}>
-                                <option value="">— Select —</option>
-                                {catalogMtgCardTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                              </select>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="catalog-item-edit-images">
-                      <p className="catalog-item-edit-images-label">Images</p>
-                      <div className="catalog-item-edit-image-slots">
-                        {[{ label: 'Front', position: 0 }, { label: 'Back', position: 1 }].map(({ label, position }) => {
-                          const img = catalogItemImages.find(i => i.position === position)
-                          const urlData = img
-                            ? img.image_path.startsWith('http')
-                              ? { publicUrl: img.image_path }
-                              : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
-                            : null
-                          return (
-                            <div key={position} className="catalog-item-edit-image-slot">
-                              <span className="catalog-item-edit-image-slot-label">{label}</span>
-                              {img ? (
-                                <div className="catalog-item-edit-image-wrap">
-                                  <img src={urlData.publicUrl} alt={label} className="catalog-detail-item-image" />
-                                  <button type="button" className="catalog-item-edit-image-delete" onClick={() => handleDeleteCatalogItemImage(img)} title={`Remove ${label}`} disabled={isUploadingCatalogItemImage}>✕</button>
-                                </div>
-                              ) : (
-                                <label className="catalog-item-edit-image-upload">
-                                  {isUploadingCatalogItemImage ? <span>Uploading…</span> : <><span className="catalog-item-edit-upload-icon">+</span><span>Add {label}</span></>}
-                                  <input type="file" accept="image/*" style={{ display: 'none' }} disabled={isUploadingCatalogItemImage} onChange={e => { if (e.target.files?.[0]) handleUploadCatalogItemImage(e.target.files[0], position); e.target.value = '' }} />
-                                </label>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    {isPlatformAdmin && (isLegoSet || isLegoMinifig) && (
-                      <div className="catalog-item-edit-field catalog-item-edit-field--wide">
-                        <span>Set / Minifig Connections</span>
-
-                        {isLegoSet && (
-                          <>
-                            <p className="catalog-admin-hint" style={{ margin: '4px 0 8px' }}>
-                              Linked minifigs ({catalogDetailSetMinifigs.length})
-                            </p>
-                            <div className="catalog-detail-minifig-list">
-                              {catalogDetailSetMinifigs.map((m) => (
-                                <div key={m.item_id} className="catalog-detail-minifig-row">
-                                  <button type="button" className="catalog-detail-minifig-rowmain" onClick={() => openCatalogItemById(m.item_id)}>
-                                    <span className="catalog-detail-minifig-name">
-                                      {m.name}
-                                      {m.variant ? <span className="catalog-detail-minifig-variant"> — {m.variant}</span> : null}
-                                      {m.quantity > 1 ? <span className="catalog-detail-minifig-qty"> ×{m.quantity}</span> : null}
-                                    </span>
-                                    {(m.code || m.figNum) ? <span className="catalog-detail-minifig-fig">{m.code || m.figNum}</span> : null}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="catalog-detail-link-remove"
-                                    title="Remove this minifig from the set"
-                                    onClick={() => removeSetMinifigLink(selectedCatalogItem.id, m.item_id)}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="catalog-detail-link-editor">
-                              <input
-                                type="text"
-                                className="catalog-admin-inline-input"
-                                placeholder="Search minifigs to add…"
-                                value={linkSearch}
-                                onChange={async (e) => {
-                                  setLinkSearch(e.target.value)
-                                  setLinkResults(await searchLegoItemsToLink(e.target.value, 'minifig'))
-                                }}
-                              />
-                              <input
-                                type="number"
-                                min="1"
-                                className="catalog-admin-inline-input"
-                                style={{ width: 64 }}
-                                value={linkQty}
-                                onChange={(e) => setLinkQty(e.target.value)}
-                                title="Quantity in set"
-                              />
-                              {linkResults.length > 0 && (
-                                <div className="catalog-admin-subject-results">
-                                  {linkResults.map((r) => (
-                                    <button
-                                      key={r.id}
-                                      type="button"
-                                      className="catalog-admin-subject-result"
-                                      disabled={isSavingLink}
-                                      onClick={() => addSetMinifigLink(selectedCatalogItem.id, r.id, linkQty)}
-                                    >
-                                      {r.name}{r.code ? ` · ${r.code}` : ''}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-
-                        {isLegoMinifig && (
-                          <>
-                            <p className="catalog-admin-hint" style={{ margin: '10px 0 8px' }}>
-                              Linked sets ({catalogDetailParentSets.length})
-                            </p>
-                            <div className="catalog-detail-minifig-list">
-                              {catalogDetailParentSets.map((setItem) => (
-                                <div key={setItem.item_id} className="catalog-detail-minifig-row">
-                                  <button type="button" className="catalog-detail-minifig-rowmain" onClick={() => openCatalogItemById(setItem.item_id)}>
-                                    <span className="catalog-detail-parent-set-name">
-                                      {setItem.name}
-                                      {setItem.franchise ? <span className="catalog-detail-minifig-variant"> — {setItem.franchise}</span> : null}
-                                      {setItem.release_year ? <span className="catalog-detail-minifig-variant"> • {setItem.release_year}</span> : null}
-                                    </span>
-                                    <span className="catalog-detail-parent-set-meta">
-                                      {setItem.quantity > 1 ? `x${setItem.quantity} in set` : 'Included'}
-                                    </span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="catalog-detail-link-remove"
-                                    title="Remove this minifig from the set"
-                                    onClick={() => removeSetMinifigLink(setItem.item_id, selectedCatalogItem.id)}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="catalog-detail-link-editor">
-                              <input
-                                type="text"
-                                className="catalog-admin-inline-input"
-                                placeholder="Search sets to add this minifig to…"
-                                value={linkSearch}
-                                onChange={async (e) => {
-                                  setLinkSearch(e.target.value)
-                                  setLinkResults(await searchLegoItemsToLink(e.target.value, 'set'))
-                                }}
-                              />
-                              {linkResults.length > 0 && (
-                                <div className="catalog-admin-subject-results">
-                                  {linkResults.map((r) => (
-                                    <button
-                                      key={r.id}
-                                      type="button"
-                                      className="catalog-admin-subject-result"
-                                      disabled={isSavingLink}
-                                      onClick={() => addSetMinifigLink(r.id, selectedCatalogItem.id, 1)}
-                                    >
-                                      {r.name}{r.code ? ` · ${r.code}` : ''}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                      </section>
-                    )}
-
-                    <section className="catalog-detail-market-card">
-                  <div className={`catalog-detail-market-image-wrap${isPsaActive ? ' psa-slab-wrap' : ''}${isBgsActive ? ` bgs-slab-wrap${isBgsBlackLabel ? ' bgs-black-label-wrap' : ''}` : ''}${isCgcActive ? ' cgc-slab-wrap' : ''}${isTAGActive ? ' tag-slab-wrap' : ''}`}>
-                    <div className={`catalog-detail-image-frame${isPsaActive ? ' psa-slab-frame' : ''}${isBgsActive ? ` bgs-slab-frame${isBgsBlackLabel ? ' bgs-black-label-frame' : ''}` : ''}${isCgcActive ? ' cgc-slab-frame' : ''}${isTAGActive ? ' tag-slab-frame' : ''}`}>
-                    {(() => {
-                      const frontImg = catalogItemImages.find(i => i.position === 0)
-                      const frontUrl = frontImg
-                        ? frontImg.image_path.startsWith('http')
-                          ? frontImg.image_path
-                          : supabase.storage.from('item-images').getPublicUrl(frontImg.image_path).data?.publicUrl
-                        : null
-                      return frontUrl ? (
-                        <img src={frontUrl} alt={selectedCatalogItem.name || 'Catalog item'} className="catalog-detail-market-image catalog-zoomable" onClick={() => openLightbox(frontUrl)} />
-                      ) : (
-                        <div className="catalog-detail-market-image catalog-item-image-placeholder">N/A</div>
-                      )
-                    })()}
-                    </div>
-                    {isPsaActive ? (
-                      <div className="catalog-detail-slab-cert-label">
-                        <span className="slab-cert-company">PSA</span>
-                        {catalogDetailSelectedGrade ? (
-                          <span className="slab-cert-grade">{activeGradeEntry ? activeGradeEntry.shortLabel : catalogDetailSelectedGrade}</span>
-                        ) : null}
-                        {catalogDetailCertNumber ? (
-                          <span className="slab-cert-number">#{catalogDetailCertNumber}</span>
-                        ) : (
-                          <span className="slab-cert-number slab-cert-number-placeholder">Cert # —</span>
-                        )}
-                      </div>
-                    ) : null}
-                    {isBgsActive ? (
-                      <div className={`catalog-detail-slab-cert-label bgs${isBgsBlackLabel ? ' black-label' : ''}`}>
-                        <span className="slab-cert-company">BGS</span>
-                        {(effectiveBgsGradeEntry || activeGradeEntry) ? (
-                          <span className="slab-cert-grade">{(effectiveBgsGradeEntry || activeGradeEntry).shortLabel}</span>
-                        ) : null}
-                        {isBgsBlackLabel ? (
-                          <span className="slab-cert-bl-tag">★ BLACK LABEL</span>
-                        ) : null}
-                        {catalogDetailCertNumber ? (
-                          <span className="slab-cert-number">#{catalogDetailCertNumber}</span>
-                        ) : (
-                          <span className="slab-cert-number slab-cert-number-placeholder">Cert # —</span>
-                        )}
-                      </div>
-                    ) : null}
-                    {isCgcActive ? (
-                      <div className="catalog-detail-slab-cert-label cgc">
-                        <span className="slab-cert-company">CGC</span>
-                        {activeGradeEntry ? (
-                          <span className="slab-cert-grade">{activeGradeEntry.shortLabel}</span>
-                        ) : null}
-                        {catalogDetailCertNumber ? (
-                          <span className="slab-cert-number">#{catalogDetailCertNumber}</span>
-                        ) : (
-                          <span className="slab-cert-number slab-cert-number-placeholder">Cert # —</span>
-                        )}
-                      </div>
-                    ) : null}
-                    {isTAGActive ? (
-                      <div className="catalog-detail-slab-cert-label tag">
-                        <span className="slab-cert-company">TAG</span>
-                        {tagDisplayedShortLabel ? (
-                          <span className="slab-cert-grade">{tagDisplayedShortLabel}</span>
-                        ) : null}
-                        {catalogDetailCertNumber ? (
-                          <span className="slab-cert-number">#{catalogDetailCertNumber}</span>
-                        ) : (
-                          <span className="slab-cert-number slab-cert-number-placeholder">Cert # —</span>
-                        )}
-                      </div>
-                    ) : null}
-                    <p className="catalog-detail-image-caption">{selectedCatalogItemMetadata.image_caption || 'N/A'}</p>
-                  </div>
-                  <div className="catalog-detail-market-panel">
-                    <div className="catalog-detail-market-panel-main">
-                      <h2>Market Data & Pricing</h2>
-                      <p className="catalog-detail-price">
-                        {marketPrice}{' '}
-                        <span className={`catalog-detail-price-trend ${Number.isFinite(marketTrendPercent) && marketTrendPercent >= 0 ? 'positive' : ''}`}>
-                          {marketTrendLabel}
-                        </span>
-                      </p>
-                      <div className="catalog-detail-metrics">
-                        <div className="catalog-detail-metric-box">
-                          <span>30-Day Avg</span>
-                          <strong>{metric30Day}</strong>
-                          <em className="positive">{selectedCatalogItemMetadata.market_30_day_note || 'N/A'}</em>
-                        </div>
-                        <div className="catalog-detail-metric-box">
-                          <span>All-Time High</span>
-                          <strong>{metricAllTimeHigh}</strong>
-                          <em>{selectedCatalogItemMetadata.market_all_time_note || 'N/A'}</em>
-                        </div>
-                        <div className="catalog-detail-metric-box">
-                          <span>Low Listing Price</span>
-                          <strong>{metricLowListing}</strong>
-                          <em className="positive">{selectedCatalogItemMetadata.market_low_listing_note || 'N/A'}</em>
-                        </div>
-                      </div>
-                      {isBgsActive ? (
-                        <div className={`catalog-detail-bgs-subgrades catalog-detail-bgs-subgrades-main${isBgsBlackLabel ? ' black-label' : ''}`}>
-                          <p className="catalog-detail-label bgs-subgrades-heading">
-                            Beckett Subgrades
-                            {bgsAllSubgradesSet && bgsAllSubgradesAreTen ? (
-                              <span className="bgs-bl-auto-badge">AUTO BLACK LABEL</span>
-                            ) : null}
-                          </p>
-                          <div className="bgs-subgrades-grid">
-                            {BGS_SUBGRADE_FIELDS.map((field) => (
-                              <div key={field.key} className="bgs-subgrade-item">
-                                <label htmlFor={`bgs-sg-${field.key}`} className="bgs-subgrade-label">{field.label}</label>
-                                <select
-                                  id={`bgs-sg-${field.key}`}
-                                  className={`bgs-subgrade-select${catalogDetailBgsSubgrades[field.key] === '10' ? ' perfect' : ''}`}
-                                  value={catalogDetailBgsSubgrades[field.key]}
-                                  onChange={(event) =>
-                                    setCatalogDetailBgsSubgrades((prev) => ({ ...prev, [field.key]: event.target.value }))
-                                  }
-                                >
-                                  <option value="" disabled>—</option>
-                                  {BGS_SUBGRADE_OPTIONS.map((opt) => (
-                                    <option key={opt} value={opt}>{opt}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <aside className={`catalog-detail-market-controls${isPsaActive ? ' psa-active' : ''}${isBgsActive ? ' bgs-active' : ''}${isBgsBlackLabel ? ' bgs-black-label' : ''}${isTAGActive ? ' tag-active' : ''}`}>
-                      {/* ── Market Variant (Condition) ─────────────────────── */}
-                      {isCardConditionCategory ? null : conditionOptions.length > 0 ? (
-                        <>
-                          <label htmlFor="catalog-detail-condition" className="catalog-detail-label">
-                            {(catalogMarketVariants.length > 0 || isLegoConditionCategory) ? 'Condition' : 'Market Variant'}
-                            {catalogMarketVariants.length > 0 && !isLegoConditionCategory && (
-                              <span title="Damaged = missing accessories or visible damage" style={{ cursor: 'help', marginLeft: 4, fontWeight: 'normal' }}>ⓘ</span>
-                            )}
-                          </label>
-                          <select
-                            id="catalog-detail-condition"
-                            value={selectedCondition || ''}
-                            onChange={(event) => setCatalogDetailSelectedCondition(event.target.value)}
-                          >
-                            <option value="">— Select —</option>
-                            {conditionOptions.map((condition) => (
-                              <option key={condition} value={condition}>{condition}</option>
-                            ))}
-                          </select>
-                          {/* ── LEGO condition sub-fields ─────────────────────── */}
-                          {isLegoConditionCategory && selectedCondition ? (() => {
-                            const isSealed = selectedCondition.includes('Sealed')
-                            const isIncomplete = selectedCondition.includes('Incomplete')
-                            const setLego = (patch) => setCatalogDetailLegoCond(prev => ({ ...prev, ...patch }))
-                            const lc = catalogDetailLegoCond
-                            return (
-                              <div className="catalog-detail-lego-cond">
-                                {isSealed && isLegoSet ? (
-                                  <>
-                                    <label className="catalog-detail-label" htmlFor="lego-box-grade">Box condition</label>
-                                    <select id="lego-box-grade" value={lc.boxGrade || ''} onChange={e => setLego({ boxGrade: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      {LEGO_SET_BOX_GRADES.map(g => <option key={g} value={g}>{g}</option>)}
-                                    </select>
-                                  </>
-                                ) : null}
-                                {isIncomplete ? (
-                                  <>
-                                    <label className="catalog-detail-label" htmlFor="lego-completeness">Completeness (%)</label>
-                                    <input id="lego-completeness" type="number" min={0} max={99} placeholder="e.g. 85"
-                                      value={lc.completenessPct ?? ''} onChange={e => setLego({ completenessPct: e.target.value })} />
-                                  </>
-                                ) : null}
-                                {isLegoSet ? (
-                                  <>
-                                    <label className="catalog-detail-label" htmlFor="lego-instructions">Instructions</label>
-                                    <select id="lego-instructions" value={lc.instructions || ''} onChange={e => setLego({ instructions: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      {LEGO_PRESENCE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                                    </select>
-                                    <label className="catalog-detail-label" htmlFor="lego-box">Original box</label>
-                                    <select id="lego-box" value={lc.box || ''} onChange={e => setLego({ box: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      {LEGO_PRESENCE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                                    </select>
-                                    <label className="catalog-detail-label" htmlFor="lego-minifigs">Minifigs present</label>
-                                    <select id="lego-minifigs" value={lc.minifigs || ''} onChange={e => setLego({ minifigs: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      <option value="All">All present</option>
-                                      <option value="Some">Some present</option>
-                                      <option value="None">None</option>
-                                    </select>
-                                  </>
-                                ) : null}
-                                {isLegoMinifig ? (
-                                  <>
-                                    <label className="catalog-detail-label" htmlFor="lego-accessories">All accessories</label>
-                                    <select id="lego-accessories" value={lc.accessories || ''} onChange={e => setLego({ accessories: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      <option value="Yes">Yes — complete</option>
-                                      <option value="No">No — missing parts</option>
-                                    </select>
-                                    <label className="catalog-detail-label" htmlFor="lego-polybag">Assembly</label>
-                                    <select id="lego-polybag" value={lc.assembly || ''} onChange={e => setLego({ assembly: e.target.value })}>
-                                      <option value="">— Select —</option>
-                                      <option value="Sealed polybag">Sealed in polybag</option>
-                                      <option value="Assembled">Assembled</option>
-                                    </select>
-                                  </>
-                                ) : null}
-                              </div>
-                            )
-                          })() : null}
-                        </>
-                      ) : null}
-
-                      {/* ── Graded toggle ─────────────────────────────────── */}
-                      {isCardConditionCategory ? (
-                        <div className="catalog-detail-graded-toggle">
-                          <span className="catalog-detail-label">Graded</span>
-                          <label className="catalog-switch" htmlFor="catalog-detail-graded-toggle">
-                            <input
-                              id="catalog-detail-graded-toggle"
-                              type="checkbox"
-                              checked={catalogDetailIsGraded}
-                              onChange={(event) => {
-                                const nextIsGraded = event.target.checked
-                                setCatalogDetailIsGraded(nextIsGraded)
-                                if (!nextIsGraded) {
-                                  setCatalogDetailGradingCompany('')
-                                  setCatalogDetailSelectedGrade('')
-                                  setCatalogDetailCertNumber('')
-                                  setCatalogDetailBgsSubgrades({ ...DEFAULT_BGS_SUBGRADES })
-                                  setCatalogDetailTagScore('')
-                                  setCatalogDetailTagDigReport('')
-                                  setCatalogDetailTagScoreRank('')
-                                  setCatalogDetailTagPopulation('')
-                                  setCatalogDetailTagVerifiedSlab('')
-                                  setCatalogDetailTagLookupError('')
-                                  setIsCatalogDetailTagLookupLoading(false)
-                                }
-                              }}
-                            />
-                            <span className="catalog-switch-slider" />
-                          </label>
-                          <span className="catalog-detail-graded-value">{catalogDetailIsGraded ? 'Yes' : 'No'}</span>
-                        </div>
-                      ) : null}
-
-                      {/* ── Ungraded card condition (Market Variant) ──────── */}
-                      {isCardConditionCategory && !catalogDetailIsGraded ? (
-                        <>
-                          <label htmlFor="catalog-detail-card-condition" className="catalog-detail-label">Market Variant</label>
-                          <select
-                            id="catalog-detail-card-condition"
-                            value={selectedCondition || conditionOptions[0] || ''}
-                            onChange={(event) => setCatalogDetailSelectedCondition(event.target.value)}
-                          >
-                            {(conditionOptions.length > 0 ? conditionOptions : []).map((condition) => (
-                              <option key={condition} value={condition}>{condition}</option>
-                            ))}
-                          </select>
-                        </>
-                      ) : null}
-
-                      {/* ── Grading Company ───────────────────────────────── */}
-                      {catalogDetailIsGraded && isCardConditionCategory ? (
-                        <>
-                          <label htmlFor="catalog-detail-grading-company" className="catalog-detail-label">
-                            Grading Company
-                          </label>
-                          <select
-                            id="catalog-detail-grading-company"
-                            className="catalog-detail-company-select"
-                            value={catalogDetailGradingCompany}
-                            onChange={(event) => {
-                              setCatalogDetailGradingCompany(event.target.value)
-                              setCatalogDetailSelectedGrade('')
-                              setCatalogDetailCertNumber('')
-                              setCatalogDetailBgsSubgrades({ ...DEFAULT_BGS_SUBGRADES })
-                              setCatalogDetailTagScore('')
-                              setCatalogDetailTagDigReport('')
-                              setCatalogDetailTagScoreRank('')
-                              setCatalogDetailTagPopulation('')
-                              setCatalogDetailTagVerifiedSlab('')
-                              setCatalogDetailTagLookupError('')
-                              setIsCatalogDetailTagLookupLoading(false)
-                            }}
-                          >
-                            <option value="" disabled>Select company</option>
-                            {GRADING_COMPANIES.map((company) => (
-                              <option key={company.id} value={company.id}>
-                                {company.shortName} — {company.name}
-                              </option>
-                            ))}
-                          </select>
-                        </>
-                      ) : null}
-
-                      {/* ── Grade selector (dynamic per company) ─────────── */}
-                      {catalogDetailIsGraded && catalogDetailGradingCompany && activeGradeScale.length > 0 ? (
-                        <>
-                          <label htmlFor="catalog-detail-grade" className="catalog-detail-label">
-                            {isTAGActive ? 'TAG Grade' : `${catalogDetailGradingCompany} Grade`}
-                          </label>
-                          <select
-                            id="catalog-detail-grade"
-                            className={`catalog-detail-grade-select${isPsaActive ? ` psa-grade-prestige-${Math.floor(psaPrestigeScore / 10) * 10}` : ''}${isBgsActive ? ' bgs-grade-select' : ''}${isTAGActive ? ' tag-grade-select' : ''}`}
-                            value={isBgsActive ? (bgsAllSubgradesSet && bgsAllSubgradesAreTen ? 'BL' : catalogDetailSelectedGrade) : isTAGActive ? (catalogDetailSelectedGrade || '10g') : catalogDetailSelectedGrade}
-                            onChange={(event) => {
-                              setCatalogDetailSelectedGrade(event.target.value)
-                              // Selecting a non-BL / non-10 clears subgrades to avoid stale auto-promotion
-                              if (event.target.value !== 'BL' && event.target.value !== '10') {
-                                setCatalogDetailBgsSubgrades({ ...DEFAULT_BGS_SUBGRADES })
-                              }
-                            }}
-                          >
-                            <option value="" disabled>Select grade</option>
-                            {activeGradeScale.map((grade) => (
-                              <option key={grade.value} value={grade.value} title={grade.description}>
-                                {isTAGActive ? `${grade.label} (${grade.scoreRange})` : grade.label}
-                              </option>
-                            ))}
-                          </select>
-                          {isPsaActive && activeGradeEntry ? (
-                            <div
-                              className={`catalog-detail-grade-badge${isPsaActive ? ' psa' : ''}`}
-                              style={isPsaActive ? { '--prestige': psaPrestigeScore } : {}}
-                            >
-                              <span className="catalog-detail-grade-badge-label">{activeGradeEntry.label}</span>
-                              {isPsaActive && psaPrestigeScore >= 90 ? (
-                                <span className="catalog-detail-grade-badge-elite">ELITE</span>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </>
-                      ) : null}
-
-                      {/* ── PSA Certification Fields ──────────────────────── */}
-                      {isPsaActive ? (
-                        <div className="catalog-detail-cert-fields">
-                          <label htmlFor="catalog-detail-cert-number" className="catalog-detail-label">PSA Cert #</label>
-                          <input
-                            id="catalog-detail-cert-number"
-                            type="text"
-                            className="catalog-detail-cert-input"
-                            placeholder="e.g. 12345678"
-                            value={catalogDetailCertNumber}
-                            onChange={(event) => setCatalogDetailCertNumber(event.target.value)}
-                            maxLength={12}
-                          />
-                          <a
-                            href={psaCertLookupUrl}
-                            className="catalog-detail-tag-search-link"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Search PSA Cert Lookup
-                          </a>
-                        </div>
-                      ) : null}
-
-                      {/* ── BGS Certification Fields ──────────────────────── */}
-                      {isBgsActive ? (
-                        <div className={`catalog-detail-cert-fields bgs-cert${isBgsBlackLabel ? ' black-label' : ''}`}>
-                          <label htmlFor="catalog-detail-bgs-cert" className="catalog-detail-label">BGS Cert #</label>
-                          <input
-                            id="catalog-detail-bgs-cert"
-                            type="text"
-                            className="catalog-detail-cert-input bgs"
-                            placeholder="e.g. 0012345678"
-                            value={catalogDetailCertNumber}
-                            onChange={(event) => setCatalogDetailCertNumber(event.target.value)}
-                            maxLength={12}
-                          />
-                          <a
-                            href={bgsCertLookupUrl}
-                            className="catalog-detail-tag-search-link"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Search Beckett Cert Lookup
-                          </a>
-                        </div>
-                      ) : null}
-
-                      {/* ── CGC Certification Fields ──────────────────────── */}
-                      {isCgcActive ? (
-                        <div className="catalog-detail-cert-fields">
-                          <label htmlFor="catalog-detail-cgc-cert" className="catalog-detail-label">CGC Cert #</label>
-                          <input
-                            id="catalog-detail-cgc-cert"
-                            type="text"
-                            className="catalog-detail-cert-input"
-                            placeholder="e.g. 1401025001"
-                            value={catalogDetailCertNumber}
-                            onChange={(event) => setCatalogDetailCertNumber(event.target.value)}
-                            maxLength={24}
-                          />
-                          <a
-                            href={cgcCertLookupUrl}
-                            className="catalog-detail-tag-search-link"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Search CGC Cert Lookup
-                          </a>
-                        </div>
-                      ) : null}
-
-                      {/* ── TAG Certification Fields ──────────────────────── */}
-                      {isTAGActive ? (
-                        <div className="catalog-detail-cert-fields tag-cert">
-                          <label htmlFor="catalog-detail-tag-cert" className="catalog-detail-label">TAG Cert #</label>
-                          <input
-                            id="catalog-detail-tag-cert"
-                            type="text"
-                            className="catalog-detail-cert-input tag"
-                            placeholder=""
-                            value={catalogDetailCertNumber}
-                            onChange={(event) => setCatalogDetailCertNumber(event.target.value)}
-                            maxLength={18}
-                          />
-                          <a
-                            href={tagPopReportSearchUrl}
-                            className="catalog-detail-tag-search-link"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Search TAG Pop Report
-                          </a>
-                        </div>
-                      ) : null}
-
-                      {/* ── View Historical Data ──────────────────────────── */}
-                      {typeof selectedCatalogItemMetadata.history_url === 'string' && selectedCatalogItemMetadata.history_url.trim() ? (
-                        <a
-                          href={selectedCatalogItemMetadata.history_url.trim()}
-                          className="catalog-detail-history-btn"
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          View Historical Data
-                        </a>
-                      ) : null}
-                    </aside>
-                  </div>
-                    </section>
-
-                    {/* ── Description band ── */}
-                    <section className="catalog-detail-description-band">
-                      <p>{selectedCatalogItem._details?.description || selectedCatalogItem.description || 'N/A'}</p>
-                    </section>
-
-                    <section className="catalog-detail-grid">
-                  <article className="catalog-card catalog-detail-section">
-                    <h3>Available Listings on CollectorsHub</h3>
-                    <div className="catalog-detail-list-row" role="button" tabIndex={0}>
-                      <div className="catalog-detail-seller-col">
-                        <strong>
-                          {(listings[0]?.seller_name || 'N/A')}
-                          {isListingCertVerified(listings[0]) ? <span className="catalog-verified-badge">Verified</span> : null}
-                        </strong>
-                        <p>
-                          {[
-                            Number.isFinite(Number(listings[0]?.seller_rating)) ? `Rating ${Number(listings[0]?.seller_rating).toFixed(1)}` : '',
-                            listings[0]?.sales_count ? `${listings[0]?.sales_count} sales` : '',
-                            listings[0]?.shipping_speed || '',
-                          ].filter(Boolean).join(' | ') || 'N/A'}
-                        </p>
-                        <p className="catalog-detail-listing-condition">
-                          {getListingCertNumber(listings[0])
-                            ? `Cert #${getListingCertNumber(listings[0])}${isListingCertVerified(listings[0]) ? ' • Verified Card' : ''}`
-                            : 'Cert # N/A'}
-                        </p>
-                        <p className="catalog-detail-listing-condition">{listings[0]?.condition || 'N/A'}</p>
-                      </div>
-                      <strong>{formatUsd(listings[0]?.price)}</strong>
-                    </div>
-                    <div className="catalog-detail-list-row" role="button" tabIndex={0}>
-                      <div className="catalog-detail-seller-col">
-                        <strong>
-                          {(listings[1]?.seller_name || 'N/A')}
-                          {isListingCertVerified(listings[1]) ? <span className="catalog-verified-badge">Verified</span> : null}
-                        </strong>
-                        <p>
-                          {[
-                            Number.isFinite(Number(listings[1]?.seller_rating)) ? `Rating ${Number(listings[1]?.seller_rating).toFixed(1)}` : '',
-                            listings[1]?.sales_count ? `${listings[1]?.sales_count} sales` : '',
-                            listings[1]?.shipping_speed || '',
-                          ].filter(Boolean).join(' | ') || 'N/A'}
-                        </p>
-                        <p className="catalog-detail-listing-condition">
-                          {getListingCertNumber(listings[1])
-                            ? `Cert #${getListingCertNumber(listings[1])}${isListingCertVerified(listings[1]) ? ' • Verified Card' : ''}`
-                            : 'Cert # N/A'}
-                        </p>
-                        <p className="catalog-detail-listing-condition">{listings[1]?.condition || 'N/A'}</p>
-                      </div>
-                      <strong>{formatUsd(listings[1]?.price)}</strong>
-                    </div>
-                    <button type="button" className="catalog-detail-viewall-btn">
-                      View All {Number.isFinite(Number(selectedCatalogItemMetadata.listings_total)) ? Number(selectedCatalogItemMetadata.listings_total) : 'N/A'} Listings
-                    </button>
-                  </article>
-                  <article className="catalog-card catalog-detail-section">
-                    <h3>Local Availability</h3>
-                    <div className="catalog-detail-availability-card alert">
-                      <strong>{localAvailability[0]?.title || localAvailability[0]?.name || 'N/A'}</strong>
-                      <p>{localAvailability[0]?.detail || localAvailability[0]?.message || 'N/A'}</p>
-                      <p>{localAvailability[0]?.stock_note || localAvailability[0]?.distance || 'N/A'}</p>
-                    </div>
-                    <div className="catalog-detail-availability-card store">
-                      <strong>{localAvailability[1]?.title || localAvailability[1]?.name || 'N/A'}</strong>
-                      <p>{localAvailability[1]?.detail || localAvailability[1]?.message || 'N/A'}</p>
-                    </div>
-                    
-                    {typeof selectedCatalogItemMetadata.map_url === 'string' && selectedCatalogItemMetadata.map_url.trim() ? (
-                      <a href={selectedCatalogItemMetadata.map_url.trim()} className="catalog-detail-map-link" target="_blank" rel="noreferrer">
-                        View on a Map
-                      </a>
-                    ) : (
-                      <span className="catalog-detail-map-link">N/A</span>
-                    )}
-                  </article>
-                  </section>
-
-                  <section className="catalog-card catalog-detail-section">
-                  <h3>Collector Insights</h3>
-                  <div className="catalog-detail-community-grid" aria-label="Collector insights">
-                    <div className="catalog-detail-community-item">
-                      <strong>For Sale</strong>
-                      <p>{catalogDetailStats ? catalogDetailStats.available_count : '—'}</p>
-                    </div>
-                    <div className="catalog-detail-community-item">
-                      <strong>Wanted</strong>
-                      <p>{catalogDetailStats ? catalogDetailStats.wanted_count : '—'}</p>
-                    </div>
-                    <div className="catalog-detail-community-item">
-                      <strong>You Own</strong>
-                      <p>{ownershipCount > 0 ? ownershipCount : 'None'}</p>
-                    </div>
-                    <div className="catalog-detail-community-item">
-                      <strong>Owned</strong>
-                      <p>{catalogDetailStats?.community_owned != null ? catalogDetailStats.community_owned : '—'}</p>
-                    </div>
-                  </div>
-                    </section>
-
-                    {marketplaceCompletionMatches.length > 0 && ownershipCount === 0 ? (
-                      <section className="catalog-card catalog-detail-section">
-                    <h3>Needed For</h3>
-                    <div className="collection-needed-list">
-                      {marketplaceCompletionMatches.map((goal) => {
-                        const nextPercent = goal.totalItems > 0 ? Math.min(((goal.ownedCount + 1) / goal.totalItems) * 100, 100) : goal.completionPercent
-                        return (
-                          <div key={`needed-goal-${goal.id}`} className="collection-needed-item">
-                            <strong>{goal.title}</strong>
-                            <p>
-                              This purchase would increase completion from {goal.completionPercent.toFixed(1)}% to {nextPercent.toFixed(1)}%.
-                            </p>
-                          </div>
-                        )
-                      })}
-                    </div>
-                      </section>
-                    ) : null}
-
-                    <section className="catalog-card catalog-detail-section">
-                  <h3>Tracked Certificate Sales History</h3>
-                  {ownedCertEntries.length === 0 ? (
-                    <p className="catalog-detail-listing-condition">Add this graded card with a cert number to start tracking cert-level sales history.</p>
-                  ) : certSalesHistory.length === 0 ? (
-                    <p className="catalog-detail-listing-condition">No cert-level sales history found yet for your tracked certificates.</p>
-                  ) : (
-                    certSalesHistory.slice(0, 5).map((sale, index) => {
-                      const saleCert = sale.cert_number || sale.certNumber || sale.certificate_number || sale.certificateNumber || sale.serial || 'N/A'
-                      const saleDate = sale.sold_at || sale.soldAt || sale.date || sale.sale_date || 'N/A'
-                      const salePrice = sale.price ?? sale.sale_price ?? sale.amount
-
-                      return (
-                        <div key={`cert-sale-${index}`} className="catalog-detail-list-row" role="button" tabIndex={0}>
-                          <div className="catalog-detail-seller-col">
-                            <strong>Cert #{saleCert || 'N/A'}</strong>
-                            <p>{saleDate || 'N/A'}</p>
-                          </div>
-                          <strong>{salePrice == null ? 'N/A' : formatUsd(salePrice)}</strong>
-                        </div>
-                      )
-                    })
-                  )}
-                    </section>
-
-                    {/* Item-to-item relationships now live under the universal
-                        "Related Items" tab (Includes / Included In). */}
-
-                    {/* ── Item images ── */}
-                    {(catalogItemImages.length > 0 || isPlatformAdmin) && (
-                      <section className="catalog-card catalog-detail-section catalog-detail-images-section">
-                    <div className="catalog-detail-images-header">
-                      <h3>Card Images</h3>
-                      {isPlatformAdmin && !isCatalogItemEditMode && (
-                        <label className="catalog-detail-add-photo-btn">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            style={{ display: 'none' }}
-                            disabled={isUploadingCatalogItemImage}
-                            onChange={e => {
-                              const file = e.target.files?.[0]
-                              if (!file) return
-                              const usedPositions = new Set(catalogItemImages.map(i => i.position))
-                              const nextPosition = [0, 1, 2, 3, 4].find(p => !usedPositions.has(p)) ?? catalogItemImages.length
-                              handleUploadCatalogItemImage(file, nextPosition)
-                              e.target.value = ''
-                            }}
-                          />
-                          {isUploadingCatalogItemImage ? 'Uploading…' : '+ Add Photo'}
-                        </label>
-                      )}
-                    </div>
-                    {catalogItemImages.length > 0 && (
-                      <div className="catalog-detail-images-row">
-                        {catalogItemImages.map((img) => {
-                          const urlData = img.image_path.startsWith('http')
-                            ? { publicUrl: img.image_path }
-                            : supabase.storage.from('item-images').getPublicUrl(img.image_path).data
-                          return (
-                            <img
-                              key={img.item_image_id}
-                              src={urlData.publicUrl}
-                              alt={img.position === 0 ? 'Front' : img.position === 1 ? 'Back' : `Image ${img.position + 1}`}
-                              className="catalog-detail-item-image catalog-zoomable"
-                              onClick={() => openLightbox(urlData.publicUrl)}
-                            />
-                          )
-                        })}
-                      </div>
-                    )}
-                      </section>
-                    )}
-
-                    {/* ── Full card information ── */}
-                    {selectedCatalogItem._details && (
-                      <section className="catalog-card catalog-detail-section catalog-detail-card-info">
-                    <h3>Full Information</h3>
-                    <div className="catalog-detail-card-info-grid">
-                      {(() => {
-                        const d = selectedCatalogItem._details
-                        const goTo = (filters) => {
-                          setCatalogCategory('all'); setCatalogSubcategory(''); setCatalogFranchise('all')
-                          setCatalogBrandId(''); setCatalogSetId(''); setCatalogSubsetId('')
-                          setCatalogPrintTypeId(''); setCatalogCardTypeIds([]); setCatalogTeamId('')
-                          setCatalogSubjectId(''); setCatalogSubjectSearch(''); setCatalogMinYear(''); setCatalogMaxYear('')
-                          filters()
-                          setCurrentScreen('catalog')
-                        }
-                        const rows = [
-                          { label: 'Category',      value: d.category,            onClick: d.category ? () => goTo(() => setCatalogCategory(d.category)) : null },
-                          { label: 'Subcategory',   value: d.subcategory,         onClick: d.subcategory ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory) }) : null },
-                          { label: 'Franchise',     value: d.franchise,           onClick: d.franchise ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all') }) : null },
-                          { label: 'Brand',         value: d.brand,               onClick: d.brand_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id) }) : null },
-                          { label: 'Collectible Set', value: d.collectible_set,   onClick: d.collectible_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id) }) : null },
-                          { label: 'Release Year',  value: d.release_year ?? 'N/A', onClick: d.release_year ? () => goTo(() => { setCatalogMinYear(String(d.release_year)); setCatalogMaxYear(String(d.release_year)) }) : null },
-                          { label: 'Subset',        value: d.subcollectible_set,  onClick: d.subcollectble_set_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id) }) : null },
-                          { label: 'Print Type',    value: d.print_type,          onClick: d.print_type_id ? () => goTo(() => { setCatalogCategory(d.category || 'all'); setCatalogSubcategory(d.subcategory || ''); setCatalogFranchise(d.franchise_id || d.franchise || 'all'); setCatalogBrandId(d.brand_id || ''); setCatalogSetId(d.collectible_set_id || ''); setCatalogSubsetId(d.subcollectble_set_id || ''); setCatalogPrintTypeId(d.print_type_id) }) : null },
-                          { label: 'Subject',       value: d.subject,             onClick: null, subjects: catalogDetailSubjects },
-                          { label: 'Subject Type',  value: d.subject_type,        onClick: null },
-                          { label: 'Species',       value: d.species,             onClick: null },
-                          ...(catalogDetailTeams.length ? [{ label: 'Team(s)', value: catalogDetailTeams.join(', '), onClick: null }] : []),
-                          ...(catalogDetailCardTypes.length ? [{ label: 'Card Treatment', value: catalogDetailCardTypes.join(', '), onClick: null }] : []),
-                          ...(catalogDetailRarityId ? [
-                            { label: 'Rarity', value: catalogRarities.find(r => r.id === catalogDetailRarityId)?.name ?? 'N/A', onClick: null },
-                          ] : []),
-                          ...(catalogItemIsMtg ? [
-                            { label: 'Type', value: catalogMtgCardTypes.find(t => t.id === catalogDetailMtgCardTypeId)?.name ?? 'N/A', onClick: null },
-                          ] : []),
-                          { label: 'Card Number',   value: d.card_number,         onClick: null },
-                          { label: 'Print Count',   value: d.print_count ?? 'N/A', onClick: null },
-                          ...(d.category === 'Building Blocks' ? (() => {
-                            const lego = catalogDetailLego || {}
-                            const pc  = lego.piece_count ?? d.piece_count
-                            const bl  = lego.bricklink_id ?? d.bricklink_id
-                            const rb  = lego.rebrickable_fig_id ?? d.rebrickable_fig_id
-                            const upc = lego.upc ?? d.upc
-                            const retail = lego.retail_price
-                            return [
-                              lego.lego_set_number && { label: 'Set Number',    value: lego.lego_set_number, onClick: null },
-                              lego.minifig_code    && { label: 'Minifig Code',   value: lego.minifig_code,    onClick: null },
-                              (retail != null && retail !== '') && { label: 'Retail Price', value: formatUsd(Number(retail)), onClick: null },
-                              (pc != null && pc !== '') && { label: 'Piece Count', value: pc,     onClick: null },
-                              bl  && { label: 'BrickLink ID',   value: bl,  onClick: null },
-                              rb  && { label: 'Rebrickable ID', value: rb,  onClick: null },
-                              upc && { label: 'UPC',            value: upc, onClick: null },
-                            ].filter(Boolean)
-                          })() : [
-                            ...(d.bricklink_id?.toLowerCase().startsWith('col') ? [
-                              { label: 'BrickLink ID',   value: d.bricklink_id ?? 'N/A',       onClick: null },
-                              { label: 'Rebrickable ID', value: d.rebrickable_fig_id ?? 'N/A', onClick: null },
-                            ] : []),
-                          ]),
-                        ].filter(Boolean)
-                        const CARD_ONLY = new Set(['Card Number', 'Print Count', 'Print Type', 'Subset'])
-                        const visibleRows = d.category === 'Building Blocks'
-                          ? rows.filter(r => !CARD_ONLY.has(r.label))
-                          : rows
-                        return visibleRows.map(({ label, value, onClick, subjects }) => (
-                          <div key={label} className="catalog-detail-info-cell">
-                            <span className="catalog-detail-info-label">{label}</span>
-                            {subjects && subjects.length > 0 ? (
-                              <div className="catalog-detail-subject-links">
-                                {subjects.map(s => (
-                                  <button key={s.id} type="button" className="catalog-detail-info-value catalog-detail-meta-link" onClick={() => goTo(() => { setCatalogSubjectId(s.id); setCatalogSubjectSearch(s.name) })}>{s.name.toUpperCase()}</button>
-                                ))}
-                              </div>
-                            ) : onClick ? (
-                              <button type="button" className="catalog-detail-info-value catalog-detail-meta-link" onClick={onClick}>{value ?? 'N/A'}</button>
-                            ) : (
-                              <span className="catalog-detail-info-value">{value ?? 'N/A'}</span>
-                            )}
-                          </div>
-                        ))
-                      })()}
-                    </div>
-                      </section>
-                    )}
-
-                    <div className="catalog-detail-cartbar">
-                      <button type="button" className="catalog-detail-cartbtn">Add to Cart</button>
-                    </div>
-                  </>
-                ) : catalogDetailViewTab === 'reviews' ? (
-                  <section className="catalog-card catalog-detail-section catalog-detail-reviews-section" role="tabpanel" aria-label="Item reviews">
-                    <div className="catalog-detail-reviews-header">
-                      <h3>Collector Reviews</h3>
-                      <p>
-                        {catalogDetailAverageRating == null
-                          ? `No ratings yet • ${catalogDetailReviews.length} review${catalogDetailReviews.length === 1 ? '' : 's'}`
-                          : `${catalogDetailAverageRating.toFixed(1)}/5 avg • ${catalogDetailReviews.length} review${catalogDetailReviews.length === 1 ? '' : 's'}`}
-                      </p>
-                    </div>
-                    {catalogDetailReviews.length === 0 ? (
-                      <p className="catalog-detail-listing-condition">No reviews have been added for this item yet.</p>
-                    ) : (
-                      <div className="catalog-detail-reviews-list">
-                        {catalogDetailReviews.map((review) => (
-                          <article key={review.id} className="catalog-detail-review-card">
-                            <div className="catalog-detail-review-topline">
-                              <strong>{review.author}</strong>
-                              <span>
-                                {review.rating == null ? 'Unrated' : `${review.rating.toFixed(1)}/5`}
-                                {review.dateLabel ? ` • ${review.dateLabel}` : ''}
-                              </span>
-                            </div>
-                            {review.title ? <p className="catalog-detail-review-title">{review.title}</p> : null}
-                            <p>{review.body || 'No written comments.'}</p>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                ) : catalogDetailViewTab === 'related' ? (
-                  <section className="catalog-card catalog-detail-section related-items-panel" role="tabpanel" aria-label="Related items">
-                    {(() => {
-                      const hasAny = catalogDetailIncludes.length > 0 || catalogDetailIncludedIn.length > 0
-                      const RelCard = ({ item, mode }) => (
-                        <div className="related-card">
-                          <button type="button" className="related-card-main" onClick={() => openCatalogItemById(item.item_id)}>
-                            <div className="related-card-thumb">
-                              {item.imageUrl ? <img src={item.imageUrl} alt={item.name} loading="lazy" /> : <div className="related-card-thumb-missing">No image</div>}
-                            </div>
-                            <div className="related-card-body">
-                              <span className="related-card-name">{item.name}{item.quantity > 1 ? <span className="related-card-qty"> ×{item.quantity}</span> : null}</span>
-                              {item.description ? <span className="related-card-desc">{item.description}</span> : null}
-                              <span className="related-card-meta">
-                                {item.itemType ? <span className="related-card-type">{item.itemType}</span> : null}
-                                {item.idNumber ? <span className="related-card-id">{item.idNumber}</span> : null}
-                              </span>
-                            </div>
-                          </button>
-                          {isPlatformAdmin && mode === 'child' && (
-                            <label className="related-card-qtyedit" title="Copies in this item" onClick={(e) => e.stopPropagation()}>
-                              ×<input type="number" min="1" defaultValue={item.quantity} disabled={relBusy}
-                                onClick={(e) => e.stopPropagation()}
-                                onBlur={(e) => { const v = Math.max(1, parseInt(e.target.value, 10) || 1); if (v !== item.quantity) handleRelSetQuantity(item.item_id, v) }} />
-                            </label>
-                          )}
-                          {isPlatformAdmin && (
-                            <button type="button" className="related-card-remove" disabled={relBusy}
-                              onClick={() => handleRemoveRelated(item.item_id, mode)} title="Remove relationship">✕</button>
-                          )}
-                        </div>
-                      )
-                      return (
-                        <>
-                          <div className="related-items-head">
-                            <h3>Related Items</h3>
-                            {isPlatformAdmin && (
-                              <div className="related-items-actions">
-                                <button type="button" className="catalog-action-pill" onClick={() => { setRelAddMode(relAddMode === 'child' ? null : 'child'); setRelSearch(''); setRelSearchResults([]) }}>+ Add Included Item</button>
-                                <button type="button" className="catalog-action-pill" onClick={() => { setRelAddMode(relAddMode === 'parent' ? null : 'parent'); setRelSearch(''); setRelSearchResults([]) }}>+ Add Parent Item</button>
-                              </div>
-                            )}
-                          </div>
-                          {relError ? <p className="catalog-admin-form-error">{relError}</p> : null}
-
-                          {isPlatformAdmin && relAddMode && (
-                            <div className="related-add-box">
-                              <p className="catalog-admin-hint">
-                                {relAddMode === 'child'
-                                  ? 'Search for an item this one includes (current item → includes → selected).'
-                                  : 'Search for a parent item that includes this one (selected → includes → current).'}
-                              </p>
-                              <div className="related-add-controls">
-                                <input type="text" autoFocus placeholder="Search name, description, ID, barcode…" value={relSearch} onChange={(e) => setRelSearch(e.target.value)} />
-                                {relAddMode === 'child' && (
-                                  <label className="related-add-qty">Qty
-                                    <input type="number" min="1" value={relAddQty} onChange={(e) => setRelAddQty(e.target.value)} />
-                                  </label>
-                                )}
-                              </div>
-                              {relSearchResults.length > 0 && (
-                                <div className="related-search-results">
-                                  {relSearchResults.map((r) => (
-                                    <button key={r.item_id} type="button" className="related-search-result" disabled={relBusy}
-                                      onClick={() => handleAddRelatedItem(r.item_id, relAddMode)}>
-                                      <span className="related-search-name">{r.name}</span>
-                                      <span className="related-search-ctx">{[r.itemType, r.idNumber, r.franchise].filter(Boolean).join(' · ')}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {!hasAny ? (
-                            <p className="related-empty">No related items have been linked yet.</p>
-                          ) : (
-                            <>
-                              {catalogDetailIncludes.length > 0 && (
-                                <div className="related-section">
-                                  <h4>Includes ({catalogDetailIncludes.length})</h4>
-                                  <div className="related-grid">
-                                    {catalogDetailIncludes.map((it) => <RelCard key={it.item_id} item={it} mode="child" />)}
-                                  </div>
-                                </div>
-                              )}
-                              {catalogDetailIncludedIn.length > 0 && (
-                                <div className="related-section">
-                                  <h4>Included In ({catalogDetailIncludedIn.length})</h4>
-                                  <div className="related-grid">
-                                    {catalogDetailIncludedIn.map((it) => <RelCard key={it.item_id} item={it} mode="parent" />)}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </>
-                      )
-                    })()}
-                  </section>
-                ) : isPlatformAdmin ? (
-                  <section className="catalog-card catalog-detail-section manage-images-panel" role="tabpanel" aria-label="Manage images">
-                    <div className="manage-images-head">
-                      <h3>Manage Images</h3>
-                      <span className="manage-images-admin-badge">Admin only</span>
-                    </div>
-                    {imageQueueActive && (
-                      <div className="image-queue-bar">
-                        <div className="image-queue-progress">
-                          <strong>Image Queue</strong>
-                          <span>Item {imageQueuePos + 1} of {imageQueueItems.length}</span>
-                          <span className="image-queue-name">{selectedCatalogItem?.name || ''}</span>
-                        </div>
-                        <div className="image-queue-controls">
-                          <button type="button" className="catalog-admin-inline-cancel" onClick={() => exitImageQueue(false)}>Exit Queue</button>
-                          <button type="button" className="catalog-action-pill" disabled={manageImagesBusy} onClick={advanceImageQueue}>Skip →</button>
-                          <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={manageImagesBusy} onClick={advanceImageQueue}>
-                            {imageQueuePos + 1 >= imageQueueItems.length ? 'Finish' : (catalogItemImages.length ? 'Save & Next →' : 'Next →')}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {manageImagesError ? <p className="catalog-admin-form-error">{manageImagesError}</p> : null}
-                    {manageImagesNotice ? <p className="auth-banner">{manageImagesNotice}</p> : null}
-
-                    {/* ── 1. Current images ─────────────────────────────────── */}
-                    <div className="manage-images-section">
-                      <h4>Current Images ({catalogItemImages.length})</h4>
-                      {catalogItemImages.length === 0 ? (
-                        <p className="manage-images-empty">No images yet. This item is eligible for automatic image discovery.</p>
-                      ) : (
-                        <div className="manage-images-grid">
-                          {[...catalogItemImages].sort((a, b) => a.position - b.position).map((img, idx, arr) => {
-                            const url = miResolveUrl(img.image_path)
-                            const isPrimary = img.position === 0 || img.is_primary
-                            const editing = manageImagesEditSourceId === img.item_image_id
-                            return (
-                              <div key={img.item_image_id} className={`manage-images-card ${isPrimary ? 'is-primary' : ''}`}>
-                                <div className="manage-images-thumb" onClick={() => url && openLightbox(url)} title="View full image">
-                                  {url ? <img src={url} alt={`Image ${img.position + 1}`} loading="lazy" /> : <div className="manage-images-thumb-missing">No preview</div>}
-                                  {isPrimary && <span className="manage-images-primary-tag">Primary</span>}
-                                </div>
-                                <div className="manage-images-meta">
-                                  <span className="manage-images-order">#{img.position + 1}</span>
-                                  {img.is_verified ? <span className="manage-images-verified">✓ Verified</span> : <span className="manage-images-unverified">Unverified</span>}
-                                </div>
-                                {img.source_name || img.source_url ? (
-                                  <p className="manage-images-source">{img.source_name || 'Source'}{img.source_url ? <> · <a href={img.source_url} target="_blank" rel="noreferrer">link</a></> : null}</p>
-                                ) : <p className="manage-images-source manage-images-source-none">No source recorded</p>}
-                                {editing ? (
-                                  <div className="manage-images-source-edit">
-                                    <input type="text" placeholder="Source name (e.g. Rebrickable)" value={manageImagesSourceDraft.source_name} onChange={e => setManageImagesSourceDraft(d => ({ ...d, source_name: e.target.value }))} />
-                                    <input type="text" placeholder="Source URL" value={manageImagesSourceDraft.source_url} onChange={e => setManageImagesSourceDraft(d => ({ ...d, source_url: e.target.value }))} />
-                                    <label className="manage-images-checkbox"><input type="checkbox" checked={manageImagesSourceDraft.is_verified} onChange={e => setManageImagesSourceDraft(d => ({ ...d, is_verified: e.target.checked }))} /> Verified</label>
-                                    <div className="manage-images-actions">
-                                      <button type="button" className="catalog-detail-btn catalog-detail-btn-collect" disabled={manageImagesBusy} onClick={() => handleMiSaveSource(img)}>Save</button>
-                                      <button type="button" className="catalog-admin-inline-cancel" onClick={() => setManageImagesEditSourceId(null)}>Cancel</button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="manage-images-actions">
-                                    {!isPrimary && <button type="button" disabled={manageImagesBusy} onClick={() => handleMiSetPrimary(img)}>Set Primary</button>}
-                                    <button type="button" disabled={manageImagesBusy || idx === 0} onClick={() => handleMiReorder(img, 'up')} title="Move up">↑</button>
-                                    <button type="button" disabled={manageImagesBusy || idx === arr.length - 1} onClick={() => handleMiReorder(img, 'down')} title="Move down">↓</button>
-                                    <button type="button" disabled={manageImagesBusy} onClick={() => { setManageImagesEditSourceId(img.item_image_id); setManageImagesSourceDraft({ source_url: img.source_url || '', source_name: img.source_name || '', is_verified: !!img.is_verified }) }}>Edit Source</button>
-                                    <button type="button" className="manage-images-danger" disabled={manageImagesBusy} onClick={() => handleMiRemove(img)}>Remove</button>
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ── 2. Image candidates ───────────────────────────────── */}
-                    <div className="manage-images-section">
-                      <div className="manage-images-section-head">
-                        <h4>Image Candidates ({manageImagesCandidates.filter(c => c.status === 'pending').length} pending)</h4>
-                        <button type="button" className="catalog-detail-btn" disabled={manageImagesBusy} onClick={handleMiFindImages}>Find Images</button>
-                      </div>
-                      {manageImagesJobs[0] ? (
-                        <p className="manage-images-jobline">Last search: <strong>{manageImagesJobs[0].status.replace(/_/g, ' ')}</strong>{manageImagesJobs[0].candidates_found ? ` · ${manageImagesJobs[0].candidates_found} found` : ''}{manageImagesJobs[0].error_message ? ` · ${manageImagesJobs[0].error_message}` : ''}</p>
-                      ) : null}
-                      {manageImagesCandidates.length === 0 ? (
-                        <p className="manage-images-empty">No candidates yet. Use “Find Images” to search Google for this item’s images.</p>
-                      ) : (
-                        <div className="manage-images-candidates-grid">
-                          {manageImagesCandidates.map(cand => (
-                            <div key={cand.id} className={`manage-images-candidate status-${cand.status}`}>
-                              <div className="manage-images-thumb" onClick={() => cand.image_url && openLightbox(cand.image_url)}>
-                                {cand.image_url ? <img src={cand.thumb_url || cand.image_url} alt="Candidate" loading="lazy" /> : <div className="manage-images-thumb-missing">No preview</div>}
-                                <span className={`manage-images-status-tag status-${cand.status}`}>{cand.status}</span>
-                              </div>
-                              <div className="manage-images-candidate-body">
-                                <p className="manage-images-source">{cand.source_name || 'Unknown source'}{cand.source_url ? <> · <a href={cand.source_url} target="_blank" rel="noreferrer">source</a></> : null}</p>
-                                <p className="manage-images-score">Score: {Number(cand.match_score || 0)}</p>
-                                {Array.isArray(cand.match_reasons) && cand.match_reasons.length ? (
-                                  <ul className="manage-images-reasons">{cand.match_reasons.map((r, i) => <li key={i}>{r.field || r.reason || JSON.stringify(r)}{r.points ? ` (+${r.points})` : ''}</li>)}</ul>
-                                ) : null}
-                              </div>
-                              {cand.status === 'pending' ? (
-                                <div className="manage-images-actions">
-                                  <button type="button" disabled={manageImagesBusy} onClick={() => handleMiApproveCandidate(cand, 'primary')}>Approve as Primary</button>
-                                  <button type="button" disabled={manageImagesBusy} onClick={() => handleMiApproveCandidate(cand, 'gallery')}>Add to Gallery</button>
-                                  <button type="button" className="manage-images-danger" disabled={manageImagesBusy} onClick={() => handleMiRejectCandidate(cand)}>Reject</button>
-                                </div>
-                              ) : (
-                                <p className="manage-images-candidate-resolved">{cand.status === 'approved' ? 'Approved — added to catalogue' : 'Rejected — will not be suggested again'}</p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ── 3. Manual image management ────────────────────────── */}
-                    <div className="manage-images-section">
-                      <h4>Add an Image</h4>
-                      <div className="manage-images-manual">
-                        <div className="manage-images-manual-upload">
-                          <label className="catalog-detail-btn catalog-detail-btn-collect manage-images-upload-btn">
-                            {manageImagesBusy ? 'Working…' : 'Upload from device'}
-                            <input type="file" accept="image/*" style={{ display: 'none' }} disabled={manageImagesBusy} onChange={e => { if (e.target.files?.[0]) handleMiUpload(e.target.files[0], catalogItemImages.length === 0); e.target.value = '' }} />
-                          </label>
-                          <span className="catalog-admin-hint">Uploads go to the existing <code>item-images</code> bucket. First image becomes primary automatically.</span>
-                        </div>
-                        <div className="manage-images-manual-url">
-                          <input type="text" placeholder="External image URL" value={manageImagesUrlDraft.image_url} onChange={e => setManageImagesUrlDraft(d => ({ ...d, image_url: e.target.value }))} />
-                          <input type="text" placeholder="Source name (optional)" value={manageImagesUrlDraft.source_name} onChange={e => setManageImagesUrlDraft(d => ({ ...d, source_name: e.target.value }))} />
-                          <input type="text" placeholder="Source URL (optional)" value={manageImagesUrlDraft.source_url} onChange={e => setManageImagesUrlDraft(d => ({ ...d, source_url: e.target.value }))} />
-                          <label className="manage-images-checkbox"><input type="checkbox" checked={manageImagesUrlDraft.asPrimary} onChange={e => setManageImagesUrlDraft(d => ({ ...d, asPrimary: e.target.checked }))} /> Set as primary</label>
-                          <button type="button" className="catalog-detail-btn" disabled={manageImagesBusy} onClick={handleMiAddByUrl}>Add by URL</button>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                ) : (
-                  <section className="catalog-card catalog-detail-section" role="tabpanel">
-                    <p className="manage-images-empty">This tab is not available.</p>
-                  </section>
-                )}
-              </>
-            ) : (
-              <div className="catalog-card catalog-loading-panel">Item not found.</div>
-            )}
-          </section>
-        ) : currentScreen === 'profile' ? (
-          <section className="profile-screen" aria-label="My Profile">
-            {!currentUser || !profile ? (
-              <div className="profile-empty-state">
-                <p className="subtitle">Sign in to view your profile.</p>
-                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>Log in</button>
-              </div>
-            ) : (
-              <div className="profile-layout">
-                {/* Hero banner */}
-                <div className="profile-hero-banner" />
-
-                {/* Identity card — overlaps banner */}
-                <div className="profile-identity-card">
-                  <div className="profile-avatar-outer">
-                    {profile.avatar_url
-                      ? <img src={profile.avatar_url} alt="avatar" className="profile-avatar" />
-                      : <div className="profile-avatar profile-avatar--placeholder">{(profile.display_name || currentUser.email || '?')[0].toUpperCase()}</div>
-                    }
-                  </div>
-                  <div className="profile-identity-body">
-                    <div>
-                      <h1 className="profile-username">{profile.display_name || currentUser.email?.split('@')[0] || 'Collector'}</h1>
-                    </div>
-                    <span className="profile-tier-pill">{profile.subscription_tier ? profile.subscription_tier.replace(/_/g, ' ') : 'Free Collector'}</span>
-                  </div>
-                </div>
-
-                {profileIsLoading ? (
-                  <div className="profile-loading">Loading stats…</div>
-                ) : (
-                  <>
-                    {/* Stat cards row */}
-                    {(() => {
-                      const unlockedCount = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
-                      return (
-                        <div className="profile-stats-row">
-                          {[
-                            { value: profileStats?.totalItems?.toLocaleString() ?? '—', label: 'Total Copies' },
-                            { value: profileStats?.uniqueItems?.toLocaleString() ?? '—', label: 'Unique Items' },
-                            { value: profileStats?.totalValue != null ? `$${profileStats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—', label: 'Est. Value' },
-                            { value: `${unlockedCount} / ${PROFILE_ACHIEVEMENTS.length}`, label: 'Achievements' },
-                          ].map(({ value, label }) => (
-                            <div key={label} className="profile-stat-card">
-                              <span className="profile-stat-number">{value}</span>
-                              <span className="profile-stat-label">{label}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })()}
-
-                    {/* Friends */}
-                    <div className="profile-panel">
-                      <div className="profile-panel-header">
-                        <h2 className="profile-panel-title">Friends{profileFriends.length > 0 ? ` (${profileFriends.length})` : ''}</h2>
-                        <button
-                          type="button"
-                          className="profile-friend-find-btn"
-                          onClick={() => { setIsFriendSearchOpen(s => !s); setFriendSearchQuery(''); setFriendSearchResults([]) }}
-                        >
-                          {isFriendSearchOpen ? 'Cancel' : 'Find Friends'}
-                        </button>
-                      </div>
-
-                      {/* Incoming requests */}
-                      {profileFriendRequests.length > 0 && (
-                        <div className="profile-friend-requests">
-                          <p className="profile-friend-requests-label">{profileFriendRequests.length} pending {profileFriendRequests.length === 1 ? 'request' : 'requests'}</p>
-                          {profileFriendRequests.map(req => (
-                            <div key={req.friendshipId} className="profile-friend-request-row">
-                              <div className="profile-friend-avatar profile-friend-avatar--sm">
-                                {req.avatar_url ? <img src={req.avatar_url} alt="" /> : <span>{(req.display_name || '?')[0].toUpperCase()}</span>}
-                              </div>
-                              <span className="profile-friend-name">{req.display_name || 'Unknown'}</span>
-                              <button type="button" className="profile-friend-action-btn profile-friend-action-btn--accept" onClick={() => handleAcceptFriendRequest(req)}>Accept</button>
-                              <button type="button" className="profile-friend-action-btn profile-friend-action-btn--decline" onClick={() => handleDeclineFriendRequest(req.friendshipId)}>Decline</button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Find Friends search */}
-                      {isFriendSearchOpen && (
-                        <div className="profile-friend-search">
-                          <input
-                            type="text"
-                            className="profile-friend-search-input"
-                            placeholder="Search by display name…"
-                            value={friendSearchQuery}
-                            onChange={e => handleFriendSearch(e.target.value)}
-                            autoFocus
-                          />
-                          {friendSearchLoading && <p className="profile-friend-search-hint">Searching…</p>}
-                          {!friendSearchLoading && friendSearchQuery && friendSearchResults.length === 0 && (
-                            <p className="profile-friend-search-hint">No users found.</p>
-                          )}
-                          {friendSearchResults.map(user => {
-                            const alreadyFriend = profileFriends.some(f => f.userId === user.id)
-                            const sent = profileSentToIds.has(user.id) || user._sent
-                            const incoming = profileFriendRequests.some(r => r.userId === user.id)
-                            return (
-                              <div key={user.id} className="profile-friend-result-row">
-                                <div className="profile-friend-avatar profile-friend-avatar--sm">
-                                  {user.avatar_url ? <img src={user.avatar_url} alt="" /> : <span>{(user.display_name || '?')[0].toUpperCase()}</span>}
-                                </div>
-                                <span className="profile-friend-name">{user.display_name || 'Unknown'}</span>
-                                {alreadyFriend ? (
-                                  <span className="profile-friend-status">Friends</span>
-                                ) : incoming ? (
-                                  <span className="profile-friend-status">Requested you</span>
-                                ) : sent ? (
-                                  <span className="profile-friend-status">Request sent</span>
-                                ) : (
-                                  <button type="button" className="profile-friend-action-btn profile-friend-action-btn--add" onClick={() => handleSendFriendRequest(user.id)}>Add Friend</button>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      {/* Friends grid */}
-                      {profileFriends.length > 0 ? (
-                        <div className="profile-friends-grid">
-                          {profileFriends.map(friend => (
-                            <div key={friend.friendshipId} className="profile-friend-card">
-                              <div className="profile-friend-avatar">
-                                {friend.avatar_url ? <img src={friend.avatar_url} alt="" /> : <span>{(friend.display_name || '?')[0].toUpperCase()}</span>}
-                              </div>
-                              <p className="profile-friend-card-name">{friend.display_name || 'Unknown'}</p>
-                              <button type="button" className="profile-friend-remove-btn" title="Remove friend" onClick={() => handleRemoveFriend(friend.friendshipId, friend.userId)}>✕</button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : !isFriendSearchOpen && profileFriendRequests.length === 0 && (
-                        <p className="profile-friend-empty">No friends yet. Click Find Friends to connect with other collectors.</p>
-                      )}
-                    </div>
-
-                    {/* Recently added */}
-                    {profileRecentItems.length > 0 && (
-                      <div className="profile-panel">
-                        <h2 className="profile-panel-title">Recently Added</h2>
-                        <div className="profile-recent-grid">
-                          {profileRecentItems.map((item, i) => {
-                            const imgUrl = item.front_image_path
-                              ? (item.front_image_path.startsWith('http')
-                                  ? item.front_image_path
-                                  : `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/item-images/${item.front_image_path}`)
-                              : null
-                            const label = [item.subject, item.print_type, item.card_number ? `#${item.card_number}` : null].filter(Boolean).join(' — ') || item.collectible_set || 'Item'
-                            return (
-                              <button key={`${item.item_id}-${i}`} type="button" className="profile-recent-card profile-recent-card--btn" onClick={() => handleOpenProfileItem(item)}>
-                                <div className="profile-recent-img-wrap">
-                                  {imgUrl
-                                    ? <img src={imgUrl} alt={label} className="profile-recent-img" />
-                                    : <div className="profile-recent-img-placeholder" />
-                                  }
-                                </div>
-                                <p className="profile-recent-label">{label}</p>
-                                {item.created_at && <p className="profile-recent-date">{new Date(item.created_at).toLocaleDateString()}</p>}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Most Valuable */}
-                    {profileMostValuable.length > 0 && (
-                      <div className="profile-panel">
-                        <h2 className="profile-panel-title">Most Valuable</h2>
-                        <div className="profile-recent-grid">
-                          {profileMostValuable.map((item, i) => {
-                            const imgUrl = item.front_image_path
-                              ? (item.front_image_path.startsWith('http')
-                                  ? item.front_image_path
-                                  : `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/item-images/${item.front_image_path}`)
-                              : null
-                            const label = [item.subject, item.print_type, item.card_number ? `#${item.card_number}` : null].filter(Boolean).join(' — ') || item.collectible_set || 'Item'
-                            return (
-                              <button key={`mv-${item.item_id}-${i}`} type="button" className="profile-recent-card profile-recent-card--btn" onClick={() => handleOpenProfileItem(item)}>
-                                <div className="profile-recent-img-wrap">
-                                  {imgUrl
-                                    ? <img src={imgUrl} alt={label} className="profile-recent-img" />
-                                    : <div className="profile-recent-img-placeholder" />
-                                  }
-                                </div>
-                                <p className="profile-recent-label">{label}</p>
-                                <p className="profile-recent-date profile-recent-value">${item.purchase_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Category breakdown */}
-                    {profileStats?.categoryBreakdown?.length > 0 && (
-                      <div className="profile-panel">
-                        <h2 className="profile-panel-title">Collection by Category</h2>
-                        <div className="profile-category-list">
-                          {profileStats.categoryBreakdown.map(([catId, count]) => {
-                            const catName = catalogCategories.find(c => c.id === catId)?.name || 'Unknown'
-                            const pct = Math.round((count / (profileStats.uniqueItems || 1)) * 100)
-                            return (
-                              <div key={catId} className="profile-category-row">
-                                <span className="profile-category-name">{catName}</span>
-                                <div className="profile-category-track">
-                                  <div className="profile-category-fill" style={{ width: `${pct}%` }} />
-                                </div>
-                                <span className="profile-category-count">{count.toLocaleString()}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Achievements */}
-                    {(() => {
-                      const groups = [...new Set(PROFILE_ACHIEVEMENTS.map(a => a.group))]
-                      const totalUnlocked = profileStats ? PROFILE_ACHIEVEMENTS.filter(a => a.check(profileStats)).length : 0
-                      return (
-                        <div className="profile-panel">
-                          <div className="profile-panel-header">
-                            <h2 className="profile-panel-title">Achievements</h2>
-                            <span className="profile-achievements-count">{totalUnlocked} / {PROFILE_ACHIEVEMENTS.length} unlocked</span>
-                          </div>
-                          {groups.map(group => {
-                            const list = PROFILE_ACHIEVEMENTS.filter(a => a.group === group)
-                            const groupUnlocked = profileStats ? list.filter(a => a.check(profileStats)).length : 0
-                            return (
-                              <div key={group} className="profile-ach-group">
-                                <div className="profile-ach-group-header">
-                                  <span className="profile-ach-group-name">{group}</span>
-                                  <span className="profile-ach-group-count">{groupUnlocked}/{list.length}</span>
-                                </div>
-                                <div className="profile-ach-grid">
-                                  {list.map(ach => {
-                                    const unlocked = profileStats ? ach.check(profileStats) : false
-                                    return (
-                                      <div
-                                        key={ach.id}
-                                        className={`profile-ach-card profile-ach-card--${ach.rarity}${unlocked ? ' profile-ach-card--on' : ''}`}
-                                        title={ach.desc}
-                                      >
-                                        <div className="profile-ach-icon">{unlocked ? ach.icon : '🔒'}</div>
-                                        <div className="profile-ach-name">{ach.name}</div>
-                                        <div className="profile-ach-desc">{ach.desc}</div>
-                                        {unlocked && <div className={`profile-ach-rarity profile-ach-rarity--${ach.rarity}`}>{ach.rarity}</div>}
-                                      </div>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )
-                    })()}
-                  </>
-                )}
-              </div>
-            )}
-          </section>
-        ) : currentScreen === 'settings' ? (
-          <section className="settings-screen" aria-label="Account settings">
-            <div className="settings-header">
-              <div>
-                <h1>{tx('Settings')}</h1>
-                <p className="subtitle">{tx('Manage your profile, account, and subscription controls.')}</p>
-              </div>
-            </div>
-
-            {authMessage && <p className="auth-banner">{authMessage}</p>}
-            {settingsError && <p className="auth-error inline-error">{settingsError}</p>}
-
-            {!currentUser || !profile ? (
-              <div className="settings-empty-state">
-                <p className="subtitle">{tx('Sign in to view your settings.')}</p>
-                <button type="button" className="auth-submit" onClick={() => openAuth('signin')}>
-                  {tx('Log in')}
-                </button>
-              </div>
-            ) : (
-              <div className="settings-stack">
-                <div className="settings-tabs-grid" role="tablist" aria-label="Settings tabs">
-                  {settingsTabs.map((tab) => (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className={`settings-tab-button ${activeSettingsTab === tab.key ? 'active' : ''}`}
-                      onClick={() => setActiveSettingsTab(tab.key)}
-                      role="tab"
-                      aria-selected={activeSettingsTab === tab.key}
-                    >
-                      {tx(tab.label)}
-                    </button>
-                  ))}
-                </div>
-
-                {activeSettingsTab === 'profile' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Profile settings">
-                    <p className="settings-eyebrow">Profile</p>
-                    <h2>Profile Settings</h2>
-
-                    <form className="auth-form settings-form" onSubmit={handleSaveProfileSettings}>
-                      <label htmlFor="settings-profile-photo">Profile photo</label>
-                      <input
-                        id="settings-profile-photo"
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          const selectedFile = event.target.files?.[0] || null
-                          setSettingsProfilePhotoFile(selectedFile)
-                        }}
-                      />
-                      {settingsProfilePhoto && (
-                        <p className="settings-file-note">Current uploaded photo saved.</p>
-                      )}
-
-                      <label htmlFor="settings-username">Username</label>
-                      <input
-                        id="settings-username"
-                        type="text"
-                        value={settingsUsername}
-                        onChange={(event) => setSettingsUsername(event.target.value)}
-                        placeholder="collectorname"
-                      />
-
-                      <label htmlFor="settings-display-name">Display name</label>
-                      <input
-                        id="settings-display-name"
-                        type="text"
-                        value={settingsDisplayName}
-                        onChange={(event) => setSettingsDisplayName(event.target.value)}
-                        placeholder="How your name appears"
-                      />
-
-                      <label htmlFor="settings-bio">Bio</label>
-                      <textarea
-                        id="settings-bio"
-                        value={settingsBio}
-                        onChange={(event) => setSettingsBio(event.target.value)}
-                        rows={3}
-                        placeholder="Tell collectors about your niche and interests"
-                      />
-
-                      <label htmlFor="settings-favourite-categories">Favourite categories</label>
-                      <input
-                        id="settings-favourite-categories"
-                        type="text"
-                        value={settingsFavouriteCategories}
-                        onChange={(event) => setSettingsFavouriteCategories(event.target.value)}
-                        placeholder="Cards, Comics, Vinyl"
-                      />
-
-                      <label htmlFor="settings-profile-banner">Profile banner</label>
-                      <input
-                        id="settings-profile-banner"
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          const selectedFile = event.target.files?.[0] || null
-                          setSettingsProfileBannerFile(selectedFile)
-                        }}
-                      />
-                      {settingsProfileBanner && (
-                        <p className="settings-file-note">Current uploaded banner saved.</p>
-                      )}
-
-                      <label htmlFor="settings-public-profile-url">Public profile URL</label>
-                      <input
-                        id="settings-public-profile-url"
-                        type="text"
-                        value={settingsPublicProfileUrl}
-                        onChange={(event) => setSettingsPublicProfileUrl(event.target.value)}
-                        placeholder="collectorshub.com/u/collectorname"
-                      />
-
-                      <p className="settings-subsection-title">Collector+ profile settings</p>
-                      {isCollectorPlusMember ? (
-                        <label className="settings-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={settingsUnlimitedCollectionFolders}
-                            onChange={(event) => setSettingsUnlimitedCollectionFolders(event.target.checked)}
-                          />
-                          <span>Unlimited collection folders</span>
-                        </label>
-                      ) : (
-                        <p className="settings-subsection-note">
-                          Collector+ only: Unlimited collection folders.
-                        </p>
-                      )}
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit" disabled={isSavingSettings}>
-                          {isSavingSettings ? 'Saving...' : 'Save'}
-                        </button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'account' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Account details">
-                    <p className="settings-eyebrow">Account</p>
-                    <h2>Account Details</h2>
-
-                    <form className="auth-form settings-form" onSubmit={(event) => handleSaveLocalSettings(event, 'Account details saved.') }>
-                      <label htmlFor="settings-account-email">Email</label>
-                      <input id="settings-account-email" type="email" value={currentUser.email || ''} disabled />
-
-                      <label htmlFor="settings-account-type">Account type</label>
-                      <input
-                        id="settings-account-type"
-                        type="text"
-                        value={isBusinessTier(profile.subscription_tier) ? 'Business account' : 'Collector account'}
-                        disabled
-                      />
-
-                      <label htmlFor="settings-account-created">Account created date</label>
-                      <input
-                        id="settings-account-created"
-                        type="text"
-                        value={formatDate(currentUser.created_at)}
-                        disabled
-                      />
-
-                      <label htmlFor="settings-account-location">Location</label>
-                      <input
-                        id="settings-account-location"
-                        type="text"
-                        value={settingsLocation}
-                        onChange={(event) => {
-                          setSettingsLocation(event.target.value)
-                          setSearchAreaContext(null)
-                        }}
-                        placeholder="City, Province"
-                      />
-
-                      <label htmlFor="settings-account-mailing-address">Mailing address</label>
-                      <textarea
-                        id="settings-account-mailing-address"
-                        rows={2}
-                        value={settingsMailingAddress}
-                        onChange={(event) => setSettingsMailingAddress(event.target.value)}
-                        placeholder="Street, unit, city, province/state, postal code"
-                      />
-
-                      <label htmlFor="settings-language">Language</label>
-                      <select
-                        id="settings-language"
-                        value={normalizeLanguage(settingsLanguage)}
-                        onChange={(event) => handleLanguageChange(event.target.value)}
-                      >
-                        {LANGUAGE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.value}
-                          </option>
-                        ))}
-                      </select>
-
-                      <label htmlFor="settings-timezone">Time zone</label>
-                      <input
-                        id="settings-timezone"
-                        type="text"
-                        value={settingsTimezone}
-                        onChange={(event) => setSettingsTimezone(event.target.value)}
-                      />
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit">Save</button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'subscription' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Subscription">
-                    <p className="settings-eyebrow">Subscription</p>
-                    <h2>Subscription</h2>
-
-                    <div className="settings-detail-list">
-                      <div className="settings-detail-row">
-                        <span>Current plan</span>
-                        <strong>{getPlanDisplayLabel(profile)}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Started date</span>
-                        <strong>{formatDate(profile.subscription_started_at)}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Next billing</span>
-                        <strong>{formatDate(profile.subscription_current_period_end)}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Billing cycle</span>
-                        <strong>{profile.billing_cycle || 'monthly'}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Renewal status</span>
-                        <strong>{renewalStatus}</strong>
-                      </div>
-                    </div>
-
-                    <div className="settings-form-actions">
-                      <button type="button" className="auth-submit support-submit" onClick={handleOpenPlans}>
-                        Manage Subscription
-                      </button>
-                    </div>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'privacy' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Privacy settings">
-                    <p className="settings-eyebrow">Privacy</p>
-                    <h2>Privacy Settings</h2>
-
-                    <form className="auth-form settings-form" onSubmit={(event) => handleSaveLocalSettings(event, 'Privacy settings saved.') }>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={privacyPublicProfile} onChange={(event) => setPrivacyPublicProfile(event.target.checked)} />
-                        <span>Public profile</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={privacyShowCollectionValue} onChange={(event) => setPrivacyShowCollectionValue(event.target.checked)} />
-                        <span>Show collection value</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={privacyShowWishlist} onChange={(event) => setPrivacyShowWishlist(event.target.checked)} />
-                        <span>Show wishlist</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={privacyAllowFollowers} onChange={(event) => setPrivacyAllowFollowers(event.target.checked)} />
-                        <span>Allow followers</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={privacyShowOnlineStatus} onChange={(event) => setPrivacyShowOnlineStatus(event.target.checked)} />
-                        <span>Show online status</span>
-                      </label>
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit">Save</button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'notifications' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Notifications settings">
-                    <p className="settings-eyebrow">Notifications</p>
-                    <h2>Notifications</h2>
-
-                    <form className="auth-form settings-form" onSubmit={(event) => handleSaveLocalSettings(event, 'Notification settings saved.') }>
-                      {isCollectorPlusMember ? (
-                        <>
-                          <p className="settings-subsection-title">Collector+ settings</p>
-                          <label className="settings-checkbox-row">
-                            <input type="checkbox" checked={notificationsDealAlerts} onChange={(event) => setNotificationsDealAlerts(event.target.checked)} />
-                            <span>Deal alerts</span>
-                          </label>
-                          <label className="settings-checkbox-row">
-                            <input
-                              type="checkbox"
-                              checked={settingsCollectionAnalytics}
-                              onChange={(event) => setSettingsCollectionAnalytics(event.target.checked)}
-                            />
-                            <span>Collection analytics</span>
-                          </label>
-                          <label className="settings-checkbox-row">
-                            <input
-                              type="checkbox"
-                              checked={settingsGradingRecommendations}
-                              onChange={(event) => setSettingsGradingRecommendations(event.target.checked)}
-                            />
-                            <span>Grading recommendations</span>
-                          </label>
-                          <label className="settings-checkbox-row">
-                            <input
-                              type="checkbox"
-                              checked={settingsPortfolioInsights}
-                              onChange={(event) => setSettingsPortfolioInsights(event.target.checked)}
-                            />
-                            <span>Portfolio insights</span>
-                          </label>
-                        </>
-                      ) : (
-                        <p className="settings-subsection-note">
-                          Collector+ only: Deal alerts, Collection analytics, Grading recommendations, and Portfolio insights.
-                        </p>
-                      )}
-
-                      <p className="settings-subsection-title">General notifications</p>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={notificationsWishlistAlerts} onChange={(event) => setNotificationsWishlistAlerts(event.target.checked)} />
-                        <span>Wishlist alerts</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={notificationsStorePromotions} onChange={(event) => setNotificationsStorePromotions(event.target.checked)} />
-                        <span>Store promotions</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={notificationsEventReminders} onChange={(event) => setNotificationsEventReminders(event.target.checked)} />
-                        <span>Event reminders</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={notificationsEmail} onChange={(event) => setNotificationsEmail(event.target.checked)} />
-                        <span>Email notifications</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input type="checkbox" checked={notificationsPush} onChange={(event) => setNotificationsPush(event.target.checked)} />
-                        <span>Push notifications</span>
-                      </label>
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit">Save</button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'security' && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Security settings">
-                    <p className="settings-eyebrow">Security</p>
-                    <h2>Security</h2>
-
-                    <div className="settings-detail-list">
-                      <div className="settings-detail-row">
-                        <span>Current email</span>
-                        <strong>{currentUser?.email || 'Not available'}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Password</span>
-                        <strong>Managed through email reset</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Two-factor authentication</span>
-                        <strong>{isTwoFactorEnabled ? 'Enabled' : 'Not enabled'}</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Active sessions</span>
-                        <strong>1 current session</strong>
-                      </div>
-                      <div className="settings-detail-row">
-                        <span>Recent account activity</span>
-                        <strong>Latest sign-in available in account logs</strong>
-                      </div>
-                    </div>
-
-                    <div className="settings-form">
-                      <label htmlFor="settings-change-email">New email address</label>
-                      <input
-                        id="settings-change-email"
-                        type="email"
-                        value={settingsPendingEmail}
-                        onChange={(event) => setSettingsPendingEmail(event.target.value)}
-                        placeholder="name@example.com"
-                      />
-                    </div>
-
-                    <div className="settings-form-actions">
-                      <button type="button" className="auth-submit" onClick={handleChangeEmail} disabled={isSavingSettings}>
-                        {isSavingSettings ? 'Updating...' : 'Change Email'}
-                      </button>
-                      <button type="button" className="auth-submit" onClick={handleChangePassword} disabled={isSavingSettings}>
-                        {isSavingSettings ? 'Sending...' : 'Change Password'}
-                      </button>
-                      <button
-                        type="button"
-                        className="back-home-btn settings-secondary-action"
-                        onClick={handleOpenTwoFactorSetup}
-                        disabled={isTwoFactorLoading || isTwoFactorEnabled}
-                      >
-                        {isTwoFactorEnabled ? '2FA Enabled' : isTwoFactorLoading ? 'Starting...' : 'Enable 2FA'}
-                      </button>
-                    </div>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'home_screen' && canAccessHomeScreenTab && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Home screen settings">
-                    <p className="settings-eyebrow">Home Screen</p>
-                    <h2>Home Screen</h2>
-
-                    <form className="auth-form settings-form" onSubmit={(event) => handleSaveLocalSettings(event, 'Home screen settings saved.') }>
-                      <label htmlFor="settings-home-section-1">Home section 1</label>
-                      <select
-                        id="settings-home-section-1"
-                        value={settingsHomeSectionOne}
-                        onChange={(event) => setSettingsHomeSectionOne(event.target.value)}
-                      >
-                        {homeSectionOneOptions.map((sectionName) => (
-                          <option key={`home-section-one-${sectionName}`} value={sectionName}>
-                            {sectionName}
-                          </option>
-                        ))}
-                      </select>
-
-                      <label htmlFor="settings-home-section-2">Home section 2</label>
-                      <select
-                        id="settings-home-section-2"
-                        value={settingsHomeSectionTwo}
-                        onChange={(event) => setSettingsHomeSectionTwo(event.target.value)}
-                      >
-                        {homeSectionTwoOptions.map((sectionName) => (
-                          <option key={`home-section-two-${sectionName}`} value={sectionName}>
-                            {sectionName}
-                          </option>
-                        ))}
-                      </select>
-
-                      <label htmlFor="settings-home-section-3">Home section 3</label>
-                      <select
-                        id="settings-home-section-3"
-                        value={settingsHomeSectionThree}
-                        onChange={(event) => setSettingsHomeSectionThree(event.target.value)}
-                      >
-                        {homeSectionThreeOptions.map((sectionName) => (
-                          <option key={`home-section-three-${sectionName}`} value={sectionName}>
-                            {sectionName}
-                          </option>
-                        ))}
-                      </select>
-
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsHomeShowGreeting}
-                          onChange={(event) => setSettingsHomeShowGreeting(event.target.checked)}
-                        />
-                        <span>Show personalized greeting on Home</span>
-                      </label>
-
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsHomeShowEmptyStateHints}
-                          onChange={(event) => setSettingsHomeShowEmptyStateHints(event.target.checked)}
-                        />
-                        <span>Show empty-state helper text in Home cards</span>
-                      </label>
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit">Save</button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'store' && canAccessStoreTab && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Store settings">
-                    <p className="settings-eyebrow">Store</p>
-                    <h2>Store Settings</h2>
-
-                    <form className="auth-form settings-form" onSubmit={handleSaveStoreSettings}>
-                      <label htmlFor="settings-store-logo">Store logo</label>
-                      <input
-                        id="settings-store-logo"
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          const selectedFile = event.target.files?.[0] || null
-                          setSettingsStoreLogoFile(selectedFile)
-                        }}
-                      />
-                      {settingsStoreLogo && <p className="settings-file-note">Current uploaded store logo saved.</p>}
-
-                      <label htmlFor="settings-store-banner">Store banner</label>
-                      <input
-                        id="settings-store-banner"
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          const selectedFile = event.target.files?.[0] || null
-                          setSettingsStoreBannerFile(selectedFile)
-                        }}
-                      />
-                      {settingsStoreBanner && <p className="settings-file-note">Current uploaded store banner saved.</p>}
-
-                      <label htmlFor="settings-store-name">Store name</label>
-                      <input
-                        id="settings-store-name"
-                        type="text"
-                        value={settingsStoreName}
-                        onChange={(event) => setSettingsStoreName(event.target.value)}
-                        placeholder="Collector's Corner"
-                      />
-
-                      <label htmlFor="settings-store-description">Store description</label>
-                      <textarea
-                        id="settings-store-description"
-                        rows={3}
-                        value={settingsStoreDescription}
-                        onChange={(event) => setSettingsStoreDescription(event.target.value)}
-                        placeholder="Describe your store and specialties"
-                      />
-
-                      <label htmlFor="settings-store-address">Store address</label>
-                      <input
-                        id="settings-store-address"
-                        type="text"
-                        value={settingsStoreAddress}
-                        onChange={(event) => setSettingsStoreAddress(event.target.value)}
-                        placeholder="Street, City, Province, Postal Code"
-                      />
-
-                      <label htmlFor="settings-store-hours">Business hours</label>
-                      <textarea
-                        id="settings-store-hours"
-                        rows={3}
-                        value={settingsStoreHours}
-                        onChange={(event) => setSettingsStoreHours(event.target.value)}
-                        placeholder="Mon-Fri 9:00 AM - 5:00 PM"
-                      />
-
-                      <p className="settings-subsection-title">Inventory settings</p>
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsInventoryAutoPublish}
-                          onChange={(event) => setSettingsInventoryAutoPublish(event.target.checked)}
-                        />
-                        <span>Automatically publish new inventory</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsInventoryAllowPurchaseRequests}
-                          onChange={(event) => setSettingsInventoryAllowPurchaseRequests(event.target.checked)}
-                        />
-                        <span>Allow collection purchase requests</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsInventoryEnableMarketplaceListings}
-                          onChange={(event) => setSettingsInventoryEnableMarketplaceListings(event.target.checked)}
-                        />
-                        <span>Enable marketplace listings</span>
-                      </label>
-                      <label className="settings-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={settingsInventoryEnableEventCreation}
-                          onChange={(event) => setSettingsInventoryEnableEventCreation(event.target.checked)}
-                        />
-                        <span>Enable event creation</span>
-                      </label>
-                      {hasStoreProAccess && (
-                        <label className="settings-checkbox-row">
-                          <input
-                            type="checkbox"
-                            checked={settingsInventoryTrackByLocation}
-                            onChange={(event) => setSettingsInventoryTrackByLocation(event.target.checked)}
-                          />
-                          <span>Track inventory quantities by location</span>
-                        </label>
-                      )}
-
-                      <label htmlFor="settings-store-visibility">Store visibility</label>
-                      <select
-                        id="settings-store-visibility"
-                        value={settingsStoreVisibility}
-                        onChange={(event) => setSettingsStoreVisibility(event.target.value)}
-                      >
-                        <option value="Public">Public</option>
-                        <option value="Private">Private</option>
-                        <option value="Hidden">Hidden</option>
-                      </select>
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit" disabled={isSavingSettings}>
-                          {isSavingSettings ? 'Saving...' : 'Save Changes'}
-                        </button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'locations' && canAccessLocationsTab && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Locations settings">
-                    <p className="settings-eyebrow">{tx('Locations')}</p>
-                    <h2>{tx('Locations')}</h2>
-
-                    <div className="settings-detail-list">
-                      <div className="settings-detail-row">
-                        <span>{tx('Current locations')}</span>
-                        <strong>{storeLocations.length}</strong>
-                      </div>
-                    </div>
-
-                    <div className="settings-form-actions">
-                      <button type="button" className="auth-submit" onClick={handleOpenAddLocationModal}>
-                        {tx('+ Add Location')}
-                      </button>
-                    </div>
-
-                    {isLocationsLoading && <p className="settings-subsection-note">{tx('Loading locations...')}</p>}
-                    {!isLocationsLoading && locationsError && <p className="auth-error inline-error">{locationsError}</p>}
-                    {!isLocationsLoading && !locationsError && storeLocations.length === 0 && (
-                      <p className="settings-subsection-note">{tx('No locations yet. Add your first location to get started.')}</p>
-                    )}
-
-                    {!isLocationsLoading && storeLocations.length > 0 && (
-                      <div className="location-list">
-                        {storeLocations.map((location) => (
-                          <LocationCard
-                            key={location.id}
-                            location={location}
-                            managerOptions={managerOptions}
-                            employeeCount={storeEmployees.filter((employee) => employee.all_locations || employee.location_ids?.includes(location.id)).length}
-                            onSave={handleSaveLocation}
-                            onViewEmployees={() => setActiveSettingsTab('employees')}
-                            onDeactivate={() => handleDeactivateLocation(location.id, location.status)}
-                            translate={tx}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                )}
-
-                {activeSettingsTab === 'employees' && canAccessEmployeesTab && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Employees settings">
-                    <p className="settings-eyebrow">{tx('Employees')}</p>
-                    <h2>{tx('Employees')}</h2>
-
-                    <div className="settings-detail-list">
-                      <div className="settings-detail-row">
-                        <span>{tx('Current employees')}</span>
-                        <strong>{storeEmployees.length}</strong>
-                      </div>
-                    </div>
-
-                    <div className="settings-form-actions">
-                      <button type="button" className="auth-submit" onClick={handleOpenAddEmployeeModal}>
-                        {tx('+ Add Employee')}
-                      </button>
-                    </div>
-
-                    {createdEmployeeLoginInfo && (
-                      <div className="settings-subsection-note" role="status" aria-live="polite">
-                        <p className="m-0">{tx('Employee Created Successfully')}</p>
-                        <p className="m-0">{tx('Store Code:')} {createdEmployeeLoginInfo.storeCode}</p>
-                        <p className="m-0">{tx('Username')}: {createdEmployeeLoginInfo.username}</p>
-                        <button type="button" className="auth-submit" onClick={handleCopyEmployeeLoginInfo}>
-                          {tx('Copy Login Info')}
-                        </button>
-                      </div>
-                    )}
-
-                    {isEmployeesLoading && <p className="settings-subsection-note">{tx('Loading employees...')}</p>}
-                    {!isEmployeesLoading && employeesError && <p className="auth-error inline-error">{employeesError}</p>}
-                    {!isEmployeesLoading && !employeesError && storeEmployees.length === 0 && (
-                      <p className="settings-subsection-note">{tx('No employees yet. Add your first employee to get started.')}</p>
-                    )}
-
-                    {!isEmployeesLoading && storeEmployees.length > 0 && (
-                      <div className="employee-list">
-                        {storeEmployees.map((employee) => (
-                          <EmployeeCard
-                            key={employee.id}
-                            employee={{
-                              ...employee,
-                              location_names: employee.all_locations
-                                ? ['All Locations']
-                                : (employee.location_ids || [])
-                                  .map((locationId) => locationsById[locationId]?.location_name)
-                                  .filter(Boolean),
-                            }}
-                            permissionOptions={EMPLOYEE_PERMISSION_OPTIONS}
-                            locationOptions={locationOptions}
-                            isEditingPermissions={editingEmployeeId === employee.id}
-                            editingPermissions={editingEmployeePermissions}
-                            editingAllLocations={editingEmployeeAllLocations}
-                            editingLocationIds={editingEmployeeLocationIds}
-                            onEditPermissions={() => handleEditEmployeePermissions(employee)}
-                            onTogglePermission={handleToggleEmployeePermission}
-                            onToggleAllLocations={handleSetEditingEmployeeAllLocations}
-                            onToggleLocationAccess={handleToggleEditingEmployeeLocation}
-                            onSavePermissions={() => handleSaveEmployeePermissions(employee.id)}
-                            onCancelPermissions={handleCancelEmployeePermissions}
-                            onDeactivate={() => handleDeactivateEmployee(employee.id, employee.status)}
-                            onRemove={() => handleRemoveEmployee(employee.id)}
-                            translate={tx}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                )}
-
-                {activeSettingsTab === 'integrations' && canAccessIntegrationsTab && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Integrations settings">
-                    <p className="settings-eyebrow">Integrations</p>
-                    <h2>Integrations</h2>
-
-                    <form className="auth-form settings-form" onSubmit={(event) => handleSaveLocalSettings(event, 'Integration settings saved.') }>
-                      <label htmlFor="settings-pos-connections">POS connections</label>
-                      <textarea
-                        id="settings-pos-connections"
-                        rows={2}
-                        value={settingsPosConnections}
-                        onChange={(event) => setSettingsPosConnections(event.target.value)}
-                        placeholder="Square, Lightspeed, Shopify POS"
-                      />
-
-                      <label htmlFor="settings-api-keys">API keys</label>
-                      <textarea
-                        id="settings-api-keys"
-                        rows={2}
-                        value={settingsApiKeys}
-                        onChange={(event) => setSettingsApiKeys(event.target.value)}
-                        placeholder="Store and manage integration keys"
-                      />
-
-                      <label htmlFor="settings-webhook-settings">Webhook settings</label>
-                      <textarea
-                        id="settings-webhook-settings"
-                        rows={2}
-                        value={settingsWebhookSettings}
-                        onChange={(event) => setSettingsWebhookSettings(event.target.value)}
-                        placeholder="Webhook URLs and event subscriptions"
-                      />
-
-                      <label htmlFor="settings-connected-apps">Connected apps</label>
-                      <textarea
-                        id="settings-connected-apps"
-                        rows={2}
-                        value={settingsConnectedApps}
-                        onChange={(event) => setSettingsConnectedApps(event.target.value)}
-                        placeholder="Connected third-party apps"
-                      />
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit">Manage Integrations</button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                {activeSettingsTab === 'imports' && isPlatformAdmin && (
-                  <section className="settings-card settings-panel" role="tabpanel" aria-label="Data import settings">
-                    <p className="settings-eyebrow">Imports</p>
-                    <h2>Magic Data Import</h2>
-
-                    <form className="auth-form settings-form" onSubmit={handleImportMagicCards}>
-                      <label htmlFor="settings-magic-import-file">Scryfall file (.json or .gz)</label>
-                      <input
-                        id="settings-magic-import-file"
-                        type="file"
-                        accept=".json,.gz,application/json,application/gzip"
-                        onChange={(event) => {
-                          setMagicImportFile(event.target.files?.[0] || null)
-                          setMagicImportError('')
-                          setMagicImportSummary('')
-                          setMagicImportProgress({ processed: 0, total: 0 })
-                        }}
-                      />
-
-                      {magicImportFile && (
-                        <p className="settings-file-note">
-                          Selected: {magicImportFile.name}
-                        </p>
-                      )}
-
-                      {magicImportProgress.total > 0 && (
-                        <p className="settings-subsection-note">
-                          Progress: {magicImportProgress.processed.toLocaleString()} / {magicImportProgress.total.toLocaleString()}
-                        </p>
-                      )}
-
-                      {magicImportSummary && (
-                        <p className="settings-subsection-note" role="status" aria-live="polite">
-                          {magicImportSummary}
-                        </p>
-                      )}
-
-                      {magicImportError && <p className="auth-error inline-error">{magicImportError}</p>}
-
-                      <p className="settings-file-note">
-                        This uploads rows into the magic_cards table. For very large files, prefer the CLI importer.
-                      </p>
-
-                      <div className="settings-form-actions">
-                        <button type="submit" className="auth-submit support-submit" disabled={isImportingMagic || !magicImportFile}>
-                          {isImportingMagic ? 'Importing...' : 'Import Magic File'}
-                        </button>
-                      </div>
-                    </form>
-                  </section>
-                )}
-
-                <AddEmployeeModal
-                  isOpen={isAddEmployeeModalOpen}
-                  firstName={newEmployeeFirstName}
-                  lastName={newEmployeeLastName}
-                  pin={newEmployeePin}
-                  role={newEmployeeRole}
-                  roleOptions={EMPLOYEE_ROLE_OPTIONS}
-                  locationOptions={locationOptions}
-                  allLocations={newEmployeeAllLocations}
-                  selectedLocationIds={newEmployeeLocationIds}
-                  isSubmitting={isCreatingEmployee}
-                  errorMessage={employeesError}
-                  onClose={handleCloseAddEmployeeModal}
-                  onSubmit={handleCreateEmployee}
-                  onFirstNameChange={setNewEmployeeFirstName}
-                  onLastNameChange={setNewEmployeeLastName}
-                  onPinChange={setNewEmployeePin}
-                  onRoleChange={setNewEmployeeRole}
-                  onAllLocationsChange={handleSetNewEmployeeAllLocations}
-                  onToggleLocation={handleToggleNewEmployeeLocation}
-                  translate={tx}
-                />
-
-                <AddLocationModal
-                  isOpen={isAddLocationModalOpen}
-                  locationName={newLocationName}
-                  streetAddress={newLocationStreetAddress}
-                  city={newLocationCity}
-                  province={newLocationProvince}
-                  postalCode={newLocationPostalCode}
-                  phoneNumber={newLocationPhoneNumber}
-                  managerEmployeeId={newLocationManagerEmployeeId}
-                  managerOptions={managerOptions}
-                  isSubmitting={isCreatingLocation}
-                  errorMessage={locationsError}
-                  onClose={handleCloseAddLocationModal}
-                  onSubmit={handleCreateLocation}
-                  onLocationNameChange={setNewLocationName}
-                  onStreetAddressChange={setNewLocationStreetAddress}
-                  onCityChange={setNewLocationCity}
-                  onProvinceChange={setNewLocationProvince}
-                  onPostalCodeChange={setNewLocationPostalCode}
-                  onPhoneNumberChange={setNewLocationPhoneNumber}
-                  onManagerEmployeeIdChange={setNewLocationManagerEmployeeId}
-                  translate={tx}
-                />
-              </div>
-            )}
-          </section>
-        ) : (
-          <section className="plans-screen" aria-label="Shopping cart">
-            <h1>{tx('Your Cart')}</h1>
-            <p className="subtitle">{tx('Review your selected subscription items before checkout.')}</p>
-
-            {authMessage && <p className="auth-banner">{authMessage}</p>}
-
-            {cartItems.length === 0 ? (
-              <div className="cart-page-empty">
-                <p className="subtitle">{tx('Your cart is empty.')}</p>
-                <button type="button" className="back-home-btn" onClick={() => setCurrentScreen('plans')}>
-                  {tx('Browse Plans')}
-                </button>
-              </div>
-            ) : (
-              <div className="cart-page-layout">
-                <div className="cart-list" role="list">
-                  {cartItems.map((item) => (
-                    <div key={item.tier} className="cart-item" role="listitem">
-                      <div>
-                        <p className="cart-item-name">{item.display_name}</p>
-                        <p className="cart-item-price">{formatPlanPrice(item.monthly_price_cents)}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="cart-remove-btn"
-                        onClick={() => removePlanFromCart(item.tier)}
-                      >
-                        {tx('Remove')}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <aside className="cart-summary cart-page-summary">
-                  <div className="cart-summary-row">
-                    <span>{tx('Items')}</span>
-                    <span>{cartItems.length}</span>
-                  </div>
-                  <div className="cart-summary-row">
-                    <span>{tx('Subtotal')}</span>
-                    <span>{formatPlanPrice(cartSubtotalCents)}</span>
-                  </div>
-                  <div className="cart-summary-row">
-                    <span>Tax (14%)</span>
-                    <span>{formatPlanPrice(cartTaxCents)}</span>
-                  </div>
-                  <div className="cart-summary-row cart-summary-total">
-                    <span>{tx('Total')}</span>
-                    <span>{formatPlanPrice(cartTotalCents)}</span>
-                  </div>
-
-                  <div className="cart-page-actions">
-                    <button type="button" className="switch-auth support-cancel" onClick={() => setCurrentScreen('plans')}>
-                      {tx('Keep Shopping')}
-                    </button>
-                    <button
-                      type="button"
-                      className="auth-submit support-submit"
-                      onClick={handleCheckoutCart}
-                      disabled={isUpdatingPlan}
-                    >
-                      {isUpdatingPlan ? tx('Processing...') : tx('Checkout')}
-                    </button>
-                  </div>
-                </aside>
-              </div>
-            )}
-          </section>
-        )}
+        {currentScreen === 'home' ? <HomePage scope={pageScope} />
+          : currentScreen === 'collection' ? <CollectionPage scope={pageScope} />
+          : currentScreen === 'collection_item' ? <CollectionItemPage scope={pageScope} />
+          : currentScreen === 'wishlist' ? <WishlistPage scope={pageScope} />
+          : currentScreen === 'catalog' ? <CatalogPage scope={pageScope} />
+          : currentScreen === 'plans' ? <PlansPage scope={pageScope} />
+          : currentScreen === 'catalog_item' ? <CatalogItemPage scope={pageScope} />
+          : currentScreen === 'profile' ? <ProfilePage scope={pageScope} />
+          : currentScreen === 'settings' ? <SettingsPage scope={pageScope} />
+          : <CartPage scope={pageScope} />}
       </main>
 
       {isAuthOpen && (
